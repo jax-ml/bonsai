@@ -1,0 +1,67 @@
+[project]
+name = "jax-bonsai"
+version = "0.0.0"
+authors = [
+  { name = "JAX-bonsai developers", email = "jiyounha@google.com" },
+]
+description = "A collection of lightweight, open-source models built on JAX."
+requires-python = ">=3.10"
+readme = "README.md"
+license = "Apache-2.0"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "jax",  # "jax[tpu]" for TPU, "jax[cuda12]" for GPU.
+  "jaxlib",
+  "jaxtyping",
+  "flax",
+  "jinja2",
+  "setuptools",
+  "huggingface-hub",
+  "transformers",
+  "xprof-nightly",
+]
+
+[project.urls]
+Source = "https://github.com/jax-ml/bonsai"
+
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["bonsai*"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+  "E",  # Pycodestyle - Errors
+  "F",  # Pyflakes
+  "I",  # isort - consistent import orders and formatting
+  "W",  # Pycodestyle - Warnings
+  "RUF",  # Ruff-specific rules
+]
+ignore = [
+  "E731",  # lambdas are allowed
+  "E501",  # don't check l gne lengths
+  "F401",  # allow unused imports
+  "E402",  # allow modules not at top of file
+  "E741",  # allow "l" as a variable name
+  "E703",  # allow semicolons (for jupyter notebooks)
+  "RUF009",  # Do not perform function call in dataclass defaults
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
