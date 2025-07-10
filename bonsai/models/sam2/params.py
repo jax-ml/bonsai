@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utils for loading and converting SAM 2 PT weights."""
+"""Utils for loading and converting SAM 2 safetensors weights."""
 
 import logging
 import re
