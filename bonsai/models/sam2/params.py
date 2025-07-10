@@ -19,14 +19,14 @@ import re
 
 import jax
 import numpy as np
-import torch
+import safetensors.flax as safetensors
 from flax import nnx
 
 from bonsai.models.sam2 import model as model_lib
 
 
 def _get_key_and_transform_mapping():
-    # Maps PyTorch keys → (JAX nnx key template, no transform needed)
+    # Maps safetensor keys → (JAX nnx key template, no transform needed)
 
     image_encoder_mapping = {
         # === Patch Embedding ===
@@ -627,8 +627,8 @@ def find_non_array_keys(tree):
     return bad
 
 
-def _torch_key_to_jax_key(mapping, source_key):
-    """Map a PyTorch key to exactly one JAX key & transform, else warn/error."""
+def _st_key_to_jax_key(mapping, source_key):
+    """Map a safetensors key to exactly one model key & transform, else warn/error."""
     subs = [
         (re.sub(pat, repl, source_key), transform)
         for pat, (repl, transform) in mapping.items()
@@ -643,7 +643,7 @@ def _torch_key_to_jax_key(mapping, source_key):
     return subs[0]
 
 
-def _assign_weights(keys, tensor, state_dict, torch_key, transform):
+def _assign_weights(keys, tensor, state_dict, st_key, transform):
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
     key, *rest = keys
     if not rest:
@@ -654,10 +654,10 @@ def _assign_weights(keys, tensor, state_dict, torch_key, transform):
             if reshape:
                 tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {torch_key}: {tensor.shape} vs {state_dict[key].shape}")
+            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
         state_dict[key] = tensor
     else:
-        _assign_weights(rest, tensor, state_dict[key], torch_key, transform)
+        _assign_weights(rest, tensor, state_dict[key], st_key, transform)
 
 
 def _stoi(s):
@@ -690,17 +690,16 @@ def assign_nan_at_path(tree, dotted_path):
 
 
 def create_sam2_from_pretrained(
-    pt_path: str,
+    file_path: str,
     config: model_lib.SAM2Config,
     *,
     mesh: jax.sharding.Mesh | None = None,
 ):
     """
-    Load PyTorch weights and initialize remaining missing weights with NaNs.
+    Load safetensors weights and initialize remaining missing weights with NaNs.
     """
-    # 1. Load PyTorch weights
-    raw = torch.load(pt_path, map_location="cpu")
-    state_dict = raw.get("state_dict", raw)["model"]
+    # 1. Load safetensor weights
+    state_dict = safetensors.load_file(file_path)
 
     # 2. Create uninitialized SAM2 nnx model
     sam2 = nnx.eval_shape(lambda: model_lib.build_sam2_model_from_config(config, rngs=nnx.Rngs(params=0)))
@@ -709,13 +708,12 @@ def create_sam2_from_pretrained(
 
     # 3. Assign known weights
     mapping = _get_key_and_transform_mapping()
-    for torch_key, tensor in state_dict.items():
-        jax_key, transform = _torch_key_to_jax_key(mapping, torch_key)
+    for st_key, tensor in state_dict.items():
+        jax_key, transform = _st_key_to_jax_key(mapping, st_key)
         if jax_key is None:
             continue
-        arr = tensor.detach().cpu().numpy() if torch.is_tensor(tensor) else tensor
         keys = [_stoi(k) for k in jax_key.split(".")]
-        _assign_weights(keys, arr, jax_state, torch_key, transform)
+        _assign_weights(keys, tensor, jax_state, st_key, transform)
 
     # 4. Fill in missing keys with NaNs
     missing_keys = find_non_array_keys(jax_state)
