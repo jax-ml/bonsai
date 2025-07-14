@@ -133,7 +133,7 @@ class Stem(nnx.Module):
         self.conv = nnx.Conv(3, 64, kernel_size=(7, 7), strides=2, padding=3, use_bias=False, rngs=rngs)
         self.bn = nnx.BatchNorm(64, rngs=rngs)
         self.relu = nnx.relu
-        self.pool = partial(max_pool, window_shape=(3, 3), strides=(2, 2), padding=(1, 1))
+        self.pool = partial(max_pool, window_shape=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)))
 
     def __call__(self, x):
         x = self.conv(x)
