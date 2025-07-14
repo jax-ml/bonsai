@@ -702,7 +702,7 @@ def create_sam2_from_pretrained(
     state_dict = safetensors.load_file(file_path)
 
     # 2. Create uninitialized SAM2 nnx model
-    sam2 = nnx.eval_shape(lambda: model_lib.build_sam2_model_from_config(config, rngs=nnx.Rngs(params=0)))
+    sam2 = nnx.eval_shape(lambda: model_lib.build_sam2_model_from_config(config, rngs=nnx.Rngs(params=0, dropout=0)))
     graph_def, abs_state = nnx.split(sam2)
     jax_state = abs_state.to_pure_dict()
 
