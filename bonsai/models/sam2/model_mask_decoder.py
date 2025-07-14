@@ -204,6 +204,7 @@ class MaskDecoder(nnx.Module):
             assert image_embeddings.shape[0] == tokens.shape[0], "Mismatch in batch size"
             src = image_embeddings
         src = src + dense_prompt_embeddings
+        B, C, H, W = src.shape
 
         pos_src = jnp.repeat(image_pe, tokens.shape[0], axis=0)
 
@@ -213,8 +214,7 @@ class MaskDecoder(nnx.Module):
         mask_tokens_out = hs[:, (s + 1) : (s + 1 + self.num_mask_tokens), :]
 
         # Reshape src for mask decoding
-        # b, h, w, c = src.shape[0], src.shape[1], src.shape[2], src.shape[3]
-        # src = src.transpose(0, 2, 3, 1)  # B H W C for conv
+        src = src.reshape(B, H, W, C)  # B H W C for conv
 
         if not self.use_high_res_features:
             upscaled_embedding = self.output_upscaling(src)
@@ -222,10 +222,10 @@ class MaskDecoder(nnx.Module):
             dc1, ln1, act1, dc2, act2 = self.output_upscaling.layers
             feat_s0, feat_s1 = high_res_features
             upscaled_embedding = dc1(src)
-            upscaled_embedding += feat_s1
+            upscaled_embedding += feat_s1.transpose(0, 2, 3, 1)
             upscaled_embedding = act1(ln1(upscaled_embedding))
             upscaled_embedding = dc2(upscaled_embedding)
-            upscaled_embedding += feat_s0
+            upscaled_embedding += feat_s0.transpose(0, 2, 3, 1)
             upscaled_embedding = act2(upscaled_embedding)
 
         # Apply hypernetworks

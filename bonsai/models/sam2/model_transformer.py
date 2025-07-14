@@ -110,21 +110,17 @@ class TwoWayAttentionBlock(nnx.Module):
 
     def __call__(self, queries, keys, query_pe, key_pe):
         # Self-attention
-        if not self.skip_first_layer_pe:
-            q = queries + query_pe
+        if self.skip_first_layer_pe:
+            queries = self.self_attn(q=queries, k=queries, v=queries)
         else:
-            q = queries
-        print("FIRST")
-        print(q.shape)
-        queries = queries + self.self_attn(q, q, queries)
+            q = queries + query_pe
+            queries = queries + self.self_attn(q=q, k=q, v=queries)
         queries = self.norm1(queries)
 
         # Token-to-image attention
-        print("SECOND")
-        print(keys.shape)
         q = queries + query_pe
         k = keys + key_pe
-        queries = queries + self.cross_attn_token_to_image(q, k, keys)
+        queries = queries + self.cross_attn_token_to_image(q=q, k=k, v=keys)
         queries = self.norm2(queries)
 
         # MLP
@@ -132,10 +128,9 @@ class TwoWayAttentionBlock(nnx.Module):
         queries = self.norm3(queries)
 
         # Image-to-token attention
-        print("SECOND")
         q = queries + query_pe
         k = keys + key_pe
-        keys = keys + self.cross_attn_image_to_token(k, q, queries)
+        keys = keys + self.cross_attn_image_to_token(q=k, k=q, v=queries)
         keys = self.norm4(keys)
 
         return queries, keys
@@ -174,9 +169,9 @@ class TwoWayTransformer(nnx.Module):
         self.norm_final_attn = nnx.LayerNorm(embedding_dim, rngs=rngs)
 
     def __call__(self, image_embedding, image_pe, point_embedding):
-        B, H, W, C = image_embedding.shape
-        image_embedding = image_embedding.reshape(B, H * W, C)
-        image_pe = image_pe.reshape(B, H * W, C)
+        B, C, H, W = image_embedding.shape
+        image_embedding = image_embedding.transpose(0, 2, 3, 1).reshape(B, H * W, C)
+        image_pe = image_pe.transpose(0, 2, 3, 1).reshape(B, H * W, C)
 
         queries = point_embedding
         keys = image_embedding

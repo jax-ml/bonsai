@@ -112,9 +112,7 @@ class PatchEmbed(nnx.Module):
 def do_pool(x: jnp.ndarray, pool: nnx.Module, norm: nnx.Module | None = None) -> jnp.ndarray:
     if pool is None:
         return x
-    x = jnp.transpose(x, (0, 3, 1, 2))  # NHWC -> NCHW
     x = pool(x)
-    x = jnp.transpose(x, (0, 2, 3, 1))  # NCHW -> NHWC
     if norm:
         x = norm(x)
     return x
@@ -153,11 +151,6 @@ class MultiScaleAttention(nnx.Module):
             q = do_pool(q, self.q_pool)
             H, W = q.shape[1], q.shape[2]
             q = q.reshape(B, H * W, self.num_heads, -1)
-
-        # transpose for attention: [B, nheads, N, C]
-        q = jnp.transpose(q, (0, 2, 1, 3))
-        k = jnp.transpose(k, (0, 2, 1, 3))
-        v = jnp.transpose(v, (0, 2, 1, 3))
 
         attn = nnx.dot_product_attention(q, k, v)
 
@@ -221,10 +214,10 @@ class MultiScaleBlock(nnx.Module):
         if self.dim != self.dim_out:
             shortcut = do_pool(self.proj(x), self.pool)
 
-        if self.window_size > 0:
+        window_size = self.window_size
+        if window_size > 0:
             H, W = x.shape[1:3]
-            x, pad_hw = window_partition(x, self.window_size)
-
+            x, pad_hw = window_partition(x, window_size)
         x = self.attn(x)
 
         if self.q_stride:
@@ -235,8 +228,7 @@ class MultiScaleBlock(nnx.Module):
             pad_hw = (H + pad_h, W + pad_w)
 
         if self.window_size > 0:
-            x = window_unpartition(x, self.window_size, pad_hw, (H, W))
-
+            x = window_unpartition(x, window_size, pad_hw, (H, W))
         x = shortcut + self.drop_path(x)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x

@@ -33,7 +33,6 @@ from bonsai.models.sam2.model_prompt_encoder import PromptEncoder
 from bonsai.models.sam2.model_sam2_transforms import SAM2Transforms
 from bonsai.models.sam2.model_transformer import RoPEAttention, TwoWayTransformer
 from bonsai.models.sam2.model_utils import MLP, Identity, select_closest_cond_frames
-from bonsai.models.sam2.params import create_sam2_from_pretrained
 
 
 @dataclass(frozen=True)
@@ -963,7 +962,6 @@ class SAM2Base(nnx.Module):
 
         # record spatial sizes
         feat_sizes = [(x.shape[-3], x.shape[-2]) for x in vision_pos_embeds]
-        print([x.shape for x in feature_maps])
         # flatten and transpose each map: (B,H,W, C) -> (H*W, B, C)
         vision_feats = [jnp.transpose(jnp.reshape(x, (x.shape[0], -1, x.shape[-1])), (1, 0, 2)) for x in feature_maps]
         vision_pos_embeds = [
@@ -1468,7 +1466,7 @@ def build_sam2_model_from_config(cfg: SAM2Config, rngs: nnx.Rngs) -> SAM2Base:
     )
 
 
-class SAM2ImagePredictor:
+class SAM2ImagePredictor(nnx.Module):
     def __init__(
         self,
         sam_model: SAM2Base,
@@ -1511,17 +1509,6 @@ class SAM2ImagePredictor:
             (64, 64),
         ]
 
-    @classmethod
-    def from_pretrained(
-        cls,
-        pt_path: str,
-        config: SAM2Config,
-        mesh: jax.sharding.Mesh | None = None,
-        **kwargs,
-    ):
-        sam_model = create_sam2_from_pretrained(pt_path, config, mesh=mesh)
-        return cls(sam_model, **kwargs)
-
     def set_image(self, image: np.ndarray | PILImage) -> None:
         """
         Calculates the image embeddings for the provided image.
@@ -1533,6 +1520,8 @@ class SAM2ImagePredictor:
 
         # Store original image size
         if isinstance(image, np.ndarray):
+            self._orig_hw = [image.shape[:2]]  # (H, W)
+        elif isinstance(image, jax.Array):
             self._orig_hw = [image.shape[:2]]  # (H, W)
         elif isinstance(image, PILImage):
             w, h = image.size
@@ -1554,7 +1543,7 @@ class SAM2ImagePredictor:
 
         # Format features
         feats = [
-            jnp.transpose(f, (0, 2, 3, 1)).reshape(1, -1, *feat_size)
+            jnp.transpose(f, (0, 2, 3, 1)).reshape(1, *feat_size)
             for f, feat_size in zip(vision_feats[::-1], self._bb_feat_sizes[::-1])
         ][::-1]
         self._features = {
@@ -1571,7 +1560,9 @@ class SAM2ImagePredictor:
           image_list (list[np.ndarray]): RGB images in HWC format with dtype uint8.
         """
         self.reset_predictor()
-        assert isinstance(image_list, list) and all(isinstance(im, np.ndarray) for im in image_list)
+        assert isinstance(image_list, list) and all(
+            isinstance(im, np.ndarray) or isinstance(im, jax.Array) for im in image_list
+        )
 
         # Save original (H, W) for each image
         self._orig_hw = [img.shape[:2] for img in image_list]
@@ -1594,7 +1585,7 @@ class SAM2ImagePredictor:
 
         # Format features from low to high resolution
         feats = [
-            jnp.transpose(f, (0, 2, 3, 1)).reshape(batch_size, -1, *feat_size)
+            jnp.transpose(f, (1, 2, 0)).reshape(batch_size, -1, *feat_size)
             for f, feat_size in zip(vision_feats[::-1], self._bb_feat_sizes[::-1])
         ][::-1]
 

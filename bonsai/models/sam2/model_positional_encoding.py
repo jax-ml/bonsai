@@ -235,7 +235,6 @@ def reshape_for_broadcast(freqs_cis: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray
     """
     Reshapes freqs_cis to broadcast over query/key shape [B, H, T, C].
     """
-    print(freqs_cis.shape)
     assert freqs_cis.shape == (
         x.shape[2],
         x.shape[3],
@@ -265,7 +264,6 @@ def apply_rotary_enc(
 
     q_c = jax.lax.complex(q[..., 0::2], q[..., 1::2])
     k_c = jax.lax.complex(k[..., 0::2], k[..., 1::2])
-    print(q_c.shape, k_c.shape)
 
     freqs_cis = reshape_for_broadcast(freqs_cis, q_c)
 
