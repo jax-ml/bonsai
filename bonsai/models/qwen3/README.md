@@ -2,6 +2,8 @@
 
 This directory contains a pure JAX implementation of the [Qwen3 language model](https://qwenlm.github.io/blog/qwen3/), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
 
+> [!IMPORTANT]
+> For large-scale high performance use case, please see the [MaxText](https://github.com/AI-Hypercomputer/maxtext?tab=readme-ov-file#getting-started) version.
 
 
 ## Tested on:  
