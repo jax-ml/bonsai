@@ -54,5 +54,5 @@ If you're interested in adding new models, improving existing implementations, o
 ## Useful Links
 * [JAX](https://docs.jax.dev/en/latest/quickstart.html): Learn more about JAX, a super fast NumPy-based ML framework with automatic differentiation.
 * [The JAX ecosystem](https://docs.jaxstack.ai/en/latest/getting_started.html): Unlock unparalleled speed and scale for your next-generation models. Explore an incredible suite of tools and libraries that effortlessly extend JAX's capabilities, transforming how you build, train, and deploy.
-* [MaxText](https://github.com/AI-Hypercomputer/maxtext) and [MaxDiffusion](https://github.com/AI-Hypercomputer/maxdiffusion): Industury solution for highly scalable, high-performant JAX model library in Google Cloud.
+* [MaxText](https://github.com/AI-Hypercomputer/maxtext) and [MaxDiffusion](https://github.com/AI-Hypercomputer/maxdiffusion): Industury solution for highly scalable, high-performant JAX model library via Google Cloud Platform.
 * [JAX LLM Examples](https://github.com/jax-ml/jax-llm-examples): Example high-performant implementation of LLMs in pure JAX.
