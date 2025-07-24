@@ -15,6 +15,7 @@
 """SAM 2 model."""
 
 from dataclasses import dataclass
+from functools import partial
 
 import jax
 import jax.image as jimage
@@ -1840,5 +1841,6 @@ class SAM2ImagePredictor(nnx.Module):
         self._is_batch = False
 
 
+@partial(jax.jit, static_argnames=["model"])
 def forward(model, points, labels):
     return model.predict_batch(points, labels)

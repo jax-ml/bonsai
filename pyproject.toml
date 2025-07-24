@@ -28,6 +28,7 @@ dependencies = [
   "huggingface-hub",
   "transformers",
   "xprof-nightly",
+  "pillow>=11.3.0",
 ]
 
 [project.urls]

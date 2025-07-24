@@ -4,7 +4,6 @@ import time
 
 import jax
 import jax.numpy as jnp
-from flax import nnx
 from huggingface_hub import snapshot_download
 
 from bonsai.models.sam2 import model, params
@@ -63,21 +62,20 @@ dummy_labels = [jnp.ones((1,), dtype=jnp.float32) for _ in range(batch_size)]
 predictor.set_image_batch(dummy_images)
 
 # Predicting masks
-forward = nnx.jit(model.forward)
-_ = forward(predictor, dummy_points, dummy_labels)
+_ = model.forward(predictor, dummy_points, dummy_labels)
 jax.block_until_ready(_)
 
 # 5. Profiling
 jax.profiler.start_trace("/tmp/profile-sam2")
 for _ in range(5):
-    output = forward(predictor, dummy_points, dummy_labels)
+    output = model.forward(predictor, dummy_points, dummy_labels)
 jax.block_until_ready(output)
 jax.profiler.stop_trace()
 
 # 6. Timing
 t0 = time.perf_counter()
 for _ in range(10):
-    output = forward(predictor, dummy_points, dummy_labels)
+    output = model.forward(predictor, dummy_points, dummy_labels)
 jax.block_until_ready(output)
 print(f"10 forward passes took {time.perf_counter() - t0:.4f} s")
 
