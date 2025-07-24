@@ -239,7 +239,7 @@ def reshape_for_broadcast(freqs_cis: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray
         x.shape[2],
         x.shape[3],
     ), f"Expected freqs_cis shape {(x.shape[2], x.shape[3])}, got {freqs_cis.shape}"
-    return freqs_cis[jnp.newaxis, jnp.newaxis, :, :]  # [1, 1, T, C]
+    return freqs_cis[None, None, :, :]  # [1, 1, T, C]
 
 
 def apply_rotary_enc(

@@ -741,11 +741,7 @@ class SAM2Base(nnx.Module):
         self.sam_mask_decoder = MaskDecoder(
             num_multimask_outputs=3,
             transformer=TwoWayTransformer(
-                depth=2,
-                embedding_dim=self.sam_prompt_embed_dim,
-                mlp_dim=2048,
-                num_heads=8,
-                rngs=rngs,
+                depth=2, embedding_dim=self.sam_prompt_embed_dim, mlp_dim=2048, num_heads=8, rngs=rngs
             ),
             transformer_dim=self.sam_prompt_embed_dim,
             iou_head_depth=3,
@@ -1100,7 +1096,7 @@ class SAM2Base(nnx.Module):
             memory_pos=memory_pos,
             num_obj_ptr_tokens=num_obj_ptr_tokens,
         )
-        # reshape to (B,H,W, C)
+        # reshape to (B,H,W,C)
         pix_feat = pix_feat.transpose((1, 0, 2)).reshape((B, H, W, C))
         return pix_feat
 
@@ -1164,8 +1160,6 @@ class SAM2Base(nnx.Module):
         prev_sam_mask_logits=None,
     ):
         current_out = {"point_inputs": point_inputs, "mask_inputs": mask_inputs}
-        # TODO: Fix shapes?
-        # High-resolution feature maps for the SAM head, reshape (HW)BC => BCHW
         if len(current_vision_feats) > 1:
             high_res_features = [
                 x.transpose((1, 2, 0)).reshape((x.shape[1], x.shape[2], *s))
@@ -1299,8 +1293,8 @@ class SAM2Base(nnx.Module):
         Keep only the highest-scoring mask at each spatial location.
         Expects pred_masks.shape == (O, H, W) or (O, H, W,…) where O is 'object' dim.
         """
-        O = pred_masks.shape[0]
-        if O == 1:
+        object_dim = pred_masks.shape[0]
+        if object_dim == 1:
             return pred_masks
 
         # find which object has max logit at each pixel
@@ -1311,7 +1305,7 @@ class SAM2Base(nnx.Module):
         # where keep[o, ...] == True iff max_inds == o
         # first, expand max_inds with an object axis
         # we broadcast compare to turn into (O, H, W, …)
-        obj_range = jnp.arange(O)[:, None, None]
+        obj_range = jnp.arange(object_dim)[:, None, None]
         keep = max_inds[None, ...] == obj_range
 
         # clamp all other scores to ≤ -10.0
@@ -1737,8 +1731,8 @@ class SAM2ImagePredictor(nnx.Module):
 
             if unnorm_coords.ndim == 2:
                 # Add batch dimension if missing
-                unnorm_coords = jnp.expand_dims(unnorm_coords, 0)
-                labels = jnp.expand_dims(labels, 0)
+                unnorm_coords = unnorm_coords[None, :, :]
+                labels = labels[None, :]
 
         if box is not None:
             box = jnp.array(box, dtype=jnp.float32)
@@ -1751,7 +1745,7 @@ class SAM2ImagePredictor(nnx.Module):
         if mask_logits is not None:
             mask_input = jnp.array(mask_logits, dtype=jnp.float32)
             if mask_input.ndim == 3:
-                mask_input = jnp.expand_dims(mask_input, 0)  # add batch dimension
+                mask_input = mask_input[None, :, :, :]  # add batch dimension
 
         return mask_input, unnorm_coords, labels, unnorm_box
 
