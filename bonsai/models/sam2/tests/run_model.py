@@ -4,6 +4,7 @@ import time
 
 import jax
 import jax.numpy as jnp
+from flax import nnx
 from huggingface_hub import snapshot_download
 
 from bonsai.models.sam2 import model, params
@@ -60,6 +61,7 @@ dummy_labels = [jnp.ones((1,), dtype=jnp.float32) for _ in range(batch_size)]
 
 
 # 4. Define forward
+@nnx.jit
 def forward(model, points, labels):
     return model.predict_batch(points, labels)
 

@@ -1644,9 +1644,9 @@ class SAM2ImagePredictor(nnx.Module):
             )
 
             # Convert from JAX to NumPy
-            masks_all.append(np.asarray(jnp.squeeze(masks, axis=0)))
-            ious_all.append(np.asarray(jnp.squeeze(ious, axis=0)))
-            lowres_all.append(np.asarray(jnp.squeeze(lowres, axis=0)))
+            masks_all.append(jnp.squeeze(masks, axis=0))
+            ious_all.append(jnp.squeeze(ious, axis=0))
+            lowres_all.append(jnp.squeeze(lowres, axis=0))
 
         return masks_all, ious_all, lowres_all
 

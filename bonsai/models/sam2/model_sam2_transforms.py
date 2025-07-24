@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from functools import partial
 from typing import Sequence
 
 import jax.image
@@ -19,6 +20,32 @@ import jax.numpy as jnp
 import numpy as np
 from PIL import Image
 from scipy.ndimage import label as cc_label
+
+
+def _postprocess_mask_numpy(mask, threshold, max_hole_area, max_sprinkle_area):
+    filled = mask.copy()
+
+    if max_hole_area > 0:
+        bg_mask = (mask <= threshold).astype(np.uint8)
+        labels, num = cc_label(bg_mask)
+        areas = np.zeros_like(labels, dtype=np.float32)
+        for l in range(1, num + 1):
+            area = (labels == l).sum()
+            areas[labels == l] = area
+        is_hole = (labels > 0) & (areas <= max_hole_area)
+        filled[is_hole] = threshold + 10.0
+
+    if max_sprinkle_area > 0:
+        fg_mask = (mask > threshold).astype(np.uint8)
+        labels, num = cc_label(fg_mask)
+        areas = np.zeros_like(labels, dtype=np.float32)
+        for l in range(1, num + 1):
+            area = (labels == l).sum()
+            areas[labels == l] = area
+        is_speckle = (labels > 0) & (areas <= max_sprinkle_area)
+        filled[is_speckle] = threshold - 10.0
+
+    return filled
 
 
 class SAM2Transforms:
@@ -77,58 +104,45 @@ class SAM2Transforms:
         boxes = boxes.reshape(-1, 2, 2)
         return self.transform_coords(boxes, normalize, orig_hw)
 
-    def postprocess_masks(self, masks: jnp.ndarray, orig_hw: tuple[int, int]) -> jnp.ndarray:
+    @partial(jax.jit, static_argnames=["self", "orig_hw", "do_postprocess"])
+    def postprocess_masks(
+        self,
+        masks: jnp.ndarray,
+        orig_hw: tuple[int, int],
+        *,
+        do_postprocess: bool = False,
+    ) -> jnp.ndarray:
         """
-        Perform PostProcessing on output masks.
+        Perform post-processing on output masks. Safe for JIT if do_postprocess=False.
         """
-        input_masks = masks
-        masks_np = np.array(masks)  # [B, M, H, W]
+        if do_postprocess:
+            try:
+                masks_np = np.array(masks)  # Move to CPU
+                for b in range(masks_np.shape[0]):
+                    for m in range(masks_np.shape[1]):
+                        mask = masks_np[b, m]
+                        processed = _postprocess_mask_numpy(
+                            mask,
+                            threshold=self.mask_threshold,
+                            max_hole_area=self.max_hole_area,
+                            max_sprinkle_area=self.max_sprinkle_area,
+                        )
+                        masks_np[b, m] = processed
+            except Exception as e:
+                import warnings
 
-        try:
-            for b in range(masks_np.shape[0]):
-                for m in range(masks_np.shape[1]):
-                    mask = masks_np[b, m]
-                    filled = mask.copy()
+                warnings.warn(
+                    f"{e}\n\nSkipping post-processing due to the error above.",
+                    category=UserWarning,
+                    stacklevel=2,
+                )
+                masks_np = np.array(masks)
+            masks = jnp.array(masks_np)  # Back to JAX
 
-                    # Fill holes in background
-                    if self.max_hole_area > 0:
-                        bg_mask = (mask <= self.mask_threshold).astype(np.uint8)
-                        labels, num = cc_label(bg_mask)
-                        areas = np.zeros_like(labels, dtype=np.float32)
-                        for l in range(1, num + 1):
-                            area = (labels == l).sum()
-                            areas[labels == l] = area
-                        is_hole = (labels > 0) & (areas <= self.max_hole_area)
-                        filled[is_hole] = self.mask_threshold + 10.0
-
-                    # Remove small speckles in foreground
-                    if self.max_sprinkle_area > 0:
-                        fg_mask = (mask > self.mask_threshold).astype(np.uint8)
-                        labels, num = cc_label(fg_mask)
-                        areas = np.zeros_like(labels, dtype=np.float32)
-                        for l in range(1, num + 1):
-                            area = (labels == l).sum()
-                            areas[labels == l] = area
-                        is_speckle = (labels > 0) & (areas <= self.max_sprinkle_area)
-                        filled[is_speckle] = self.mask_threshold - 10.0
-
-                    masks_np[b, m] = filled
-
-        except Exception as e:
-            import warnings
-
-            warnings.warn(
-                f"{e}\n\nSkipping the post-processing step due to the error above.",
-                category=UserWarning,
-                stacklevel=2,
-            )
-            masks_np = np.array(input_masks)
-
-        # Resize to original shape
-        masks_jax = jnp.array(masks_np)
+        # Resize to original shape (always in JAX)
         resized = jax.image.resize(
-            masks_jax,
-            shape=(masks_jax.shape[0], masks_jax.shape[1], orig_hw[0], orig_hw[1]),
+            masks,
+            shape=(masks.shape[0], masks.shape[1], orig_hw[0], orig_hw[1]),
             method="bilinear",
         )
         return resized
