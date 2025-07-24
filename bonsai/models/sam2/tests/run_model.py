@@ -59,35 +59,29 @@ dummy_images = [jnp.ones((image_size, image_size, 3), dtype=jnp.float32) for _ i
 dummy_points = [jnp.ones((1, 2), dtype=jnp.float32) for _ in range(batch_size)]
 dummy_labels = [jnp.ones((1,), dtype=jnp.float32) for _ in range(batch_size)]
 
-
-# 4. Define forward
-@nnx.jit
-def forward(model, points, labels):
-    return model.predict_batch(points, labels)
-
-
-# 5. Setting images and warmup
+# 4. Setting images and warmup
 predictor.set_image_batch(dummy_images)
 
 # Predicting masks
+forward = nnx.jit(model.forward)
 _ = forward(predictor, dummy_points, dummy_labels)
 jax.block_until_ready(_)
 
-# 6. Profiling
+# 5. Profiling
 jax.profiler.start_trace("/tmp/profile-sam2")
 for _ in range(5):
     output = forward(predictor, dummy_points, dummy_labels)
 jax.block_until_ready(output)
 jax.profiler.stop_trace()
 
-# 7. Timing
+# 6. Timing
 t0 = time.perf_counter()
 for _ in range(10):
     output = forward(predictor, dummy_points, dummy_labels)
 jax.block_until_ready(output)
 print(f"10 forward passes took {time.perf_counter() - t0:.4f} s")
 
-# 9. Output summary
+# 7. Output summary
 print(
     "SAM2 outputs (example):",
     output if isinstance(output, jnp.ndarray) else "[complex output]",

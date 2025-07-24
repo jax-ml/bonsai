@@ -1795,11 +1795,9 @@ class SAM2ImagePredictor(nnx.Module):
 
         # Get features
         batched_mode = concat_points is not None and concat_points[0].shape[0] > 1
-        high_res_features = [
-            jnp.expand_dims(feat_level[img_idx], axis=0) for feat_level in self._features["high_res_feats"]
-        ]
+        high_res_features = [feat_level[img_idx][None, :, :, :] for feat_level in self._features["high_res_feats"]]
 
-        image_embed = jnp.expand_dims(self._features["image_embed"][img_idx], axis=0)
+        image_embed = self._features["image_embed"][img_idx][None, :, :, :]
         image_pe = self.model.sam_prompt_encoder.get_dense_pe()
 
         # Mask decoding
@@ -1840,3 +1838,7 @@ class SAM2ImagePredictor(nnx.Module):
         self._features = None
         self._orig_hw = None
         self._is_batch = False
+
+
+def forward(model, points, labels):
+    return model.predict_batch(points, labels)
