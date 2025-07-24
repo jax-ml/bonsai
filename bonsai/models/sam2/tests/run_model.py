@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 from huggingface_hub import snapshot_download
 
-from bonsai.models.sam2 import model, params
+from bonsai.models.sam2 import modeling, params
 
 
 def convert_pt_to_safetensors(pt_path: str, output_path: str):
@@ -47,9 +47,9 @@ if not os.path.exists(safetensors_path):
     convert_pt_to_safetensors(pt_path, safetensors_path)
 
 # 2. Create SAM2 model and predictor
-config = model.SAM2Config.sam2_tiny()
+config = modeling.SAM2Config.sam2_tiny()
 model_obj = params.create_sam2_from_pretrained(safetensors_path, config)
-predictor = model.SAM2ImagePredictor(model_obj)
+model = modeling.SAM2ImagePredictor(model_obj)
 
 # 3. Prepare dummy input
 batch_size = 4
@@ -59,23 +59,23 @@ dummy_points = [jnp.ones((1, 2), dtype=jnp.float32) for _ in range(batch_size)]
 dummy_labels = [jnp.ones((1,), dtype=jnp.float32) for _ in range(batch_size)]
 
 # 4. Setting images and warmup
-predictor.set_image_batch(dummy_images)
+model.set_image_batch(dummy_images)
 
 # Predicting masks
-_ = model.forward(predictor, dummy_points, dummy_labels)
+_ = modeling.forward(model, dummy_points, dummy_labels)
 jax.block_until_ready(_)
 
 # 5. Profiling
 jax.profiler.start_trace("/tmp/profile-sam2")
 for _ in range(5):
-    output = model.forward(predictor, dummy_points, dummy_labels)
+    output = modeling.forward(model, dummy_points, dummy_labels)
 jax.block_until_ready(output)
 jax.profiler.stop_trace()
 
 # 6. Timing
 t0 = time.perf_counter()
 for _ in range(10):
-    output = model.forward(predictor, dummy_points, dummy_labels)
+    output = modeling.forward(model, dummy_points, dummy_labels)
 jax.block_until_ready(output)
 print(f"10 forward passes took {time.perf_counter() - t0:.4f} s")
 

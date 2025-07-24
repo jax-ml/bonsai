@@ -22,7 +22,7 @@ import numpy as np
 import safetensors.flax as safetensors
 from flax import nnx
 
-from bonsai.models.sam2 import model as model_lib
+from bonsai.models.sam2 import modeling as model_lib
 
 
 def _get_key_and_transform_mapping():
