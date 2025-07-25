@@ -68,19 +68,13 @@ jax.block_until_ready(_)
 # 5. Profiling
 jax.profiler.start_trace("/tmp/profile-sam2")
 for _ in range(5):
-    output = modeling.forward(model, dummy_points, dummy_labels)
-jax.block_until_ready(output)
+    masks_all, ious_all, lowres_all = modeling.forward(model, dummy_points, dummy_labels)
+jax.block_until_ready(masks_all)
 jax.profiler.stop_trace()
 
 # 6. Timing
 t0 = time.perf_counter()
 for _ in range(10):
-    output = modeling.forward(model, dummy_points, dummy_labels)
-jax.block_until_ready(output)
+    masks_all, ious_all, lowres_all = modeling.forward(model, dummy_points, dummy_labels)
+jax.block_until_ready(masks_all)
 print(f"10 forward passes took {time.perf_counter() - t0:.4f} s")
-
-# 7. Output summary
-print(
-    "SAM2 outputs (example):",
-    output if isinstance(output, jnp.ndarray) else "[complex output]",
-)
