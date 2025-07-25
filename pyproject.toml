@@ -29,6 +29,7 @@ dependencies = [
   "transformers",
   "xprof-nightly",
   "pillow>=11.3.0",
+  "xprof",
 ]
 
 [project.urls]
