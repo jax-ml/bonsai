@@ -1566,9 +1566,9 @@ class SAM2ImagePredictor(nnx.Module):
         img_batch = self._transforms.forward_batch(image_list)  # Shape: (B, H, W, 3)
 
         batch_size = img_batch.shape[0]
-        assert (
-            img_batch.ndim == 4 and img_batch.shape[-1] == 3
-        ), f"img_batch must be (B, H, W, 3), got {img_batch.shape}"
+        assert img_batch.ndim == 4 and img_batch.shape[-1] == 3, (
+            f"img_batch must be (B, H, W, 3), got {img_batch.shape}"
+        )
 
         # Forward pass
         backbone_out = self.model.forward_image(img_batch)

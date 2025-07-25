@@ -25,6 +25,15 @@ This directory contains a pure JAX implementation of the [Qwen3 language model](
 | [Qwen3-235B-A22B](https://huggingface.co/Qwen/Qwen3-235B-A22B) | 🟡 Not started | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |
 
 
+### Running this model
+
+Run Qwen3 in action, implemented in [300 lines of code](bonsai/models/qwen3/modeling.py) in JAX.
+
+```python
+python bonsai/models/qwen3/tests/run_model.py
+```
+
+
 ## How to contribute to this model
 
 We welcome contributions! You can contribute to this model via the following:
