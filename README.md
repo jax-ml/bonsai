@@ -2,22 +2,24 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-This repository serves as a curated list of JAX [NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) simple implementations of common machine learning models.
+Bonsai is a minimal, lightweight JAX implementation of popular models.
+
+We're committed to making popular models accessible in JAX through simple, hackable, and concise code. Our aim is to lower the barrier to entry for JAX and promote academic innovation.
 
 
-Bonsai supports integration with powerful JAX libraries.
-* [Tunix](https://github.com/google/tunix/tree/main), a post-training library supporting Supervised Fine-Tuning, RL, Knoweldge Distillation.
-
-> [!IMPORTANT]
-> Bonsai is a simple, lightweight JAX implementation. For large-scale high performance pretraining on Google Cloud, see [MaxText](https://github.com/AI-Hypercomputer/maxtext) and [MaxDiffusion](https://github.com/AI-Hypercomputer/maxdiffusion).
+> [!TIP]
+> For large-scale or industry use on Google Cloud, see [MaxText](https://github.com/AI-Hypercomputer/maxtext) and [MaxDiffusion](https://github.com/AI-Hypercomputer/maxdiffusion).
 
 
-## Current Models
+## Models
 
-* [Qwen 3](bonsai/models/qwen3)
-* (Coming soon) Gemma 3
-* (Coming soon) Llama 3
-* (Coming soon) SAM2
+* **LLM (Large Language Models)**: [Qwen 3](bonsai/models/qwen3),
+* **dLLM (diffusion-based Large Language Models)**: (Coming soon) Llada, ...
+* **ASR (Automatic Speech Recognition)**: (Coming soon) Whisper, ...
+* **Image segmentation**: [SAM2](bonsai/models/sam2), ...
+* **Computational Biology**: (Coming soon) ESM, ...
+
+Got models you'd like to see in JAX? [Add a request](https://github.com/jax-ml/bonsai/issues).
 
 ## 🏁 Getting Started
 
@@ -50,6 +52,8 @@ python bonsai/models/qwen3/tests/run_model.py
 
 We welcome contributions!
 If you're interested in adding new models, improving existing implementations, or enhancing documentation, please see our [Contributing Guidelines](CONTRIBUTING.md).
+
+Join our [discord](https://discord.gg/77FrhNQb) to socialize with other JAX
 
 ## Useful Links
 * [JAX](https://docs.jax.dev/en/latest/quickstart.html): Learn more about JAX, a super fast NumPy-based ML framework with automatic differentiation.
