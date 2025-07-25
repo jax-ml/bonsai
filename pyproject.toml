@@ -27,7 +27,7 @@ dependencies = [
   "setuptools",
   "huggingface-hub",
   "transformers",
-  "xprof-nightly",
+  "xprof",
 ]
 
 [project.urls]
