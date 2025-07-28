@@ -20,7 +20,7 @@ We're committed to making popular models accessible in JAX through simple, hacka
 * **Computational Biology**: (Coming soon) ESM, ...
 * **WFM (World Foundation Model)**: (Coming soon) Cosmos, ...
 
-Got models you'd like to see in JAX? [Add a request](https://github.com/jax-ml/bonsai/issues).
+Got models you'd like to see in JAX? [Add a request](https://github.com/jax-ml/bonsai/issues) or [contribute](CONTRIBUTING.md).
 
 ## 🏁 Getting Started
 
