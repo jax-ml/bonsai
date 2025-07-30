@@ -20,45 +20,19 @@ from flax.linen.pooling import max_pool
 
 
 class Bottleneck(nnx.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        stride: int = 1,
-        downsample=None,
-        *,
-        rngs: nnx.Rngs,
-    ):
+    def __init__(self, in_channels: int, out_channels: int, stride: int = 1, downsample=None, *, rngs: nnx.Rngs):
         self.conv0 = nnx.Conv(
-            in_channels,
-            out_channels,
-            kernel_size=(1, 1),
-            strides=1,
-            padding=0,
-            use_bias=False,
-            rngs=rngs,
+            in_channels, out_channels, kernel_size=(1, 1), strides=1, padding=0, use_bias=False, rngs=rngs
         )
         self.bn0 = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
         self.conv1 = nnx.Conv(
-            out_channels,
-            out_channels,
-            kernel_size=(3, 3),
-            strides=stride,
-            padding=1,
-            use_bias=False,
-            rngs=rngs,
+            out_channels, out_channels, kernel_size=(3, 3), strides=stride, padding=1, use_bias=False, rngs=rngs
         )
         self.bn1 = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
         self.conv2 = nnx.Conv(
-            out_channels,
-            out_channels * 4,
-            kernel_size=(1, 1),
-            strides=1,
-            padding=0,
-            use_bias=False,
-            rngs=rngs,
+            out_channels, out_channels * 4, kernel_size=(1, 1), strides=1, padding=0, use_bias=False, rngs=rngs
         )
         self.bn2 = nnx.BatchNorm(out_channels * 4, use_running_average=True, rngs=rngs)
 
@@ -88,13 +62,7 @@ class Bottleneck(nnx.Module):
 class Downsample(nnx.Module):
     def __init__(self, in_channels: int, out_channels: int, stride: int, *, rngs: nnx.Rngs):
         self.conv = nnx.Conv(
-            in_channels,
-            out_channels,
-            kernel_size=(1, 1),
-            strides=stride,
-            padding=0,
-            use_bias=False,
-            rngs=rngs,
+            in_channels, out_channels, kernel_size=(1, 1), strides=stride, padding=0, use_bias=False, rngs=rngs
         )
         self.bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
@@ -104,15 +72,7 @@ class Downsample(nnx.Module):
 
 
 class BlockGroup(nnx.Module):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        blocks,
-        stride: int,
-        *,
-        rngs: nnx.Rngs,
-    ):
+    def __init__(self, in_channels: int, out_channels: int, blocks, stride: int, *, rngs: nnx.Rngs):
         self.blocks = []
 
         downsample = None
