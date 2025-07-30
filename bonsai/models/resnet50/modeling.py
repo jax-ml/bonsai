@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2025 The JAX Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 from functools import partial
 
+import jax
 from flax import nnx
 from flax.linen.pooling import max_pool
 
@@ -37,7 +38,7 @@ class Bottleneck(nnx.Module):
             use_bias=False,
             rngs=rngs,
         )
-        self.bn0 = nnx.BatchNorm(out_channels, rngs=rngs)
+        self.bn0 = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
         self.conv1 = nnx.Conv(
             out_channels,
@@ -48,7 +49,7 @@ class Bottleneck(nnx.Module):
             use_bias=False,
             rngs=rngs,
         )
-        self.bn1 = nnx.BatchNorm(out_channels, rngs=rngs)
+        self.bn1 = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
         self.conv2 = nnx.Conv(
             out_channels,
@@ -59,7 +60,7 @@ class Bottleneck(nnx.Module):
             use_bias=False,
             rngs=rngs,
         )
-        self.bn2 = nnx.BatchNorm(out_channels * 4, rngs=rngs)
+        self.bn2 = nnx.BatchNorm(out_channels * 4, use_running_average=True, rngs=rngs)
 
         self.downsample = downsample
         self.relu = nnx.relu
@@ -95,7 +96,7 @@ class Downsample(nnx.Module):
             use_bias=False,
             rngs=rngs,
         )
-        self.bn = nnx.BatchNorm(out_channels, rngs=rngs)
+        self.bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
     def __call__(self, x):
         x = self.conv(x)
@@ -131,7 +132,7 @@ class BlockGroup(nnx.Module):
 class Stem(nnx.Module):
     def __init__(self, *, rngs: nnx.Rngs):
         self.conv = nnx.Conv(3, 64, kernel_size=(7, 7), strides=2, padding=3, use_bias=False, rngs=rngs)
-        self.bn = nnx.BatchNorm(64, rngs=rngs)
+        self.bn = nnx.BatchNorm(64, use_running_average=True, rngs=rngs)
         self.relu = nnx.relu
         self.pool = partial(max_pool, window_shape=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)))
 
@@ -167,3 +168,8 @@ class ResNet(nnx.Module):
 
 def ResNet50(num_classes=1000, *, rngs: nnx.Rngs):
     return ResNet([3, 4, 6, 3], num_classes=num_classes, rngs=rngs)
+
+
+@partial(jax.jit, static_argnames=["model"])
+def forward(model, x):
+    return model(x)

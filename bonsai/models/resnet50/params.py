@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2025 The JAX Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ import jax
 import safetensors.flax as safetensors
 from flax import nnx
 
-from bonsai.models.resnet50 import model as model_lib
+from bonsai.models.resnet50 import modeling as model_lib
 
 
 def _get_key_and_transform_mapping():
