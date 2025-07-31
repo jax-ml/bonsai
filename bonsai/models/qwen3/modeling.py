@@ -24,7 +24,8 @@ from jax import numpy as jnp
 from jax.interpreters import pxla
 from jaxtyping import Array, ArrayLike
 
-K_MASK = -2.3819763e38
+# -2.3819763e38
+_K_MASK = jax._src.nn.functions._get_large_negative(jax.numpy.float32).item()
 
 
 class LayerCache(nnx.Module):
@@ -272,7 +273,7 @@ class Attention(nnx.Module):
         causal_mask = k_pos[:, None, :] <= q_pos[:, :, None]
         segment_mask = kv_segment_ids[:, None, :] == segment_ids[:, :, None]
         final_mask = causal_mask & segment_mask  # (b, q_len, k_len)
-        attn_logits = jnp.where(final_mask[:, None, None, :, :], attn_logits, K_MASK)
+        attn_logits = jnp.where(final_mask[:, None, None, :, :], attn_logits, _K_MASK)
         attn_weights = jax.nn.softmax(attn_logits.astype(jnp.float32), axis=-1).astype(attn_logits.dtype)
         qkv = jnp.einsum("BHGTS,BSHD->BTHGD", attn_weights, cache.v_cache.value).reshape((b, t, qh, d))
 
