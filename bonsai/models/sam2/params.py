@@ -584,14 +584,14 @@ def _get_key_and_transform_mapping():
         r"^mask_downsample\.weight$": ("mask_downsample.kernel", ((2, 3, 1, 0), None)),
         r"^mask_downsample\.bias$": ("mask_downsample.bias", None),
         # Object Pointer Projection MLP
-        r"^obj_ptr_proj\.layers\.0\.weight$": ("obj_ptr_proj.layers.0.kernel", None),
+        r"^obj_ptr_proj\.layers\.0\.weight$": ("obj_ptr_proj.layers.0.kernel", ((1, 0), None)),
         r"^obj_ptr_proj\.layers\.0\.bias$": ("obj_ptr_proj.layers.0.bias", None),
-        r"^obj_ptr_proj\.layers\.1\.weight$": ("obj_ptr_proj.layers.1.kernel", None),
+        r"^obj_ptr_proj\.layers\.1\.weight$": ("obj_ptr_proj.layers.1.kernel", ((1, 0), None)),
         r"^obj_ptr_proj\.layers\.1\.bias$": ("obj_ptr_proj.layers.1.bias", None),
-        r"^obj_ptr_proj\.layers\.2\.weight$": ("obj_ptr_proj.layers.2.kernel", None),
+        r"^obj_ptr_proj\.layers\.2\.weight$": ("obj_ptr_proj.layers.2.kernel", ((1, 0), None)),
         r"^obj_ptr_proj\.layers\.2\.bias$": ("obj_ptr_proj.layers.2.bias", None),
         # Object TPos Encoding
-        r"^obj_ptr_tpos_proj\.weight$": ("obj_ptr_tpos_proj.kernel", None),
+        r"^obj_ptr_tpos_proj\.weight$": ("obj_ptr_tpos_proj.kernel", ((1, 0), None)),
         r"^obj_ptr_tpos_proj\.bias$": ("obj_ptr_tpos_proj.bias", None),
     }
     return (
