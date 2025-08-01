@@ -18,10 +18,7 @@ import flax.nnx as nnx
 import jax
 import jax.numpy as jnp
 
-from bonsai.models.sam2.model_positional_encoding import (
-    apply_rotary_enc,
-    compute_axial_cis,
-)
+from bonsai.models.sam2.model_positional_encoding import apply_rotary_enc, compute_axial_cis
 from bonsai.models.sam2.model_utils import MLP
 
 
@@ -63,7 +60,7 @@ class Attention(nnx.Module):
         k = self.k_proj(k)
         v = self.v_proj(v)
 
-        q = self._separate_heads(q)
+        q = self._separate_heads(q)  # (B, N, H, D)
         k = self._separate_heads(k)
         v = self._separate_heads(v)
 
@@ -212,8 +209,7 @@ class RoPEAttention(nnx.Module):
 
         self.num_heads = num_heads
         self.head_dim = self.internal_dim // num_heads
-        self.scale = self.head_dim**-0.5
-        self.dropout = nnx.Dropout(dropout, rngs=rngs)
+        self.dropout_rate = dropout
         self.rope_k_repeat = rope_k_repeat
 
         H, W = feat_sizes
@@ -222,11 +218,10 @@ class RoPEAttention(nnx.Module):
     def _separate_heads(self, x: jnp.ndarray) -> jnp.ndarray:
         B, T, D = x.shape
         x = x.reshape(B, T, self.num_heads, self.head_dim)
-        return jnp.transpose(x, (0, 2, 1, 3))  # [B, H, T, C]
+        return x  # [B, T, H, C]
 
     def _combine_heads(self, x: jnp.ndarray) -> jnp.ndarray:
-        B, H, T, C = x.shape
-        x = jnp.transpose(x, (0, 2, 1, 3))  # [B, T, H, C]
+        B, T, H, C = x.shape
         return x.reshape(B, T, H * C)
 
     def _get_freqs_cis(self, seq_len: int) -> jnp.ndarray:
@@ -244,9 +239,9 @@ class RoPEAttention(nnx.Module):
         v: jnp.ndarray,  # [B, Tk, D]
         num_k_exclude_rope: int = 0,
     ) -> jnp.ndarray:
-        q_proj = self._separate_heads(self.q_proj(q))  # [B, H, Tq, C]
-        k_proj = self._separate_heads(self.k_proj(k))  # [B, H, Tk, C]
-        v_proj = self._separate_heads(self.v_proj(v))  # [B, H, Tk, C]
+        q_proj = self._separate_heads(self.q_proj(q))  # [B, Tq, H, C]
+        k_proj = self._separate_heads(self.k_proj(k))  # [B, Tk, H, C]
+        v_proj = self._separate_heads(self.v_proj(v))  # [B, Tk, H, C]
 
         freqs = self._get_freqs_cis(q_proj.shape[2])
 
@@ -263,10 +258,6 @@ class RoPEAttention(nnx.Module):
         else:
             q_proj, k_proj = apply_rotary_enc(q_proj, k_proj, freqs, repeat_freqs_k=self.rope_k_repeat)
 
-        attn_weights = jnp.einsum("bhqd,bhkd->bhqk", q_proj, k_proj) * self.scale
-        attn_weights = jax.nn.softmax(attn_weights, axis=-1)
-        attn_weights = self.dropout(attn_weights)
-
-        attn_out = jnp.einsum("bhqk,bhkd->bhqd", attn_weights, v_proj)
+        attn_out = nnx.dot_product_attention(q_proj, k_proj, v_proj, dropout_rate=self.dropout_rate)
         out = self._combine_heads(attn_out)
         return self.out_proj(out)
