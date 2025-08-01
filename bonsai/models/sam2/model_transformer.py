@@ -217,10 +217,7 @@ class RoPEAttention(nnx.Module):
         self.rope_k_repeat = rope_k_repeat
 
         H, W = feat_sizes
-        self.rotary_freqs_cis = nnx.Variable(
-            compute_axial_cis(self.head_dim, H, W, rope_theta),
-            trainable=False,
-        )
+        self.rotary_freqs_cis = compute_axial_cis(self.head_dim, H, W, rope_theta)
 
     def _separate_heads(self, x: jnp.ndarray) -> jnp.ndarray:
         B, T, D = x.shape
@@ -234,11 +231,11 @@ class RoPEAttention(nnx.Module):
 
     def _get_freqs_cis(self, seq_len: int) -> jnp.ndarray:
         """Handles dynamic recomputation if spatial extent changes."""
-        if self.rotary_freqs_cis.value.shape[0] != seq_len:
+        if self.rotary_freqs_cis.shape[0] != seq_len:
             H = int(seq_len**0.5)
             W = -(-seq_len // H)
             return compute_axial_cis(self.head_dim, H, W)
-        return self.rotary_freqs_cis.value
+        return self.rotary_freqs_cis
 
     def __call__(
         self,
