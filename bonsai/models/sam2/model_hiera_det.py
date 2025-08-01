@@ -154,8 +154,8 @@ class MultiScaleAttention(nnx.Module):
 
         attn = nnx.dot_product_attention(q, k, v)
 
-        # [B, nheads, N, C] -> [B, N, nheads, C] -> [B, H, W, C]
-        attn = jnp.transpose(attn, (0, 2, 1, 3)).reshape(B, H, W, -1)
+        # [B, H*W, nheads, C] -> [B, H, W, C]
+        attn = attn.reshape(B, H, W, -1)
 
         return self.proj(attn)
 

@@ -1538,7 +1538,7 @@ class SAM2ImagePredictor(nnx.Module):
 
         # Format features
         feats = [
-            jnp.transpose(f, (0, 2, 3, 1)).reshape(1, *feat_size)
+            jnp.transpose(f, (1, 2, 0)).reshape(1, -1, *feat_size)
             for f, feat_size in zip(vision_feats[::-1], self._bb_feat_sizes[::-1])
         ][::-1]
         self._features = {
@@ -1566,9 +1566,9 @@ class SAM2ImagePredictor(nnx.Module):
         img_batch = self._transforms.forward_batch(image_list)  # Shape: (B, H, W, 3)
 
         batch_size = img_batch.shape[0]
-        assert img_batch.ndim == 4 and img_batch.shape[-1] == 3, (
-            f"img_batch must be (B, H, W, 3), got {img_batch.shape}"
-        )
+        assert (
+            img_batch.ndim == 4 and img_batch.shape[-1] == 3
+        ), f"img_batch must be (B, H, W, 3), got {img_batch.shape}"
 
         # Forward pass
         backbone_out = self.model.forward_image(img_batch)
@@ -1600,7 +1600,7 @@ class SAM2ImagePredictor(nnx.Module):
         multimask_output: bool = True,
         return_logits: bool = False,
         normalize_coords: bool = True,
-    ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+    ) -> tuple[list[jax.Array], list[jax.Array], list[jax.Array]]:
         """
         Predict masks for a batch of images using corresponding batched prompts.
 
@@ -1644,7 +1644,6 @@ class SAM2ImagePredictor(nnx.Module):
                 img_idx=i,
             )
 
-            # Convert from JAX to NumPy
             masks_all.append(jnp.squeeze(masks, axis=0))
             ious_all.append(jnp.squeeze(ious, axis=0))
             lowres_all.append(jnp.squeeze(lowres, axis=0))
@@ -1660,7 +1659,7 @@ class SAM2ImagePredictor(nnx.Module):
         multimask_output: bool = True,
         return_logits: bool = False,
         normalize_coords: bool = True,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
         """
         Predict a mask for a single image and prompt.
 
@@ -1693,11 +1692,6 @@ class SAM2ImagePredictor(nnx.Module):
             multimask_output=multimask_output,
             return_logits=return_logits,
         )
-
-        # Convert from JAX to NumPy arrays (and keep batch dimension)
-        masks = np.asarray(masks)
-        ious = np.asarray(ious)
-        lowres_masks = np.asarray(lowres_masks)
 
         return masks, ious, lowres_masks
 
