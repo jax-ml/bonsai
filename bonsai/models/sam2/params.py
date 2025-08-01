@@ -259,6 +259,10 @@ def _get_key_and_transform_mapping():
             r"memory_encoder.fuser.layers.\1.gamma",
             None,
         ),
+        r"^memory_encoder\.fuser\.layers\.([0-1])\.weight$": (
+            r"memory_encoder.fuser.layers.\1.gamma",
+            None,
+        ),
         r"^memory_encoder\.fuser\.layers\.([0-1])\.dwconv\.weight$": (
             r"memory_encoder.fuser.layers.\1.dwconv.kernel",
             ((2, 3, 1, 0), None),
