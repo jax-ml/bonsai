@@ -48,8 +48,7 @@ class Attention(nnx.Module):
 
     def _separate_heads(self, x: jax.Array) -> jax.Array:
         b, n, c = x.shape
-        x = x.reshape(b, n, self.num_heads, c // self.num_heads)
-        return x
+        return x.reshape(b, n, self.num_heads, c // self.num_heads)
 
     def _recombine_heads(self, x: jax.Array) -> jax.Array:
         b, n, h, d = x.shape
@@ -217,8 +216,7 @@ class RoPEAttention(nnx.Module):
 
     def _separate_heads(self, x: jnp.ndarray) -> jnp.ndarray:
         B, T, D = x.shape
-        x = x.reshape(B, T, self.num_heads, self.head_dim)
-        return x  # [B, T, H, C]
+        return x.reshape(B, T, self.num_heads, self.head_dim)
 
     def _combine_heads(self, x: jnp.ndarray) -> jnp.ndarray:
         B, T, H, C = x.shape
