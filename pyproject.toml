@@ -1,6 +1,6 @@
 [project]
 name = "jax-bonsai"
-version = "0.0.0"
+dynamic = ["version"]
 authors = [
   { name = "JAX-bonsai developers", email = "jiyounha@google.com" },
 ]
@@ -32,6 +32,17 @@ dependencies = [
   "xprof",
 ]
 
+[project.optional-dependencies]
+qwen3 = []
+resnet50 = []
+sam2 = []
+
+all = [
+  "jax-bonsai[qwen3]",
+  "jax-bonsai[resnet50]",
+  "jax-bonsai[sam2]",
+]
+
 [project.urls]
 Source = "https://github.com/jax-ml/bonsai"
 
@@ -41,6 +52,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["bonsai*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "bonsai.__version__"}
 
 [tool.ruff]
 target-version = "py39"

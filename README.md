@@ -29,6 +29,57 @@ To get started with JAX Bonsai, follow these steps to set up your development en
 
 ### Installation
 
+```bash
+python3 -m pip install 'git+https://github.com/jax-ml/bonsai#egg=bonsai'
+```
+
+### CLI
+
+#### `python3 -m bonsai --help`
+```bash
+usage: python3 -m bonsai [-h] [--version] [-s SEARCH] {ls,run} ...
+
+Bonsai is a minimal, lightweight JAX implementation of popular models.
+
+positional arguments:
+  {ls,run}
+    ls                  List installed models
+    run                 Run specified model
+
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
+  -s SEARCH, --search SEARCH
+                        An alternative filepath or fully-qualified name (FQN)
+                        to use models from.
+```
+
+#### `python3 -m bonsai ls --help`
+```bash
+usage: python3 -m bonsai ls [-h]
+                            [--additional-search-path ADDITIONAL_SEARCH_PATH]
+
+options:
+  -h, --help            show this help message and exit
+  --additional-search-path ADDITIONAL_SEARCH_PATH
+                        Additional alternative filepath or fully-qualified
+                        name (FQN) to use models from.
+```
+
+#### `python3 -m bonsai run --help`
+```bash
+usage: python3 -m bonsai run [-h] [-n MODEL_NAME] [-p PATH_ROOT]
+
+options:
+  -h, --help            show this help message and exit
+  -n MODEL_NAME, --model-name MODEL_NAME
+                        Model name
+  -p PATH_ROOT, --path-root PATH_ROOT
+                        --model-name
+```
+
+### Development
+
 Clone the JAX Bonsai repository to your local machine.
 
 ```bash
@@ -45,10 +96,14 @@ pip install -e .
 
 Jump right into our [Qwen3](bonsai/models/qwen3) model, implemented in [300 lines of code](bonsai/models/qwen3/modeling.py) in JAX.
 
-```python
-python bonsai/models/qwen3/tests/run_model.py
+```sh
+python3 -m bonsai.models.qwen3.tests.run_model
 ```
 
+Or alternatively:
+```sh
+python3 -m bonsai run -n qwen3
+```
 
 ## Contributing
 
