@@ -29,8 +29,8 @@ This directory contains a pure JAX implementation of the [Qwen3 language model](
 
 Run Qwen3 in action, implemented in [300 lines of code](bonsai/models/qwen3/modeling.py) in JAX.
 
-```python
-python bonsai/models/qwen3/tests/run_model.py
+```sh
+python3 -m bonsai.models.qwen3.tests.run_model
 ```
 
 

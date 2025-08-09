@@ -10,3 +10,5 @@
 .idea
 .vscode
 .envrc
+build
+*venv*

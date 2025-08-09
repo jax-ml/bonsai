@@ -17,8 +17,8 @@ A minimal, readable JAX + Flax NNX re-implementation of Meta’s [Segment An
 
 Run SAM2 model inference in action:
 
-```python
-python bonsai/models/sam2/tests/run_model.py
+```sh
+python3 -m bonsai.models.sam2.tests.run_model
 ```
 
 ## How to contribute to this model

@@ -27,7 +27,15 @@ Got models you'd like to see in JAX? [Add a request](https://github.com/jax-ml/b
 
 To get started with JAX Bonsai, follow these steps to set up your development environment and run the models.
 
+Alternatively, run the CLI ([docs](./CLI_USAGE.md)).
+
 ### Installation
+
+```bash
+python3 -m pip install 'git+https://github.com/jax-ml/bonsai'
+```
+
+### Development
 
 Clone the JAX Bonsai repository to your local machine.
 
@@ -38,17 +46,21 @@ cd bonsai
 
 Install the latest repository.
 ```bash
-pip install -e .
+python3 -m pip install -e .
 ```
 
 ### Running models
 
 Jump right into our [Qwen3](bonsai/models/qwen3) model, implemented in [300 lines of code](bonsai/models/qwen3/modeling.py) in JAX.
 
-```python
-python bonsai/models/qwen3/tests/run_model.py
+```sh
+python3 -m bonsai.models.qwen3.tests.run_model
 ```
 
+Or alternatively:
+```sh
+python3 -m bonsai run -n qwen3
+```
 
 ## Contributing
 
