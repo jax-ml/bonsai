@@ -127,7 +127,7 @@ def main(cli_argv=None, return_args=False):
                         if os.path.isdir(search_path)
                         else filepath_from_module(search_path)
                     )
-                    if os.path.isdir(os.path.join(args.search, d))
+                    if os.path.isdir(os.path.join(search_path, d))
                     and d not in frozenset(("__pycache__",))
                 )
             )
