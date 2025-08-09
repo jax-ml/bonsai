@@ -12,8 +12,8 @@ This directory contains a pure JAX implementation of the [ResNet-50](https://hug
 
 Run ResNet model inference in action:
 
-```python
-python bonsai/models/resnet50/tests/run_model.py
+```sh
+python3 -m bonsai.models.resnet50.tests.run_model
 ```
 
 
