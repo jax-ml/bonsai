@@ -1,10 +1,9 @@
 # 🤝 Contributing to Bonsai
 
-We love contributions! Bonsai aims to be a community-driven collection of high-quality JAX NNX model implementations. Whether you're fixing a bug, adding a new model, improving documentation, or proposing new features, your help is greatly appreciated.
+We love contributions! Bonsai aims to be a community-driven collection of high-quality JAX NNX model implementations. Whether you're fixing a bug, [adding a new model](#contributing-a-model), improving documentation, or proposing new features, your help is greatly appreciated.
 
 Please take a moment to review this document to understand how to contribute effectively.
 
----
 
 ## Ways to Contribute
 
@@ -14,13 +13,11 @@ There are many ways you can contribute to Bonsai:
 2.  **Suggesting Enhancements:** Have an idea for a new model, a better way to structure code, or a useful feature? Open an issue to discuss it.
 3.  **Writing Code:**
     * **Fixing Bugs:** Submit a pull request with a fix for an existing bug.
-    * **Adding New Models:** Implement a new state-of-the-art model using JAX NNX.
+    * **Adding New Models:** [Implement a new model](#contributing-a-model) using JAX NNX.
     * **Improving Existing Models:** Enhance performance, add features, or refactor existing model implementations.
     * **Writing Tests:** Improve code coverage by adding new tests.
 4.  **Improving Documentation:** Enhance the `README.md` files, add clearer explanations, or create new guides.
 5.  **Community Engagement:** Answer questions, help other users, and share your experiences.
-
----
 
 
 ## Contributing code using pull requests
@@ -148,3 +145,39 @@ While `pre-commit` handles checks on commit, you might want to manually run all 
     ```
 
 Please ensure your code passes all linting, formatting, and type-checking checks before submitting a pull request. This helps maintain a clean and reliable codebase for everyone.
+
+
+## Contributing a model
+
+We welcome contribution of new models that may be beneficial for the JAX community
+
+1. Check if your model is [already being worked on](https://github.com/jax-ml/bonsai/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22Model%20request%22). If not, add a [Model Request](https://github.com/jax-ml/bonsai/issues/new?template=model-request---enter-model-name-here-.md) with the details about the model.
+
+2. Follow the [guidelines](#contributing-code-using-pull-requests) for forking the repository and making contributions.
+
+3. Create a new directory in [bonsai/models](bonsai/models/). Make sure to follow these designs:
+
+    ```
+    ├── models/
+    │   └── your_model_name/
+    │       ├── tests
+    │       │   ├── __init__.py
+    │       │   ├── model_validation_colab.ipynb
+    │       │   └── run_model.py
+    │       ├── README.md
+    │       ├── modeling.py
+    │       └── params.py
+    ```
+
+    Refer to the following for each of the components:
+    * `README.md`: Please include the original model source and `Tested on` matrix for supported configurations confirmation on different hardwares.
+    * `modeling.py`: This is your entire model. We aim to have [single-model, single-file policy](https://huggingface.co/blog/transformers-design-philosophy).
+      * There can be [exceptions](bonsai/models/sam2) due to model architecture.
+      * Make sure your explicit `forward` pass is properly jitted.
+      * Maximize the [120 char limit](pyproject.toml#L61) for shorter, concise and easily readable code.
+    * `params.py`: Functions for supporting conversion of checkpoints.
+    * `tests/`: Make sure the contributed model has reasonable performance and correct quality.
+      * Run [JAX profiling](https://docs.jax.dev/en/latest/profiling.html#viewing-the-trace) (i.e. `xprof --port 8791 /tmp/profile-data`) to make sure the model code fully utilizes benefits of JAX's [jit capabilities](https://docs.jax.dev/en/latest/jit-compilation.html).
+      * Add a validation colab ([SAM2 example](bonsai/models/sam2/tests/SAM2_image_predictor_example.ipynb)) to make sure the model functions properly.
+   
+   See an example model directory in [Qwen3](bonsai/models/qwen3).
