@@ -22,6 +22,7 @@ from huggingface_hub import snapshot_download
 from bonsai.models.resnet50 import modeling as model_lib
 from bonsai.models.resnet50 import params
 
+
 def run_model(MODEL_CP_PATH=None):
     # 1. Download safetensors file
     model_name = "microsoft/resnet-50"

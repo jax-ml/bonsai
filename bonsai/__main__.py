@@ -25,9 +25,7 @@ def get_module(name, package=None):
         if spec is not None:
             break
     if spec is None:
-        raise ModuleNotFoundError(
-            f"No module named {absolute_name!r}", name=absolute_name
-        )
+        raise ModuleNotFoundError(f"No module named {absolute_name!r}", name=absolute_name)
     module = importlib.util.module_from_spec(spec)
     if path is not None:
         setattr(parent_module, child_name, module)
@@ -62,16 +60,14 @@ def _build_parser():
         help="Alternative filepath(s) or fully-qualified name (FQN) to use models from.",
     )
 
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser] = (
-        parser.add_subparsers()
-    )
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser] = parser.add_subparsers()
     subparsers.required = True
     subparsers.dest = "command"
 
     ######
     # ls #
     ######
-    ls_parser: argparse.ArgumentParser = subparsers.add_parser(
+    subparsers.add_parser(
         "ls",
         help="List installed models",
     )
@@ -91,8 +87,7 @@ def _build_parser():
     run_parser.add_argument(
         "-p",
         "--path-root",
-        help="Path root (for model.safetensors directory &etc.)."
-        'Defaults to "/tmp/models-bonsai/${model_name}"',
+        help='Path root (for model.safetensors directory &etc.).Defaults to "/tmp/models-bonsai/${model_name}"',
     )
 
     return parser
@@ -123,12 +118,9 @@ def main(cli_argv=None, return_args=False):
                     f"- {d}"
                     for search_path in frozenset(args.search)
                     for d in (
-                        os.listdir(search_path)
-                        if os.path.isdir(search_path)
-                        else filepath_from_module(search_path)
+                        os.listdir(search_path) if os.path.isdir(search_path) else filepath_from_module(search_path)
                     )
-                    if os.path.isdir(os.path.join(search_path, d))
-                    and d not in frozenset(("__pycache__",))
+                    if os.path.isdir(os.path.join(search_path, d)) and d not in frozenset(("__pycache__",))
                 )
             )
         )
@@ -136,11 +128,7 @@ def main(cli_argv=None, return_args=False):
     elif args.command == "run":
         search_paths = tuple(
             sorted(
-                (
-                    search_path
-                    if os.path.isdir(search_path)
-                    else filepath_from_module(search_path)
-                )
+                (search_path if os.path.isdir(search_path) else filepath_from_module(search_path))
                 for search_path in frozenset(args.search)
             )
         )
@@ -148,9 +136,9 @@ def main(cli_argv=None, return_args=False):
             og_search_path = search_path
             if os.path.isdir(search_path):
                 prev = None
-                while not os.path.isfile(
-                    os.path.join(search_path, "setup.py")
-                ) and not os.path.isfile(os.path.join(search_path, "pyproject.toml")):
+                while not os.path.isfile(os.path.join(search_path, "setup.py")) and not os.path.isfile(
+                    os.path.join(search_path, "pyproject.toml")
+                ):
                     search_path = os.path.dirname(search_path)
                     if search_path == prev:
                         raise ModuleNotFoundError("Could not find project root")

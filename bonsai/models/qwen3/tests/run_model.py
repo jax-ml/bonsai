@@ -25,6 +25,7 @@ from transformers import AutoTokenizer
 
 from bonsai.models.qwen3 import modeling, params
 
+
 def tokenize(tokenizer, input: list[str]):
     pad_idx = tokenizer.pad_token_id
     lines = [
@@ -35,6 +36,7 @@ def tokenize(tokenizer, input: list[str]):
     max_l = max(len(line) for line in lines)  # left-pad to max line length.
     buffer_len = 2 ** math.ceil(math.log2(max(max_l, 1)))  # right-pad to buffer length.
     return jnp.array([np.pad(l, (max_l - len(l), buffer_len - max_l), constant_values=pad_idx) for l in lines]), max_l
+
 
 def run_model(MODEL_CP_PATH=None):
     model_name = "Qwen/Qwen3-0.6B"
@@ -54,7 +56,9 @@ def run_model(MODEL_CP_PATH=None):
 
     config = modeling.ModelCfg.qwen3_0_6b()
     model = params.create_model_from_safe_tensors(MODEL_CP_PATH, config)
-    cache = modeling.init_cache(num_layers=28, batch_size=batch_size, cache_size=cache_size, num_kv_heads=8, head_dim=128)
+    cache = modeling.init_cache(
+        num_layers=28, batch_size=batch_size, cache_size=cache_size, num_kv_heads=8, head_dim=128
+    )
     graphdef, state = nnx.split((model, cache))
     state = jax.tree.leaves(state)  # Better perf from flattened jax state due to no pytree trasversals.
 
