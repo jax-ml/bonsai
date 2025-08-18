@@ -103,11 +103,10 @@ def run_model(MODEL_CP_PATH: Optional[str] = None, audio_path: Optional[str] = N
     mel_features = mel_features[None, ...].transpose(0, 2, 1)  # (1, n_mels, time)
     mel_features = jnp.array(mel_features)
     
-    # Create model with random weights for testing
+    # Create model from pretrained weights
     config = modeling.WhisperConfig.whisper_tiny()
-    rngs = nnx.Rngs(0)
-    model = modeling.WhisperModel(config, rngs=rngs)
-    print("Created model with random weights for testing")
+    model = params.create_model_from_safe_tensors(MODEL_CP_PATH, config)
+    print("Loaded pretrained Whisper weights")
     
     # Create dummy tokens for testing (BOS token)
     tokens = jnp.array([[50258]])  # BOS token for Whisper

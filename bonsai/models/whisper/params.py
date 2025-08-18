@@ -36,260 +36,279 @@ def _get_key_and_transform_mapping(config: model_lib.WhisperConfig) -> Dict[str,
         r"model\.encoder\.conv2\.bias": ("encoder.conv2.bias", None),
         
         # Audio encoder positional embedding
-        r"model\.encoder\.embed_positions\.weight": ("encoder.positional_embedding", None),
+        r"model\.encoder\.embed_positions\.weight": ("encoder.embed_positions", None),
         
         # Audio encoder transformer blocks
         r"model\.encoder\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (
-            r"encoder.blocks.\1.attn.query.kernel", ((1, 0), None)
+            r"encoder.layers.\1.self_attn.q_proj.kernel", ((1, 0), None)
         ),
         r"model\.encoder\.layers\.([0-9]+)\.self_attn\.q_proj\.bias": (
-            r"encoder.blocks.\1.attn.query.bias", None
+            r"encoder.layers.\1.self_attn.q_proj.bias", None
         ),
         r"model\.encoder\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (
-            r"encoder.blocks.\1.attn.key.kernel", ((1, 0), None)
-        ),
-        r"model\.encoder\.layers\.([0-9]+)\.self_attn\.k_proj\.bias": (
-            r"encoder.blocks.\1.attn.key.bias", None
+            r"encoder.layers.\1.self_attn.k_proj.kernel", ((1, 0), None)
         ),
         r"model\.encoder\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (
-            r"encoder.blocks.\1.attn.value.kernel", ((1, 0), None)
+            r"encoder.layers.\1.self_attn.v_proj.kernel", ((1, 0), None)
         ),
         r"model\.encoder\.layers\.([0-9]+)\.self_attn\.v_proj\.bias": (
-            r"encoder.blocks.\1.attn.value.bias", None
+            r"encoder.layers.\1.self_attn.v_proj.bias", None
         ),
         r"model\.encoder\.layers\.([0-9]+)\.self_attn\.out_proj\.weight": (
-            r"encoder.blocks.\1.attn.out.kernel", ((1, 0), None)
+            r"encoder.layers.\1.self_attn.out_proj.kernel", ((1, 0), None)
         ),
         r"model\.encoder\.layers\.([0-9]+)\.self_attn\.out_proj\.bias": (
-            r"encoder.blocks.\1.attn.out.bias", None
+            r"encoder.layers.\1.self_attn.out_proj.bias", None
         ),
         r"model\.encoder\.layers\.([0-9]+)\.self_attn_layer_norm\.weight": (
-            r"encoder.blocks.\1.attn_ln.scale", None
+            r"encoder.layers.\1.self_attn_layer_norm.scale", None
         ),
         r"model\.encoder\.layers\.([0-9]+)\.self_attn_layer_norm\.bias": (
-            r"encoder.blocks.\1.attn_ln.bias", None
+            r"encoder.layers.\1.self_attn_layer_norm.bias", None
         ),
         r"model\.encoder\.layers\.([0-9]+)\.fc1\.weight": (
-            r"encoder.blocks.\1.mlp_fc1.kernel", ((1, 0), None)
+            r"encoder.layers.\1.fc1.kernel", ((1, 0), None)
         ),
         r"model\.encoder\.layers\.([0-9]+)\.fc1\.bias": (
-            r"encoder.blocks.\1.mlp_fc1.bias", None
+            r"encoder.layers.\1.fc1.bias", None
         ),
         r"model\.encoder\.layers\.([0-9]+)\.fc2\.weight": (
-            r"encoder.blocks.\1.mlp_fc2.kernel", ((1, 0), None)
+            r"encoder.layers.\1.fc2.kernel", ((1, 0), None)
         ),
         r"model\.encoder\.layers\.([0-9]+)\.fc2\.bias": (
-            r"encoder.blocks.\1.mlp_fc2.bias", None
+            r"encoder.layers.\1.fc2.bias", None
         ),
         r"model\.encoder\.layers\.([0-9]+)\.final_layer_norm\.weight": (
-            r"encoder.blocks.\1.mlp_ln.scale", None
+            r"encoder.layers.\1.final_layer_norm.scale", None
         ),
         r"model\.encoder\.layers\.([0-9]+)\.final_layer_norm\.bias": (
-            r"encoder.blocks.\1.mlp_ln.bias", None
+            r"encoder.layers.\1.final_layer_norm.bias", None
         ),
         
         # Audio encoder final layer norm
-        r"model\.encoder\.layer_norm\.weight": ("encoder.ln_post.scale", None),
-        r"model\.encoder\.layer_norm\.bias": ("encoder.ln_post.bias", None),
+        r"model\.encoder\.layer_norm\.weight": ("encoder.layer_norm.scale", None),
+        r"model\.encoder\.layer_norm\.bias": ("encoder.layer_norm.bias", None),
         
         # Text decoder
-        r"model\.decoder\.embed_tokens\.weight": ("decoder.token_embedding.embedding", None),
-        r"model\.decoder\.embed_positions\.weight": ("decoder.positional_embedding", None),
+        r"model\.decoder\.embed_tokens\.weight": ("decoder.embed_tokens.embedding", None),
+        r"model\.decoder\.embed_positions\.weight": ("decoder.embed_positions", None),
         
         # Text decoder transformer blocks
         r"model\.decoder\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (
-            r"decoder.blocks.\1.attn.query.kernel", ((1, 0), None)
+            r"decoder.layers.\1.self_attn.q_proj.kernel", ((1, 0), None)
         ),
         r"model\.decoder\.layers\.([0-9]+)\.self_attn\.q_proj\.bias": (
-            r"decoder.blocks.\1.attn.query.bias", None
+            r"decoder.layers.\1.self_attn.q_proj.bias", None
         ),
         r"model\.decoder\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (
-            r"decoder.blocks.\1.attn.key.kernel", ((1, 0), None)
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.self_attn\.k_proj\.bias": (
-            r"decoder.blocks.\1.attn.key.bias", None
+            r"decoder.layers.\1.self_attn.k_proj.kernel", ((1, 0), None)
         ),
         r"model\.decoder\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (
-            r"decoder.blocks.\1.attn.value.kernel", ((1, 0), None)
+            r"decoder.layers.\1.self_attn.v_proj.kernel", ((1, 0), None)
         ),
         r"model\.decoder\.layers\.([0-9]+)\.self_attn\.v_proj\.bias": (
-            r"decoder.blocks.\1.attn.value.bias", None
+            r"decoder.layers.\1.self_attn.v_proj.bias", None
         ),
         r"model\.decoder\.layers\.([0-9]+)\.self_attn\.out_proj\.weight": (
-            r"decoder.blocks.\1.attn.out.kernel", ((1, 0), None)
+            r"decoder.layers.\1.self_attn.out_proj.kernel", ((1, 0), None)
         ),
         r"model\.decoder\.layers\.([0-9]+)\.self_attn\.out_proj\.bias": (
-            r"decoder.blocks.\1.attn.out.bias", None
+            r"decoder.layers.\1.self_attn.out_proj.bias", None
         ),
         r"model\.decoder\.layers\.([0-9]+)\.self_attn_layer_norm\.weight": (
-            r"decoder.blocks.\1.attn_ln.scale", None
+            r"decoder.layers.\1.self_attn_layer_norm.scale", None
         ),
         r"model\.decoder\.layers\.([0-9]+)\.self_attn_layer_norm\.bias": (
-            r"decoder.blocks.\1.attn_ln.bias", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.q_proj\.weight": (
-            r"decoder.blocks.\1.cross_attn.query.kernel", ((1, 0), None)
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.q_proj\.bias": (
-            r"decoder.blocks.\1.cross_attn.query.bias", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.k_proj\.weight": (
-            r"decoder.blocks.\1.cross_attn.key.kernel", ((1, 0), None)
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.k_proj\.bias": (
-            r"decoder.blocks.\1.cross_attn.key.bias", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.v_proj\.weight": (
-            r"decoder.blocks.\1.cross_attn.value.kernel", ((1, 0), None)
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.v_proj\.bias": (
-            r"decoder.blocks.\1.cross_attn.value.bias", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.out_proj\.weight": (
-            r"decoder.blocks.\1.cross_attn.out.kernel", ((1, 0), None)
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.out_proj\.bias": (
-            r"decoder.blocks.\1.cross_attn.out.bias", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn_layer_norm\.weight": (
-            r"decoder.blocks.\1.cross_attn_ln.scale", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn_layer_norm\.bias": (
-            r"decoder.blocks.\1.cross_attn_ln.bias", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.fc1\.weight": (
-            r"decoder.blocks.\1.mlp_fc1.kernel", ((1, 0), None)
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.fc1\.bias": (
-            r"decoder.blocks.\1.mlp_fc1.bias", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.fc2\.weight": (
-            r"decoder.blocks.\1.mlp_fc2.kernel", ((1, 0), None)
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.fc2\.bias": (
-            r"decoder.blocks.\1.mlp_fc2.bias", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.final_layer_norm\.weight": (
-            r"decoder.blocks.\1.mlp_ln.scale", None
-        ),
-        r"model\.decoder\.layers\.([0-9]+)\.final_layer_norm\.bias": (
-            r"decoder.blocks.\1.mlp_ln.bias", None
+            r"decoder.layers.\1.self_attn_layer_norm.bias", None
         ),
         
-        # Text decoder final layer norm and output projection
-        r"model\.decoder\.layer_norm\.weight": ("decoder.ln.scale", None),
-        r"model\.decoder\.layer_norm\.bias": ("decoder.ln.bias", None),
-        r"model\.decoder\.embed_tokens\.weight": ("decoder.output_projection.kernel", ((1, 0), None)),
+        # Cross attention
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.q_proj\.weight": (
+            r"decoder.layers.\1.encoder_attn.q_proj.kernel", ((1, 0), None)
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.q_proj\.bias": (
+            r"decoder.layers.\1.encoder_attn.q_proj.bias", None
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.k_proj\.weight": (
+            r"decoder.layers.\1.encoder_attn.k_proj.kernel", ((1, 0), None)
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.v_proj\.weight": (
+            r"decoder.layers.\1.encoder_attn.v_proj.kernel", ((1, 0), None)
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.v_proj\.bias": (
+            r"decoder.layers.\1.encoder_attn.v_proj.bias", None
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.out_proj\.weight": (
+            r"decoder.layers.\1.encoder_attn.out_proj.kernel", ((1, 0), None)
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn\.out_proj\.bias": (
+            r"decoder.layers.\1.encoder_attn.out_proj.bias", None
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn_layer_norm\.weight": (
+            r"decoder.layers.\1.encoder_attn_layer_norm.scale", None
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.encoder_attn_layer_norm\.bias": (
+            r"decoder.layers.\1.encoder_attn_layer_norm.bias", None
+        ),
+        
+        # MLP
+        r"model\.decoder\.layers\.([0-9]+)\.fc1\.weight": (
+            r"decoder.layers.\1.fc1.kernel", ((1, 0), None)
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.fc1\.bias": (
+            r"decoder.layers.\1.fc1.bias", None
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.fc2\.weight": (
+            r"decoder.layers.\1.fc2.kernel", ((1, 0), None)
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.fc2\.bias": (
+            r"decoder.layers.\1.fc2.bias", None
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.final_layer_norm\.weight": (
+            r"decoder.layers.\1.final_layer_norm.scale", None
+        ),
+        r"model\.decoder\.layers\.([0-9]+)\.final_layer_norm\.bias": (
+            r"decoder.layers.\1.final_layer_norm.bias", None
+        ),
+        
+        # Decoder final layer norm
+        r"model\.decoder\.layer_norm\.weight": ("decoder.layer_norm.scale", None),
+        r"model\.decoder\.layer_norm\.bias": ("decoder.layer_norm.bias", None),
     }
 
 
-def _torch_key_to_jax_key(mapping: Dict[str, Tuple[str, Optional[Tuple]]], source_key: str) -> Tuple[str, Optional[Tuple]]:
-    """Convert PyTorch key to JAX key with transformation."""
-    for pattern, (replacement, transform) in mapping.items():
-        if re.match(pattern, source_key):
-            # Handle numbered groups in replacement
-            if r"\1" in replacement:
-                match = re.match(pattern, source_key)
-                if match:
-                    replacement = replacement.replace(r"\1", match.group(1))
-            return replacement, transform
-    raise ValueError(f"No mapping found for key: {source_key}")
+def _torch_key_to_jax_key(torch_key: str) -> str:
+    """Convert PyTorch-style key to JAX-style key."""
+    # Replace .weight with .kernel for linear layers
+    if torch_key.endswith('.weight') and 'embed' not in torch_key and 'norm' not in torch_key:
+        return torch_key.replace('.weight', '.kernel')
+    # Replace .weight with .scale for layer norms
+    elif torch_key.endswith('.weight') and 'norm' in torch_key:
+        return torch_key.replace('.weight', '.scale')
+    return torch_key
 
 
-def _stoi(s):
-    """Convert string to int if possible, otherwise return string."""
-    try:
-        return int(s)
-    except ValueError:
-        return s
-
-
-def _assign_weights(keys: list, tensor: np.ndarray, state_dict: Dict[str, Any], torch_key: str, transform: Optional[Tuple]) -> None:
-    """Convert weights and assign to NNX state_dict."""
-    key = keys[0]
-    if len(keys) == 1:
-        try:
-            if transform is not None:
-                permute, reshape = transform
-                if permute:
-                    tensor = tensor.transpose(permute)
-                if reshape:
-                    tensor = tensor.reshape(reshape)
-            state_dict[key] = jnp.array(tensor)
-        except Exception as e:
-            print(f"Error processing key {torch_key}: {e}")
-            raise
-    else:
-        # Handle nested keys
-        if key not in state_dict:
-            state_dict[key] = {}
-        _assign_weights(keys[1:], tensor, state_dict[key], torch_key, transform)
-
-
-def convert_hf_whisper_to_nnx(hf_model_path: str, config: model_lib.WhisperConfig) -> model_lib.WhisperModel:
-    """Convert HuggingFace Whisper model to NNX format."""
-    # Load HuggingFace config to get model dimensions
-    hf_config = HFWhisperConfig.from_pretrained(hf_model_path)
+def _assign_weights(hf_weights: Dict[str, np.ndarray], nnx_state: Dict[str, Any], 
+                   key_mapping: Dict[str, Tuple[str, Optional[Tuple]]]) -> Dict[str, Any]:
+    """Assign HuggingFace weights to NNX state."""
+    assigned_count = 0
+    skipped_count = 0
     
-    # Create NNX model with proper RNGs
-    whisper_model = nnx.eval_shape(lambda: model_lib.WhisperModel(config, rngs=nnx.Rngs(params=0)))
-    graph_def, abs_state = nnx.split(whisper_model)
+    for hf_key, hf_array in hf_weights.items():
+        matched = False
+        
+        for pattern, (nnx_key, transform) in key_mapping.items():
+            match = re.match(pattern, hf_key)
+            if match:
+                # Handle regex groups
+                if '\\1' in nnx_key:
+                    nnx_key = match.expand(nnx_key)
+                
+                # Apply transformation if specified
+                if transform is not None:
+                    perm, _ = transform
+                    if perm is not None:
+                        hf_array = np.transpose(hf_array, perm)
+                
+                # Convert to JAX array
+                if hasattr(hf_array, 'numpy'):
+                    hf_array = hf_array.numpy()
+                jax_array = jax.device_put(hf_array.astype(np.float32))
+                
+                # Navigate to the correct location in the state dict
+                keys = nnx_key.split('.')
+                current = nnx_state
+                for key in keys[:-1]:
+                    # Convert layer indices to integers
+                    if key.isdigit():
+                        key = int(key)
+                    if key not in current:
+                        current[key] = {}
+                    current = current[key]
+                
+                # Keep the final key as string
+                current[keys[-1]] = jax_array
+                assigned_count += 1
+                matched = True
+                break
+        
+        if not matched:
+            skipped_count += 1
+    
+    print(f"Assigned {assigned_count} tensors, skipped {skipped_count} tensors")
+    return nnx_state
+
+
+def convert_hf_whisper_to_nnx(model_dir: str, config: model_lib.WhisperConfig) -> Tuple[nnx.GraphDef, Dict[str, Any]]:
+    """Convert HuggingFace Whisper model to NNX format."""
+    # Load HuggingFace weights
+    model_path = epath.Path(model_dir)
+    safetensors_file = model_path / "model.safetensors"
+    
+    if not safetensors_file.exists():
+        raise FileNotFoundError(f"No model.safetensors found in {model_dir}")
+    
+    print(f"Loading weights from {safetensors_file}")
+    with safetensors.safe_open(str(safetensors_file), framework="pt") as f:
+        hf_weights = {key: f.get_tensor(key) for key in f.keys()}
+    
+    print(f"Loaded {len(hf_weights)} tensors from HuggingFace model")
+    
+    # Create NNX model structure
+    model = nnx.eval_shape(lambda: model_lib.WhisperModel(config, rngs=nnx.Rngs(params=0)))
+    graph_def, abs_state = nnx.split(model)
     state_dict = abs_state.to_pure_dict()
     
-    # Load weights from safetensors or pytorch format
-    model_path = epath.Path(hf_model_path)
+    print(f"Created NNX model with {len(state_dict)} top-level keys")
     
-    # Try to load from safetensors first
-    safetensors_files = list(model_path.glob("*.safetensors"))
-    if safetensors_files:
-        hf_state_dict = safetensors.load_file(str(safetensors_files[0]))
-    else:
-        # Fall back to pytorch format
-        import torch
-        checkpoint = torch.load(model_path / "pytorch_model.bin", map_location="cpu")
-        hf_state_dict = {k: v.numpy() for k, v in checkpoint.items()}
+    # Get key mapping
+    key_mapping = _get_key_and_transform_mapping(config)
     
-    # Convert weights
-    mapping = _get_key_and_transform_mapping(config)
+    # Assign weights
+    state_dict = _assign_weights(hf_weights, state_dict, key_mapping)
     
-    for torch_key, tensor in hf_state_dict.items():
-        try:
-            jax_key, transform = _torch_key_to_jax_key(mapping, torch_key)
-            if jax_key is None:
-                continue
-            keys = [_stoi(k) for k in jax_key.split(".")]
-            _assign_weights(keys, tensor, state_dict, torch_key, transform)
-        except ValueError:
-            print(f"Skipping unmapped key: {torch_key}")
-            continue
-    
-    # Device placement
-    state_dict = jax.device_put(state_dict, jax.devices()[0])
-    
-    # Merge and return
-    return nnx.merge(graph_def, state_dict)
+    return graph_def, state_dict
 
 
-def create_model_from_safe_tensors(model_path: str, config: model_lib.WhisperConfig) -> model_lib.WhisperModel:
-    """Create Whisper model from safetensors checkpoint."""
-    return convert_hf_whisper_to_nnx(model_path, config)
+def create_model_from_safe_tensors(model_dir: str, config: model_lib.WhisperConfig) -> model_lib.WhisperModel:
+    """Create NNX Whisper model from HuggingFace safetensors."""
+    graph_def, state_dict = convert_hf_whisper_to_nnx(model_dir, config)
+    
+    # Merge the model
+    model = nnx.merge(graph_def, state_dict)
+    return model
 
 
-def load_whisper_model(model_name: str = "openai/whisper-tiny", config: Optional[model_lib.WhisperConfig] = None) -> model_lib.WhisperModel:
+def load_whisper_model(model_name: str = "openai/whisper-tiny", 
+                      cache_dir: str = "/tmp/models-bonsai") -> model_lib.WhisperModel:
     """Load Whisper model from HuggingFace hub."""
-    if config is None:
-        # Auto-detect config based on model name
-        if "tiny" in model_name:
-            config = model_lib.WhisperConfig.whisper_tiny()
-        elif "base" in model_name:
-            config = model_lib.WhisperConfig.whisper_base()
-        elif "small" in model_name:
-            config = model_lib.WhisperConfig.whisper_small()
-        elif "medium" in model_name:
-            config = model_lib.WhisperConfig.whisper_medium()
-        elif "large" in model_name:
-            config = model_lib.WhisperConfig.whisper_large()
-        else:
-            config = model_lib.WhisperConfig.whisper_tiny()  # Default
+    from transformers import WhisperConfig
     
-    return convert_hf_whisper_to_nnx(model_name, config)
+    # Download model if not cached
+    model_dir = f"{cache_dir}/{model_name.split('/')[-1]}"
+    
+    if not epath.Path(model_dir).exists():
+        print(f"Downloading {model_name} to {model_dir}")
+        from transformers import WhisperProcessor
+        processor = WhisperProcessor.from_pretrained(model_name, cache_dir=cache_dir)
+        # The processor download will also download the model files
+    
+    # Load config and create model
+    hf_config = WhisperConfig.from_pretrained(model_dir)
+    config = model_lib.WhisperConfig(
+        vocab_size=hf_config.vocab_size,
+        n_mels=hf_config.num_mel_bins,
+        n_audio_ctx=hf_config.max_source_positions,
+        n_audio_state=hf_config.d_model,
+        n_audio_head=hf_config.encoder_attention_heads,
+        n_audio_layer=hf_config.encoder_layers,
+        n_text_ctx=hf_config.max_target_positions,
+        n_text_state=hf_config.d_model,
+        n_text_head=hf_config.decoder_attention_heads,
+        n_text_layer=hf_config.decoder_layers,
+        n_vocab=hf_config.vocab_size,
+        n_langs=hf_config.num_languages,
+        dtype=jnp.float32
+    )
+    
+    return create_model_from_safe_tensors(model_dir, config)
