@@ -386,14 +386,15 @@ def generate(model: WhisperModel, mel_features: Array, max_length: int = 448, te
     """Generate text tokens from audio features."""
     batch_size = mel_features.shape[0]
     
-    # Start with BOS token
-    tokens = jnp.array([[50258]])  # BOS token
-    tokens = jnp.repeat(tokens, batch_size, axis=0)
+    # Start with HF Whisper prompt tokens: <|startoftranscript|><|en|><|transcribe|><|notimestamps|>
+    # HF uses forced_decoder_ids: position 1=<|en|>, 2=<|transcribe|>, 3=<|notimestamps|>
+    prompt_tokens = jnp.array([[50258, 50259, 50359, 50363]])
+    tokens = jnp.repeat(prompt_tokens, batch_size, axis=0)
     
     # Encode audio once
     xa = model.encoder(mel_features)
     
-    for _ in range(max_length - 1):
+    for _ in range(max_length - len(prompt_tokens[0])):
         # Create causal mask
         seq_len = tokens.shape[1]
         mask = create_causal_mask(seq_len)
@@ -401,10 +402,9 @@ def generate(model: WhisperModel, mel_features: Array, max_length: int = 448, te
         # Get logits
         logits = model.decoder(tokens, xa, mask)
         
-        # Get next token
-        next_logits = logits[:, -1, :] / max(temperature, 1e-5)
-        next_token = jax.random.categorical(jax.random.PRNGKey(0), next_logits)
-        next_token = next_token[:, None]
+        # Get next token (greedy decoding)
+        next_logits = logits[:, -1, :]
+        next_token = jnp.argmax(next_logits, axis=-1, keepdims=True)
         
         # Append to sequence
         tokens = jnp.concatenate([tokens, next_token], axis=1)
