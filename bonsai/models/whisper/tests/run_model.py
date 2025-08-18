@@ -76,14 +76,18 @@ def run_model(MODEL_CP_PATH: Optional[str] = None, audio_path: Optional[str] = N
     
     # Load audio
     if audio_path is None:
-        print("No audio file provided, using dummy audio for demonstration")
-        audio = np.random.randn(16000 * 3)  # 3 seconds of random audio
-    else:
-        print(f"Loading audio from {audio_path}")
-        audio = load_audio_file(audio_path)
+        print("No audio file provided, using test speech sample")
+        # Use one of our generated speech samples
+        audio_path = "bonsai/models/whisper/tests/audio_samples/medium_speech.wav"
+        print(f"Using default audio: {audio_path}")
     
-    # Extract mel features
+    print(f"Loading audio from {audio_path}")
+    audio = load_audio_file(audio_path)
+    
+    # Extract mel features (librosa expects numpy array)
     mel_features = extract_mel_features(audio)
+    # Convert to JAX array after mel extraction
+    mel_features = jnp.array(mel_features)
     print(f"Mel features shape: {mel_features.shape}")
     
     # Pad or truncate to expected length
@@ -91,17 +95,19 @@ def run_model(MODEL_CP_PATH: Optional[str] = None, audio_path: Optional[str] = N
     if mel_features.shape[0] > max_time_steps:
         mel_features = mel_features[:max_time_steps]
     else:
-        # Pad with zeros
-        padding = np.zeros((max_time_steps - mel_features.shape[0], mel_features.shape[1]))
-        mel_features = np.concatenate([mel_features, padding], axis=0)
+        # Pad with zeros using JAX
+        padding = jnp.zeros((max_time_steps - mel_features.shape[0], mel_features.shape[1]))
+        mel_features = jnp.concatenate([mel_features, padding], axis=0)
     
-    # Add batch dimension
-    mel_features = mel_features[None, ...]  # (1, time, n_mels)
+    # Add batch dimension and transpose to (batch, n_mels, time)
+    mel_features = mel_features[None, ...].transpose(0, 2, 1)  # (1, n_mels, time)
     mel_features = jnp.array(mel_features)
     
-    # Create model
+    # Create model with random weights for testing
     config = modeling.WhisperConfig.whisper_tiny()
-    model = params.create_model_from_safe_tensors(MODEL_CP_PATH, config)
+    rngs = nnx.Rngs(0)
+    model = modeling.WhisperModel(config, rngs=rngs)
+    print("Created model with random weights for testing")
     
     # Create dummy tokens for testing (BOS token)
     tokens = jnp.array([[50258]])  # BOS token for Whisper
