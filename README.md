@@ -53,7 +53,7 @@ python bonsai/models/qwen3/tests/run_model.py
 ## Contributing
 
 We welcome contributions!
-If you're interested in adding new models, improving existing implementations, or enhancing documentation, please see our [Contributing Guidelines](CONTRIBUTING.md).
+If you're interested in [adding new models](CONTRIBUTING.md#contributing-a-model), improving existing implementations, or enhancing documentation, please see our [Contributing Guidelines](CONTRIBUTING.md).
 
 Join our [discord](https://discord.gg/77FrhNQb) to socialize with other JAX enthusiasts.
 

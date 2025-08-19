@@ -48,47 +48,55 @@ def convert_pt_to_safetensors(pt_path: str, output_path: str):
     logging.info("Conversion complete.")
 
 
-# 1. Download weights if needed
-model_name = "facebook/sam2-hiera-tiny"
-MODEL_CP_PATH = "/tmp/models-bonsai/" + model_name.split("/")[1]
-if not os.path.isdir(MODEL_CP_PATH):
-    snapshot_download(model_name, local_dir=MODEL_CP_PATH)
+def run_model(MODEL_CP_PATH=None):
+    # 1. Download weights if needed
+    model_name = "facebook/sam2-hiera-tiny"
+    if MODEL_CP_PATH is None:
+        MODEL_CP_PATH = "/tmp/models-bonsai/" + model_name.split("/")[1]
+    if not os.path.isdir(MODEL_CP_PATH):
+        snapshot_download(model_name, local_dir=MODEL_CP_PATH)
 
-pt_path = os.path.join(MODEL_CP_PATH, "sam2_hiera_tiny.pt")  # assuming this file name
-safetensors_path = "/tmp/sam2_model.safetensors"
+    pt_path = os.path.join(MODEL_CP_PATH, "sam2_hiera_tiny.pt")  # assuming this file name
+    safetensors_path = "/tmp/sam2_model.safetensors"
 
-if not os.path.exists(safetensors_path):
-    convert_pt_to_safetensors(pt_path, safetensors_path)
+    if not os.path.exists(safetensors_path):
+        convert_pt_to_safetensors(pt_path, safetensors_path)
 
-# 2. Create SAM2 model and predictor
-config = modeling.SAM2Config.sam2_tiny()
-model_obj = params.create_sam2_from_pretrained(safetensors_path, config)
-model = modeling.SAM2ImagePredictor(model_obj)
+    # 2. Create SAM2 model and predictor
+    config = modeling.SAM2Config.sam2_tiny()
+    model_obj = params.create_sam2_from_pretrained(safetensors_path, config)
+    model = modeling.SAM2ImagePredictor(model_obj)
 
-# 3. Prepare dummy input
-batch_size = 4
-image_size = 64
-dummy_images = [jnp.ones((image_size, image_size, 3), dtype=jnp.float32) for _ in range(batch_size)]
-dummy_points = [jnp.ones((1, 2), dtype=jnp.float32) for _ in range(batch_size)]
-dummy_labels = [jnp.ones((1,), dtype=jnp.float32) for _ in range(batch_size)]
+    # 3. Prepare dummy input
+    batch_size = 4
+    image_size = 64
+    dummy_images = [jnp.ones((image_size, image_size, 3), dtype=jnp.float32) for _ in range(batch_size)]
+    dummy_points = [jnp.ones((1, 2), dtype=jnp.float32) for _ in range(batch_size)]
+    dummy_labels = [jnp.ones((1,), dtype=jnp.float32) for _ in range(batch_size)]
 
-# 4. Setting images and warmup
-model.set_image_batch(dummy_images)
+    # 4. Setting images and warmup
+    model.set_image_batch(dummy_images)
 
-# Predicting masks
-_ = modeling.forward(model, dummy_points, dummy_labels)
-jax.block_until_ready(_)
+    # Predicting masks
+    _ = modeling.forward(model, dummy_points, dummy_labels)
+    jax.block_until_ready(_)
 
-# 5. Profiling
-jax.profiler.start_trace("/tmp/profile-sam2")
-for _ in range(5):
-    masks_all, ious_all, lowres_all = modeling.forward(model, dummy_points, dummy_labels)
-jax.block_until_ready(masks_all)
-jax.profiler.stop_trace()
+    # 5. Profiling
+    jax.profiler.start_trace("/tmp/profile-sam2")
+    for _ in range(5):
+        masks_all, ious_all, lowres_all = modeling.forward(model, dummy_points, dummy_labels)
+    jax.block_until_ready(masks_all)
+    jax.profiler.stop_trace()
 
-# 6. Timing
-t0 = time.perf_counter()
-for _ in range(10):
-    masks_all, ious_all, lowres_all = modeling.forward(model, dummy_points, dummy_labels)
-jax.block_until_ready(masks_all)
-print(f"10 forward passes took {time.perf_counter() - t0:.4f} s")
+    # 6. Timing
+    t0 = time.perf_counter()
+    for _ in range(10):
+        masks_all, ious_all, lowres_all = modeling.forward(model, dummy_points, dummy_labels)
+    jax.block_until_ready(masks_all)
+    print(f"10 forward passes took {time.perf_counter() - t0:.4f} s")
+
+
+if __name__ == "__main__":
+    run_model()
+
+__all__ = ["run_model"]

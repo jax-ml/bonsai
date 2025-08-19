@@ -24,6 +24,10 @@ from flax import nnx
 
 from bonsai.models.sam2 import modeling as model_lib
 
+PYTORCH_TO_JAX_CONV_2D_KERNEL = (2, 3, 1, 0)  # (C_out, C_in, kH, kW) -> (kH, kW, C_in, C_out)
+PYTORCH_TO_JAX_CONV_2D_TRANSPOSE_KERNEL = (2, 3, 0, 1)  # (C_in, C_out, kH, kW) -> (kH, kW, C_in, C_out)
+PYTORCH_TO_JAX_LINEAR = (1, 0)  # (D_in, D_out) -> (D_out, D_in)
+
 
 def _get_key_and_transform_mapping():
     # Maps safetensor keys → (JAX nnx key template, no transform needed)
@@ -32,7 +36,7 @@ def _get_key_and_transform_mapping():
         # === Patch Embedding ===
         r"^image_encoder\.trunk\.patch_embed\.proj\.weight$": (
             "image_encoder.trunk.patch_embed.proj.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^image_encoder\.trunk\.patch_embed\.proj\.bias$": (
             "image_encoder.trunk.patch_embed.proj.bias",
@@ -55,7 +59,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.attn\.qkv\.weight$": (
             r"image_encoder.trunk.blocks.\1.attn.qkv.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.attn\.qkv\.bias$": (
             r"image_encoder.trunk.blocks.\1.attn.qkv.bias",
@@ -63,7 +67,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.attn\.proj\.weight$": (
             r"image_encoder.trunk.blocks.\1.attn.proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.attn\.proj\.bias$": (
             r"image_encoder.trunk.blocks.\1.attn.proj.bias",
@@ -79,7 +83,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.mlp\.layers\.0\.weight$": (
             r"image_encoder.trunk.blocks.\1.mlp.layers.0.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.mlp\.layers\.0\.bias$": (
             r"image_encoder.trunk.blocks.\1.mlp.layers.0.bias",
@@ -87,7 +91,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.mlp\.layers\.1\.weight$": (
             r"image_encoder.trunk.blocks.\1.mlp.layers.1.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.mlp\.layers\.1\.bias$": (
             r"image_encoder.trunk.blocks.\1.mlp.layers.1.bias",
@@ -95,7 +99,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.proj\.weight$": (
             r"image_encoder.trunk.blocks.\1.proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^image_encoder\.trunk\.blocks\.([0-9]+)\.proj\.bias$": (
             r"image_encoder.trunk.blocks.\1.proj.bias",
@@ -104,7 +108,7 @@ def _get_key_and_transform_mapping():
         # === Neck Convolutions ===
         r"^image_encoder\.neck\.convs\.([0-3])\.conv\.weight$": (
             r"image_encoder.neck.convs.\1.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^image_encoder\.neck\.convs\.([0-3])\.conv\.bias$": (
             r"image_encoder.neck.convs.\1.bias",
@@ -140,7 +144,7 @@ def _get_key_and_transform_mapping():
         # === Feedforward MLP ===
         r"^memory_attention\.layers\.([0-3])\.linear1\.weight$": (
             r"memory_attention.layers.\1.linear1.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.linear1\.bias$": (
             r"memory_attention.layers.\1.linear1.bias",
@@ -148,7 +152,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_attention\.layers\.([0-3])\.linear2\.weight$": (
             r"memory_attention.layers.\1.linear2.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.linear2\.bias$": (
             r"memory_attention.layers.\1.linear2.bias",
@@ -157,7 +161,7 @@ def _get_key_and_transform_mapping():
         # === Self Attention ===
         r"^memory_attention\.layers\.([0-3])\.self_attn\.q_proj\.weight$": (
             r"memory_attention.layers.\1.self_attn.q_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.self_attn\.q_proj\.bias$": (
             r"memory_attention.layers.\1.self_attn.q_proj.bias",
@@ -165,7 +169,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_attention\.layers\.([0-3])\.self_attn\.k_proj\.weight$": (
             r"memory_attention.layers.\1.self_attn.k_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.self_attn\.k_proj\.bias$": (
             r"memory_attention.layers.\1.self_attn.k_proj.bias",
@@ -173,7 +177,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_attention\.layers\.([0-3])\.self_attn\.v_proj\.weight$": (
             r"memory_attention.layers.\1.self_attn.v_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.self_attn\.v_proj\.bias$": (
             r"memory_attention.layers.\1.self_attn.v_proj.bias",
@@ -181,7 +185,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_attention\.layers\.([0-3])\.self_attn\.out_proj\.weight$": (
             r"memory_attention.layers.\1.self_attn.out_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.self_attn\.out_proj\.bias$": (
             r"memory_attention.layers.\1.self_attn.out_proj.bias",
@@ -190,7 +194,7 @@ def _get_key_and_transform_mapping():
         # === Cross Attention ===
         r"^memory_attention\.layers\.([0-3])\.cross_attn_image\.q_proj\.weight$": (
             r"memory_attention.layers.\1.cross_attn_image.q_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.cross_attn_image\.q_proj\.bias$": (
             r"memory_attention.layers.\1.cross_attn_image.q_proj.bias",
@@ -198,7 +202,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_attention\.layers\.([0-3])\.cross_attn_image\.k_proj\.weight$": (
             r"memory_attention.layers.\1.cross_attn_image.k_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.cross_attn_image\.k_proj\.bias$": (
             r"memory_attention.layers.\1.cross_attn_image.k_proj.bias",
@@ -206,7 +210,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_attention\.layers\.([0-3])\.cross_attn_image\.v_proj\.weight$": (
             r"memory_attention.layers.\1.cross_attn_image.v_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.cross_attn_image\.v_proj\.bias$": (
             r"memory_attention.layers.\1.cross_attn_image.v_proj.bias",
@@ -214,7 +218,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_attention\.layers\.([0-3])\.cross_attn_image\.out_proj\.weight$": (
             r"memory_attention.layers.\1.cross_attn_image.out_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_attention\.layers\.([0-3])\.cross_attn_image\.out_proj\.bias$": (
             r"memory_attention.layers.\1.cross_attn_image.out_proj.bias",
@@ -230,7 +234,7 @@ def _get_key_and_transform_mapping():
         # === Conv2d layers (even indices: 0, 3, 6, 9, 12) ===
         r"^memory_encoder\.mask_downsampler\.encoder\.(0|3|6|9|12)\.weight$": (
             r"memory_encoder.mask_downsampler.encoder.layers.\1.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^memory_encoder\.mask_downsampler\.encoder\.(0|3|6|9|12)\.bias$": (
             r"memory_encoder.mask_downsampler.encoder.layers.\1.bias",
@@ -248,7 +252,7 @@ def _get_key_and_transform_mapping():
         # === Pixel Feature Projection ===
         r"^memory_encoder\.pix_feat_proj\.weight$": (
             "memory_encoder.pix_feat_proj.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^memory_encoder\.pix_feat_proj\.bias$": (
             "memory_encoder.pix_feat_proj.bias",
@@ -259,9 +263,13 @@ def _get_key_and_transform_mapping():
             r"memory_encoder.fuser.layers.\1.gamma",
             None,
         ),
+        r"^memory_encoder\.fuser\.layers\.([0-1])\.weight$": (
+            r"memory_encoder.fuser.layers.\1.gamma",
+            None,
+        ),
         r"^memory_encoder\.fuser\.layers\.([0-1])\.dwconv\.weight$": (
             r"memory_encoder.fuser.layers.\1.dwconv.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^memory_encoder\.fuser\.layers\.([0-1])\.dwconv\.bias$": (
             r"memory_encoder.fuser.layers.\1.dwconv.bias",
@@ -277,7 +285,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_encoder\.fuser\.layers\.([0-1])\.pwconv1\.weight$": (
             r"memory_encoder.fuser.layers.\1.pwconv1.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_encoder\.fuser\.layers\.([0-1])\.pwconv1\.bias$": (
             r"memory_encoder.fuser.layers.\1.pwconv1.bias",
@@ -285,7 +293,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^memory_encoder\.fuser\.layers\.([0-1])\.pwconv2\.weight$": (
             r"memory_encoder.fuser.layers.\1.pwconv2.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^memory_encoder\.fuser\.layers\.([0-1])\.pwconv2\.bias$": (
             r"memory_encoder.fuser.layers.\1.pwconv2.bias",
@@ -294,7 +302,7 @@ def _get_key_and_transform_mapping():
         # === Final Output Projection ===
         r"^memory_encoder\.out_proj\.weight$": (
             "memory_encoder.out_proj.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^memory_encoder\.out_proj\.bias$": ("memory_encoder.out_proj.bias", None),
     }
@@ -302,7 +310,7 @@ def _get_key_and_transform_mapping():
         # Self-attention
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.self_attn\.q_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.self_attn.q_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.self_attn\.q_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.self_attn.q_proj.bias",
@@ -310,7 +318,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.self_attn\.k_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.self_attn.k_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.self_attn\.k_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.self_attn.k_proj.bias",
@@ -318,7 +326,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.self_attn\.v_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.self_attn.v_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.self_attn\.v_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.self_attn.v_proj.bias",
@@ -326,7 +334,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.self_attn\.out_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.self_attn.out_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.self_attn\.out_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.self_attn.out_proj.bias",
@@ -344,7 +352,7 @@ def _get_key_and_transform_mapping():
         # MLP
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.mlp\.layers\.([01])\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.mlp.layers.\2.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.mlp\.layers\.([01])\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.mlp.layers.\2.bias",
@@ -353,7 +361,7 @@ def _get_key_and_transform_mapping():
         # Cross-attn: token → image
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_token_to_image\.q_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_token_to_image.q_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_token_to_image\.q_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_token_to_image.q_proj.bias",
@@ -361,7 +369,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_token_to_image\.k_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_token_to_image.k_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_token_to_image\.k_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_token_to_image.k_proj.bias",
@@ -369,7 +377,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_token_to_image\.v_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_token_to_image.v_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_token_to_image\.v_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_token_to_image.v_proj.bias",
@@ -377,7 +385,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_token_to_image\.out_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_token_to_image.out_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_token_to_image\.out_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_token_to_image.out_proj.bias",
@@ -386,7 +394,7 @@ def _get_key_and_transform_mapping():
         # Cross-attn: image → token
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_image_to_token\.q_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_image_to_token.q_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_image_to_token\.q_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_image_to_token.q_proj.bias",
@@ -394,7 +402,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_image_to_token\.k_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_image_to_token.k_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_image_to_token\.k_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_image_to_token.k_proj.bias",
@@ -402,7 +410,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_image_to_token\.v_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_image_to_token.v_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_image_to_token\.v_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_image_to_token.v_proj.bias",
@@ -410,7 +418,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_image_to_token\.out_proj\.weight$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_image_to_token.out_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.layers\.([0-9]+)\.cross_attn_image_to_token\.out_proj\.bias$": (
             r"sam_mask_decoder.transformer.blocks.\1.cross_attn_image_to_token.out_proj.bias",
@@ -419,7 +427,7 @@ def _get_key_and_transform_mapping():
         # Final cross-attn
         r"^sam_mask_decoder\.transformer\.final_attn_token_to_image\.q_proj\.weight$": (
             "sam_mask_decoder.transformer.final_attn_token_to_image.q_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.final_attn_token_to_image\.q_proj\.bias$": (
             "sam_mask_decoder.transformer.final_attn_token_to_image.q_proj.bias",
@@ -427,7 +435,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.final_attn_token_to_image\.k_proj\.weight$": (
             "sam_mask_decoder.transformer.final_attn_token_to_image.k_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.final_attn_token_to_image\.k_proj\.bias$": (
             "sam_mask_decoder.transformer.final_attn_token_to_image.k_proj.bias",
@@ -435,7 +443,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.final_attn_token_to_image\.v_proj\.weight$": (
             "sam_mask_decoder.transformer.final_attn_token_to_image.v_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.final_attn_token_to_image\.v_proj\.bias$": (
             "sam_mask_decoder.transformer.final_attn_token_to_image.v_proj.bias",
@@ -443,7 +451,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.transformer\.final_attn_token_to_image\.out_proj\.weight$": (
             "sam_mask_decoder.transformer.final_attn_token_to_image.out_proj.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.transformer\.final_attn_token_to_image\.out_proj\.bias$": (
             "sam_mask_decoder.transformer.final_attn_token_to_image.out_proj.bias",
@@ -474,7 +482,7 @@ def _get_key_and_transform_mapping():
         # Upscaling layers
         r"^sam_mask_decoder\.output_upscaling\.0\.weight$": (
             "sam_mask_decoder.output_upscaling.layers.0.kernel",
-            ((2, 3, 0, 1), None),
+            (PYTORCH_TO_JAX_CONV_2D_TRANSPOSE_KERNEL, None),
         ),
         r"^sam_mask_decoder\.output_upscaling\.0\.bias$": (
             "sam_mask_decoder.output_upscaling.layers.0.bias",
@@ -490,7 +498,7 @@ def _get_key_and_transform_mapping():
         ),
         r"^sam_mask_decoder\.output_upscaling\.3\.weight$": (
             "sam_mask_decoder.output_upscaling.layers.3.kernel",
-            ((2, 3, 0, 1), None),
+            (PYTORCH_TO_JAX_CONV_2D_TRANSPOSE_KERNEL, None),
         ),
         r"^sam_mask_decoder\.output_upscaling\.3\.bias$": (
             "sam_mask_decoder.output_upscaling.layers.3.bias",
@@ -499,18 +507,18 @@ def _get_key_and_transform_mapping():
         # Convs
         r"^sam_mask_decoder\.conv_s0\.weight$": (
             "sam_mask_decoder.conv_s0.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^sam_mask_decoder\.conv_s0\.bias$": ("sam_mask_decoder.conv_s0.bias", None),
         r"^sam_mask_decoder\.conv_s1\.weight$": (
             "sam_mask_decoder.conv_s1.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^sam_mask_decoder\.conv_s1\.bias$": ("sam_mask_decoder.conv_s1.bias", None),
         # Output Hypernetwork MLPs
         r"^sam_mask_decoder\.output_hypernetworks_mlps\.([0-3])\.layers\.([0-2])\.weight$": (
             r"sam_mask_decoder.output_hypernetworks_mlps.\1.layers.\2.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.output_hypernetworks_mlps\.([0-3])\.layers\.([0-2])\.bias$": (
             r"sam_mask_decoder.output_hypernetworks_mlps.\1.layers.\2.bias",
@@ -519,7 +527,7 @@ def _get_key_and_transform_mapping():
         # IoU prediction head
         r"^sam_mask_decoder\.iou_prediction_head\.layers\.([0-2])\.weight$": (
             r"sam_mask_decoder.iou_prediction_head.layers.\1.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.iou_prediction_head\.layers\.([0-2])\.bias$": (
             r"sam_mask_decoder.iou_prediction_head.layers.\1.bias",
@@ -528,7 +536,7 @@ def _get_key_and_transform_mapping():
         # Predicted object score head
         r"^sam_mask_decoder\.pred_obj_score_head\.layers\.([0-2])\.weight$": (
             r"sam_mask_decoder.pred_obj_score_head.layers.\1.kernel",
-            ((1, 0), None),
+            (PYTORCH_TO_JAX_LINEAR, None),
         ),
         r"^sam_mask_decoder\.pred_obj_score_head\.layers\.([0-2])\.bias$": (
             r"sam_mask_decoder.pred_obj_score_head.layers.\1.bias",
@@ -559,7 +567,7 @@ def _get_key_and_transform_mapping():
         # Mask Downscaling
         r"^sam_prompt_encoder\.mask_downscaling\.([0|3|6])\.weight$": (
             r"sam_prompt_encoder.mask_downscaling.layers.\1.kernel",
-            ((2, 3, 1, 0), None),
+            (PYTORCH_TO_JAX_CONV_2D_KERNEL, None),
         ),
         r"^sam_prompt_encoder\.mask_downscaling\.([0|3|6])\.bias$": (
             r"sam_prompt_encoder.mask_downscaling.layers.\1.bias",
@@ -581,17 +589,17 @@ def _get_key_and_transform_mapping():
         r"^no_mem_pos_enc$": ("no_mem_pos_enc", None),
         r"^no_obj_ptr$": ("no_obj_ptr", None),
         # Mask Downsample
-        r"^mask_downsample\.weight$": ("mask_downsample.kernel", ((2, 3, 1, 0), None)),
+        r"^mask_downsample\.weight$": ("mask_downsample.kernel", (PYTORCH_TO_JAX_CONV_2D_KERNEL, None)),
         r"^mask_downsample\.bias$": ("mask_downsample.bias", None),
         # Object Pointer Projection MLP
-        r"^obj_ptr_proj\.layers\.0\.weight$": ("obj_ptr_proj.layers.0.kernel", None),
+        r"^obj_ptr_proj\.layers\.0\.weight$": ("obj_ptr_proj.layers.0.kernel", (PYTORCH_TO_JAX_LINEAR, None)),
         r"^obj_ptr_proj\.layers\.0\.bias$": ("obj_ptr_proj.layers.0.bias", None),
-        r"^obj_ptr_proj\.layers\.1\.weight$": ("obj_ptr_proj.layers.1.kernel", None),
+        r"^obj_ptr_proj\.layers\.1\.weight$": ("obj_ptr_proj.layers.1.kernel", (PYTORCH_TO_JAX_LINEAR, None)),
         r"^obj_ptr_proj\.layers\.1\.bias$": ("obj_ptr_proj.layers.1.bias", None),
-        r"^obj_ptr_proj\.layers\.2\.weight$": ("obj_ptr_proj.layers.2.kernel", None),
+        r"^obj_ptr_proj\.layers\.2\.weight$": ("obj_ptr_proj.layers.2.kernel", (PYTORCH_TO_JAX_LINEAR, None)),
         r"^obj_ptr_proj\.layers\.2\.bias$": ("obj_ptr_proj.layers.2.bias", None),
         # Object TPos Encoding
-        r"^obj_ptr_tpos_proj\.weight$": ("obj_ptr_tpos_proj.kernel", None),
+        r"^obj_ptr_tpos_proj\.weight$": ("obj_ptr_tpos_proj.kernel", (PYTORCH_TO_JAX_LINEAR, None)),
         r"^obj_ptr_tpos_proj\.bias$": ("obj_ptr_tpos_proj.bias", None),
     }
     return (
