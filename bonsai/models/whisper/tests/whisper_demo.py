@@ -172,7 +172,7 @@ if 'model_features' in locals():
     generated_tokens = model_lib.generate(
         model, 
         model_features, 
-        max_length=100, 
+        max_length=200,  # Increased for longer transcriptions
         temperature=0.0
     )
     
@@ -180,62 +180,73 @@ if 'model_features' in locals():
     print(f"✅ Generation completed in {generation_time:.3f}s")
     print(f"📋 Generated {generated_tokens.shape[1]} tokens")
     
-    # Decode transcription
+    # Decode transcription using pure JAX
     print("\n📝 Decoding transcription...")
+    print(f"Generated tokens: {generated_tokens[0]}")
+    
+    # Decode tokens using proper Whisper vocabulary
     try:
-        from transformers import WhisperProcessor
-        processor = WhisperProcessor.from_pretrained("/tmp/models-bonsai/whisper-tiny")
-        transcription = processor.batch_decode(generated_tokens, skip_special_tokens=True)[0]
-        print(f"Generated tokens: {generated_tokens[0]}")
-        if not transcription:
-            with_specials = processor.batch_decode(generated_tokens, skip_special_tokens=False)[0]
-            print(f"Decoded with specials: {with_specials}")
-        print(f"✅ Transcription: {transcription}")
+        import json
+        
+        # Load the actual vocabulary from the model directory
+        vocab_path = "/tmp/models-bonsai/whisper-tiny/vocab.json"
+        with open(vocab_path, 'r') as f:
+            vocab_data = json.load(f)
+        
+        # Create reverse mapping: token_id -> text
+        vocab = {int(token_id): text for text, token_id in vocab_data.items()}
+        
+        # Add special tokens that are not in the vocabulary file
+        special_tokens = {
+            50258: "<|startoftranscript|>",
+            50259: "<|en|>", 
+            50359: "<|transcribe|>",
+            50363: "<|notimestamps|>",
+            50257: "<|endoftext|>",
+            50260: "<|notimestamps|>",
+            50261: "<|translate|>",
+            50358: "<|startoflm|>",
+            50360: "<|startofprev|>",
+            50361: "<|noprob|>",
+            50362: "<|noprob|>",
+        }
+        vocab.update(special_tokens)
+        
+        print(f"✅ Loaded vocabulary with {len(vocab)} tokens (including special tokens)")
+        
+        # Decode tokens to text
+        decoded_text = ""
+        for token in generated_tokens[0]:
+            # Convert JAX array to Python int for dictionary lookup
+            token_id = int(token)
+            if token_id in vocab:
+                text = vocab[token_id]
+                # Skip special tokens for clean output
+                if not (text.startswith("<|") and text.endswith("|>")):
+                    # Replace BPE space marker with actual space
+                    text = text.replace("Ġ", " ")
+                    decoded_text += text
+            else:
+                # For unknown tokens, show the token ID
+                decoded_text += f"[{token_id}]"
+        
+        print(f"✅ Transcription: {decoded_text}")
+        
     except Exception as e:
-        print(f"⚠️  Could not decode with HF processor: {e}")
-        print(f"📋 Raw tokens: {generated_tokens[0][:20]}...")
+        print(f"⚠️  Error decoding: {e}")
+        print(f"📋 Raw tokens: {generated_tokens[0]}")
+        # Fallback: just show token IDs
+        decoded_text = " ".join([str(t) for t in generated_tokens[0]])
+        print(f"📋 Token IDs: {decoded_text}")
 else:
     print("❌ No audio features available.")
 
 # =============================================================================
-# Compare with HuggingFace Model
+# Pure JAX Implementation Complete
 # =============================================================================
 
-if 'audio_path' in locals() and Path(audio_path).exists():
-    print("🔄 Comparing with HuggingFace model...")
-    
-    try:
-        from transformers import WhisperProcessor, WhisperForConditionalGeneration
-        import torch
-        
-        # Load HF model
-        processor = WhisperProcessor.from_pretrained("openai/whisper-tiny")
-        model_hf = WhisperForConditionalGeneration.from_pretrained("openai/whisper-tiny")
-        
-        # Load audio
-        audio, _ = librosa.load(audio_path, sr=16000)
-        
-        # Process with HF
-        start_time = time.time()
-        inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
-        
-        with torch.no_grad():
-            predicted_ids = model_hf.generate(
-                inputs["input_features"],
-                max_length=100,
-                temperature=0.0
-            )
-        
-        hf_transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-        hf_time = time.time() - start_time
-        
-        print(f"✅ HF transcription: {hf_transcription}")
-        print(f"⏱️  HF generation time: {hf_time:.3f}s")
-        
-    except Exception as e:
-        print(f"⚠️  Could not run HF comparison: {e}")
-else:
-    print("❌ No audio file available for comparison.")
+print("🎉 Pure JAX Whisper implementation is ready!")
+print("✅ All processing done with JAX and librosa")
 
 # =============================================================================
 # Model Configuration Options

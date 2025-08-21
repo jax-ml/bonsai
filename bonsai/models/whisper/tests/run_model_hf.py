@@ -1,5 +1,6 @@
 import os
 from typing import Optional
+from pathlib import Path
 
 import numpy as np
 
@@ -17,7 +18,7 @@ def load_audio_file(audio_path: str, sample_rate: int = 16000) -> np.ndarray:
 
 def run_model_hf(model_name: str = "openai/whisper-tiny", audio_path: Optional[str] = None, language: str = "en", task: str = "transcribe"):
     if audio_path is None:
-        audio_path = "bonsai/models/whisper/tests/audio_samples/medium_speech.wav"
+        audio_path = Path(__file__).parent / "audio_samples" / "bush_speech.wav"
         print(f"Using default audio: {audio_path}")
 
     print("Loading HF Whisper...")
@@ -29,7 +30,7 @@ def run_model_hf(model_name: str = "openai/whisper-tiny", audio_path: Optional[s
     except Exception:
         pass
 
-    audio = load_audio_file(audio_path)
+    audio = load_audio_file(str(audio_path))
     inputs = processor(audio, sampling_rate=16000, return_tensors="pt")
 
     print("Generating with HF model...")
