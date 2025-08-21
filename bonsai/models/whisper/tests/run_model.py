@@ -20,8 +20,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from flax import nnx
+from pathlib import Path
 from huggingface_hub import snapshot_download
-from transformers import WhisperProcessor
 
 from bonsai.models.whisper import modeling, params
 
@@ -38,26 +38,40 @@ def load_audio_file(audio_path: str, sample_rate: int = 16000) -> np.ndarray:
         return np.random.randn(sample_rate * 3)  # 3 seconds of random audio
 
 
-def extract_mel_features(audio: np.ndarray, sample_rate: int = 16000, n_mels: int = 80) -> np.ndarray:
-    """Extract mel spectrogram features from audio."""
+def extract_mel_features_whisper(audio: np.ndarray, sample_rate: int = 16000) -> np.ndarray:
+    """Extract mel spectrogram features from audio using Whisper's exact preprocessing."""
     try:
         import librosa
+        
+        # Whisper's exact mel spectrogram parameters
         mel_spec = librosa.feature.melspectrogram(
-            y=audio, 
-            sr=sample_rate, 
-            n_mels=n_mels,
+            y=audio,
+            sr=sample_rate,
+            n_mels=80,
             hop_length=160,
             win_length=400,
-            window='hann'
+            window='hann',
+            fmin=0,
+            fmax=8000,
+            power=2.0
         )
-        # Convert to log scale
-        mel_spec = librosa.power_to_db(mel_spec, ref=np.max)
-        return mel_spec.T  # Transpose to (time, n_mels)
+        
+        # Convert to log10 scale (Whisper's approach)
+        log_spec = np.log10(mel_spec + 1e-10)
+        
+        # Clip values (Whisper's approach)
+        log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
+        
+        # Normalize (Whisper's approach)
+        log_spec = (log_spec + 4.0) / 4.0
+        
+        return log_spec.T  # Transpose to (time, n_mels)
+        
     except ImportError:
         print("librosa not available, using dummy mel features")
         # Generate dummy mel features for testing
         time_steps = len(audio) // 160  # Approximate time steps
-        return np.random.randn(time_steps, n_mels)
+        return np.random.randn(time_steps, 80)
 
 
 def run_model(MODEL_CP_PATH: Optional[str] = None, audio_path: Optional[str] = None):
@@ -71,27 +85,24 @@ def run_model(MODEL_CP_PATH: Optional[str] = None, audio_path: Optional[str] = N
         print(f"Downloading {model_name} to {MODEL_CP_PATH}...")
         snapshot_download(model_name, local_dir=MODEL_CP_PATH)
 
-    # Load processor for tokenization
-    processor = WhisperProcessor.from_pretrained(MODEL_CP_PATH)
-    
     # Load audio
     if audio_path is None:
         print("No audio file provided, using test speech sample")
-        # Use one of our generated speech samples
-        audio_path = "bonsai/models/whisper/tests/audio_samples/medium_speech.wav"
+        # Use the Bush speech sample
+        audio_path = Path(__file__).parent / "audio_samples" / "bush_speech.wav"
         print(f"Using default audio: {audio_path}")
     
     print(f"Loading audio from {audio_path}")
-    audio = load_audio_file(audio_path)
+    audio = load_audio_file(str(audio_path))
     
-    # Extract mel features (librosa expects numpy array)
-    mel_features = extract_mel_features(audio)
+    # Extract mel features using Whisper's exact preprocessing
+    mel_features = extract_mel_features_whisper(audio)
     # Convert to JAX array after mel extraction
     mel_features = jnp.array(mel_features)
     print(f"Mel features shape: {mel_features.shape}")
     
-    # Pad or truncate to expected length
-    max_time_steps = 1500  # Whisper's default audio context length
+    # Pad or truncate to expected length (Whisper uses 3000 for full context)
+    max_time_steps = 3000  # Whisper's full audio context length
     if mel_features.shape[0] > max_time_steps:
         mel_features = mel_features[:max_time_steps]
     else:
@@ -136,10 +147,49 @@ def run_model(MODEL_CP_PATH: Optional[str] = None, audio_path: Optional[str] = N
     end_time = time.perf_counter()
     print(f"Generation completed in {end_time - start_time:.4f} seconds")
     
-    # Decode tokens
+    # Simple token-to-text decoding (using Whisper vocabulary)
+    print("Decoding transcription...")
     try:
-        decoded_text = processor.batch_decode(generated_tokens, skip_special_tokens=True)
-        print(f"Generated text: {decoded_text[0]}")
+        # Load vocabulary from the model files
+        import json
+        vocab_path = os.path.join(MODEL_CP_PATH, "vocab.json")
+        if os.path.exists(vocab_path):
+            with open(vocab_path, 'r') as f:
+                vocab_data = json.load(f)
+            
+            # Create reverse mapping: token_id -> text
+            vocab = {int(token_id): text for text, token_id in vocab_data.items()}
+            
+            # Add special tokens
+            special_tokens = {
+                50258: "<|startoftranscript|>",
+                50259: "<|en|>", 
+                50359: "<|transcribe|>",
+                50363: "<|notimestamps|>",
+                50257: "<|endoftext|>",
+            }
+            vocab.update(special_tokens)
+            
+            # Decode tokens to text
+            decoded_text = ""
+            for token in generated_tokens[0]:
+                token_id = int(token)
+                if token_id in vocab:
+                    text = vocab[token_id]
+                    # Skip special tokens for clean output
+                    if not (text.startswith("<|") and text.endswith("|>")):
+                        # Replace BPE space marker with actual space
+                        text = text.replace("Ġ", " ")
+                        decoded_text += text
+                else:
+                    # For unknown tokens, show the token ID
+                    decoded_text += f"[{token_id}]"
+            
+            print(f"Transcription: {decoded_text.strip()}")
+        else:
+            print("Vocabulary file not found, showing raw tokens:")
+            print(f"Generated tokens: {generated_tokens[0]}")
+            
     except Exception as e:
         print(f"Could not decode tokens: {e}")
         print(f"Generated tokens: {generated_tokens[0]}")

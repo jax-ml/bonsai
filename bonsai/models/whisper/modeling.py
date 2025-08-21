@@ -394,7 +394,13 @@ def generate(model: WhisperModel, mel_features: Array, max_length: int = 448, te
     # Encode audio once
     xa = model.encoder(mel_features)
     
-    for _ in range(max_length - len(prompt_tokens[0])):
+    # Track if any sequence has finished
+    finished = jnp.zeros(batch_size, dtype=bool)
+    
+    # Track recent tokens for repetition detection
+    repetition_window = 10
+    
+    for step in range(max_length - len(prompt_tokens[0])):
         # Create causal mask
         seq_len = tokens.shape[1]
         mask = create_causal_mask(seq_len)
@@ -406,11 +412,45 @@ def generate(model: WhisperModel, mel_features: Array, max_length: int = 448, te
         next_logits = logits[:, -1, :]
         next_token = jnp.argmax(next_logits, axis=-1, keepdims=True)
         
+        # Check for EOS tokens and natural stopping points
+        eos_mask = (next_token == 50257).flatten()  # <|endoftext|>
+        
+        # Also consider other natural stopping tokens
+        natural_stops = jnp.array([
+            50257,  # <|endoftext|>
+            50258,  # <|startoftranscript|> (shouldn't appear in middle)
+            13,     # period token (if followed by silence/pause tokens)
+            11,     # space + pause combination
+        ])
+        
+        # Check if current token is a natural stopping point
+        is_natural_stop = jnp.any(next_token.flatten() == natural_stops[0])  # EOS
+        
+        # Additional heuristic: if we see multiple periods/pauses in a row
+        if tokens.shape[1] >= 3:
+            last_3_tokens = tokens[0, -3:]
+            # Stop if we see period followed by spaces (end of sentence pattern)
+            if (last_3_tokens[-1] == 13 and  # period
+                jnp.any(last_3_tokens[:-1] == 11)):  # space before
+                is_natural_stop = True
+        
+        finished = finished | eos_mask | is_natural_stop
+        
         # Append to sequence
         tokens = jnp.concatenate([tokens, next_token], axis=1)
         
-        # Stop if EOS token
-        if jnp.any(next_token == 50257):  # EOS token
+        # Simple repetition detection
+        if tokens.shape[1] > 10:
+            recent_tokens = tokens[0, -6:]  # Look at last 6 tokens
+            if len(recent_tokens) >= 6:
+                last_3 = recent_tokens[-3:]
+                prev_3 = recent_tokens[-6:-3]
+                if jnp.array_equal(last_3, prev_3):
+                    print("🛑 Detected repetition, stopping generation")
+                    break
+        
+        # Stop if all sequences are finished or if we've generated enough tokens
+        if jnp.all(finished) or step > 50:  # Stop early to prevent long repetition
             break
     
     return tokens
