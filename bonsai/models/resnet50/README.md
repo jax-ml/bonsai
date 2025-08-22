@@ -12,9 +12,20 @@ This directory contains a pure JAX implementation of the [ResNet-50](https://hug
 
 Run ResNet model inference in action:
 
-```python
-python bonsai/models/resnet50/tests/run_model.py
+```sh
+python3 -m bonsai.models.resnet50.tests.run_model
 ```
+
+### Validation with Real Images
+
+For comprehensive validation of the ResNet-50 model on actual images, see the [ImageNet validation colab](tests/ResNet50_ImageNet_validation_example.ipynb). This notebook demonstrates:
+
+- ImageNet classification on real downloaded images
+- Proper image preprocessing and normalization
+- Top-k predictions with confidence scores
+- Batch processing for efficiency
+- Performance benchmarking across batch sizes
+
 
 
 ## How to contribute to this model
