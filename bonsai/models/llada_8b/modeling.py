@@ -16,11 +16,12 @@ import math
 from dataclasses import dataclass
 from enum import Enum, auto
 from functools import partial
-from typing import Callable, NamedTuple, TypeAlias
+from typing import Callable, NamedTuple
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
+from jax import lax
 
 
 class ActivationType(Enum):
@@ -98,8 +99,9 @@ def get_layer_norm(cfg, dim: int | None = None, *, rngs: nnx.Rngs):
     eps = getattr(cfg, "rms_norm_eps", 1e-6)
 
     ln_type = cfg.layer_norm_type
+    use_bias = getattr(cfg, "bias_for_layer_norm", False)
     if ln_type == LayerNormType.DEFAULT:
-        return nnx.LayerNorm(dim, epsilon=eps, rngs=rngs)
+        return nnx.LayerNorm(dim, epsilon=eps, use_bias=use_bias, rngs=rngs)
 
     if ln_type == LayerNormType.RMS:
         return nnx.RMSNorm(dim, epsilon=eps, rngs=rngs)
@@ -108,7 +110,7 @@ def get_layer_norm(cfg, dim: int | None = None, *, rngs: nnx.Rngs):
         return GemmaRMSNorm(
             dim,
             epsilon=eps,
-            use_bias=getattr(cfg, "bias_for_layer_norm", False),
+            use_bias=use_bias,
             rngs=rngs,
         )
 
@@ -238,7 +240,6 @@ class RotaryEmbedding(nnx.Module):
         self.cfg = cfg
         dim = cfg.d_model // cfg.n_heads
         sin, cos = self._make_table(cfg.max_sequence_length, dim, cfg.rope_theta)
-        # store as non-trainable cache
         self.pos_sin = nnx.Cache(sin)  # (1,L,1,dim)
         self.pos_cos = nnx.Cache(cos)
 
@@ -253,24 +254,17 @@ class RotaryEmbedding(nnx.Module):
 
         qf, kf = q, k
 
-        # ensure cache large enough
-        sin, cos = self._get_tables(T_k, qf.dtype)
-        # slice to match lengths
+        # Slice from full tables
+        sin, cos = self.pos_sin.value, self.pos_cos.value
+        sin = sin[:, :T_k, :, :]
+        cos = cos[:, :T_k, :, :]
+
         sin_q, cos_q = sin[:, T_k - T_q : T_k, :, :], cos[:, T_k - T_q : T_k, :, :]
 
         q_out = self._apply_rotary(qf, sin_q, cos_q)
         k_out = self._apply_rotary(kf, sin, cos)
 
         return q_out.astype(q.dtype), k_out.astype(k.dtype)
-
-    def _get_tables(self, seq_len: int, dtype) -> tuple[jax.Array, jax.Array]:
-        sin, cos = self.pos_sin.value, self.pos_cos.value
-        if sin.shape[-2] < seq_len:
-            # grow cache
-            dim = sin.shape[-1]
-            sin, cos = self._make_table(seq_len, dim, self.cfg.rope_theta, dtype=dtype)
-            self.pos_sin.value, self.pos_cos.value = sin, cos
-        return sin[..., :seq_len, :], cos[..., :seq_len, :]
 
     @staticmethod
     def _make_table(L: int, dim: int, theta: float, dtype=jnp.float32):
@@ -291,7 +285,66 @@ class RotaryEmbedding(nnx.Module):
         return (t * cos) + (self._rotate_half(t) * sin)
 
 
-KVCache: TypeAlias = tuple[jax.Array, ...]
+@dataclass
+class KVCache(nnx.Module):
+    def __init__(self, batch_size, num_layers, kv_len, num_kv_heads, head_dim, dtype):
+        self.buf = nnx.Variable(jnp.zeros((batch_size, num_layers, kv_len, 2, num_kv_heads, head_dim), dtype=dtype))
+        self.idx = nnx.Variable(jnp.array(0, dtype=jnp.int32))
+        self.kv_len = kv_len
+
+    def view(self, layer: int):
+        """Past KV up to the current index for this layer."""
+        t = self.idx.value
+        k = self.buf.value[:, layer, :t, 0, :, :]  # (B, t, Kh, Dh)
+        v = self.buf.value[:, layer, :t, 1, :, :]
+        return k, v
+
+    def latest(self, layer: int):
+        """Most recent single step (or zeros if none)."""
+        t = self.idx.value
+        B, _, _, _, Kh, Dh = self.buf.value.shape
+
+        def _zero():
+            z = jnp.zeros((B, 1, Kh, Dh), self.buf.value.dtype)
+            return z, z
+
+        def _last():
+            k = self.buf.value[:, layer, t - 1 : t, 0, :, :]
+            v = self.buf.value[:, layer, t - 1 : t, 1, :, :]
+            return k, v
+
+        return lax.cond(t > 0, lambda _: _last(), lambda _: _zero(), operand=None)
+
+    # Enable tuple-style access: cache[layer] -> (k_past, v_past)
+    def __getitem__(self, layer: int):
+        return self.view(layer)
+
+    def append(self, layer: int, k_step, v_step):
+        """
+        Append new steps for a layer.
+        k_step, v_step: (B, T_step, Kh, Dh)
+        """
+        t = self.idx.value
+        B, T_step, Kh, Dh = k_step.shape
+
+        assert_msg = "KV cache capacity exceeded; increase kv_len."
+        assert (t + T_step) <= self.kv_len, assert_msg
+
+        # updates
+        self.buf.value = self.buf.value.at[:, layer, t, 0, :, :].set(k_step[:, t, :, :])
+        self.buf.value = self.buf.value.at[:, layer, t, 1, :, :].set(v_step[:, t, :, :])
+
+
+def init_cache(cfg, batch_size: int, kv_len: int | None = None, dtype=jnp.float16) -> KVCache:
+    """
+    Create a per-layer KV cache:
+      cache[layer] -> (k_past, v_past) with shapes (B, t, Kh, Dh).
+    """
+    L = cfg.n_layers
+    Kh = cfg.effective_n_kv_heads
+    Dh = cfg.d_model // cfg.n_heads
+    T = kv_len if kv_len is not None else cfg.max_sequence_length
+    return KVCache(batch_size, L, T, Kh, Dh, dtype)
 
 
 class LLaDABlock(nnx.Module):
@@ -336,7 +389,9 @@ class LLaDABlock(nnx.Module):
         self.ff_proj = nnx.Linear(cfg.d_model, self.hidden_size, use_bias=cfg.include_bias, rngs=rngs)
 
         # Feed-forward output projection
-        self.ff_out = nnx.Linear(int(self.act_output_mult * self.hidden_size), cfg.d_model, rngs=rngs)
+        self.ff_out = nnx.Linear(
+            int(self.act_output_mult * self.hidden_size), cfg.d_model, use_bias=cfg.include_bias, rngs=rngs
+        )
 
         # Block specifics
         if cfg.block_type == BlockType.SEQUENTIAL:
@@ -382,7 +437,7 @@ class LLaDABlock(nnx.Module):
         k: jax.Array,  # (B,T,Dk)
         v: jax.Array,  # (B,T,Dk)
         attention_bias: jax.Array | None = None,
-        layer_past: KVCache | None = None,
+        layer_past: tuple[jax.Array, jax.Array] | None = None,
         use_cache: bool = False,
     ) -> tuple[jax.Array, tuple[jax.Array, jax.Array] | None]:
         B, T, C = q.shape
@@ -428,7 +483,7 @@ class LLaDABlock(nnx.Module):
             k,
             v,
             mask=None,
-            bias=attention_bias,
+            bias=None,
             dropout_rate=self.cfg.attention_dropout,
         )  # (B,T,H,Dh)
 
@@ -607,11 +662,16 @@ class LLaDAModel(nnx.Module):
         self.blocks = [LLaDABlock(i, self.cfg, rngs=rngs) for i in range(self.cfg.n_layers)]
 
         # Final layer norm
-        self.ln_f = nnx.LayerNorm(self.cfg.d_model, epsilon=1e-5, rngs=rngs)
+        self.ln_f = get_layer_norm(self.cfg, dim=self.cfg.d_model, rngs=rngs)
 
         # Output projection
         if not self.cfg.weight_tying:
-            self.ff_out = nnx.Linear(self.cfg.d_model, self.cfg.vocab_size, rngs=rngs)
+            self.ff_out = nnx.Linear(
+                self.cfg.d_model,
+                self.cfg.embedding_size or self.cfg.vocab_size,
+                use_bias=self.cfg.include_bias,
+                rngs=rngs,
+            )
 
         self.__cache = {}
 
@@ -621,8 +681,8 @@ class LLaDAModel(nnx.Module):
         input_embeddings: jax.Array | None = None,
         attention_mask: jax.Array | None = None,
         attention_bias: jax.Array | None = None,
-        past_key_values: list[KVCache] | None = None,
-        use_cache: bool = True,
+        past_key_values: KVCache | None = None,
+        use_cache: bool = False,
         output_hidden_states: bool | None = None,
         last_logits_only: bool = False,
     ) -> LLaDAOutput:  # returns logits  (B, T or 1, V)
@@ -630,8 +690,7 @@ class LLaDAModel(nnx.Module):
         if past_key_values is None:
             past_length = 0
         else:
-            past_length = past_key_values[0][0].shape[-2]
-
+            past_length = past_key_values.idx
         # (B, T, D)
         x = self.wte(input_ids) if input_embeddings is None else input_embeddings
 
@@ -677,7 +736,7 @@ class LLaDAModel(nnx.Module):
                 # Might get -infs after adding attention mask, since dtype.min + dtype.min = -inf.
                 ensure_finite(attention_bias, check_neg_inf=True, check_pos_inf=False)
 
-        attn_key_values = [] if use_cache else None
+        attn_key_values = past_key_values if use_cache else None
 
         # Decoder layers
         all_hidden_states = []
@@ -693,9 +752,12 @@ class LLaDAModel(nnx.Module):
                 layer_past=layer_past,
                 use_cache=use_cache,
             )  # (B, T, D)
-            if attn_key_values is not None:
+            if attn_key_values is not None and use_cache:
                 assert cache is not None
-                attn_key_values.append(cache)
+                attn_key_values.append(blk_idx, cache[0], cache[1])
+
+        if attn_key_values is not None and use_cache:
+            attn_key_values.idx.value = attn_key_values.idx.value + 1
 
         # Prepare logits (B, T | 1, V)
         if last_logits_only:
@@ -721,19 +783,133 @@ class LLaDAModel(nnx.Module):
         )
 
 
-def num_right_pad(x: jax.Array):
-    return jnp.sum(jnp.cumsum(jnp.flip(x != 0, axis=-1), axis=-1) == 0, -1)
+def add_gumbel_noise(logits: jnp.ndarray, temperature: float, key: jax.Array) -> jnp.ndarray:
+    if temperature == 0.0:
+        return logits
+    logits64 = logits.astype(jnp.float64)
+    u = jax.random.uniform(key, shape=logits.shape, dtype=jnp.float64, minval=1e-6, maxval=1.0)
+    g = (-jnp.log(u)) ** temperature
+    return jnp.exp(logits64) / g
 
 
-@partial(jax.jit, donate_argnums=(1))
-def forward(graphdef: nnx.GraphDef[tuple[nnx.Module, list[KVCache]]], state, tokens, pad_id):
-    model, cache = nnx.merge(graphdef, state)
-    output = model(tokens, past_key_values=cache)
+def get_num_transfer_tokens(mask_index: jnp.ndarray, steps: int) -> jnp.ndarray:
+    mask_num = jnp.sum(mask_index, axis=1, keepdims=True)  # (B,1)
+    base = mask_num // steps  # (B,1)
+    remainder = mask_num % steps  # (B,1)
+    base = jnp.repeat(base, steps, axis=1)  # (B,steps)
+    inc = (jnp.arange(steps)[None, :] < remainder).astype(jnp.int32)  # (B,steps)
+    return (base + inc).astype(jnp.int32)
 
-    # Predict next missing token
-    right_paddings = num_right_pad(tokens != pad_id)
-    next_tokens = jnp.argmax(output.logits[:, -right_paddings - 1], axis=-1, keepdims=True)
 
-    # Update state
-    state = jax.tree.leaves(nnx.state((model, output.attn_key_values)))
-    return next_tokens, state
+def _row_topk_mask(conf_row: jnp.ndarray, k: jnp.ndarray) -> jnp.ndarray:
+    L = conf_row.shape[0]
+    idx_sorted = jnp.argsort(conf_row)[::-1]
+    ranks = jnp.empty((L,), dtype=jnp.int32).at[idx_sorted].set(jnp.arange(L, dtype=jnp.int32))
+    return ranks < k
+
+
+_row_topk_mask_vmapped = jax.vmap(_row_topk_mask, in_axes=(0, 0), out_axes=0)
+
+
+def forward(graphdef: nnx.GraphDef[tuple[nnx.Module, list]], state, tokens: jnp.ndarray):
+    model = nnx.merge(graphdef, state)
+    out = model(tokens)
+    return out.logits, nnx.state(model)
+
+
+@partial(
+    jax.jit,
+    static_argnames=[
+        "model_step",
+        "steps",
+        "gen_length",
+        "block_length",
+        "temperature",
+        "cfg_scale",
+        "remasking",
+        "mask_id",
+    ],
+)
+def generate(
+    model_step,
+    init_state,
+    prompt: jnp.ndarray,
+    steps: int = 128,
+    gen_length: int = 128,
+    block_length: int = 128,
+    temperature: float = 0.0,
+    cfg_scale: float = 0.0,
+    remasking: str = "low_confidence",
+    mask_id: int = 126336,
+    rng: jax.Array = jax.random.PRNGKey(0),
+):
+    B, Lp = prompt.shape
+    x = jnp.full((B, Lp + gen_length), mask_id, dtype=jnp.int32).at[:, :Lp].set(prompt)
+    prompt_index = x != mask_id
+
+    assert gen_length % block_length == 0
+    num_blocks = gen_length // block_length
+    assert steps % num_blocks == 0
+    steps_per_block = steps // num_blocks
+
+    def do_block(carry, b_idx):
+        x, state, rng = carry
+        start = Lp + b_idx * block_length
+        stop = Lp + (b_idx + 1) * block_length
+        block_mask = lax.dynamic_slice_in_dim(x, start_index=start, slice_size=block_length, axis=1)
+        block_mask_index = block_mask == mask_id  # (B, block_len)
+        num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)  # (B,S)
+
+        def do_step(carry_s, i):
+            x, state, rng = carry_s
+            mask_index = x == mask_id
+
+            # --- CFG: run both, keep the state from the *conditional* path ---
+            if cfg_scale > 0.0:
+                un_x = jnp.where(prompt_index, mask_id, x)
+                x_stack = jnp.concatenate([x, un_x], axis=0)  # (2B, L)
+                # Run conditional first to advance state:
+                logits_cond, state_cond = model_step(x, state)  # (B,L,V), new_state
+                # Run unconditional WITHOUT advancing state: call on the same `state`
+                logits_both, _ = model_step(x_stack, state)  # (2B,L,V), ignore state
+                _, logits_un = jnp.split(logits_both, 2, axis=0)  # (B,L,V)
+                logits = logits_un + (cfg_scale + 1.0) * (logits_cond - logits_un)
+                state_next = state_cond
+            else:
+                logits, state_next = model_step(x, state)
+
+            # Noise + argmax
+            rng, sub = jax.random.split(rng)
+            logits_noisy = add_gumbel_noise(logits, temperature, sub)
+            x0 = jnp.argmax(logits_noisy, axis=-1).astype(jnp.int32)
+
+            # Confidence
+            if remasking == "low_confidence":
+                p = jax.nn.softmax(logits, axis=-1)
+                x0_p = jnp.squeeze(jnp.take_along_axis(p, x0[..., None], axis=-1), axis=-1)
+            elif remasking == "random":
+                rng, sub = jax.random.split(rng)
+                x0_p = jax.random.uniform(sub, shape=x0.shape, dtype=logits.dtype)
+            else:
+                raise NotImplementedError(remasking)
+
+            # Forbid beyond current block
+            neg_inf = jnp.array(-jnp.inf, dtype=x0_p.dtype)
+            pos = jnp.arange(x0.shape[1])[None, :]
+            x0_p = jnp.where(pos >= stop, neg_inf, x0_p)
+
+            x0_sel = jnp.where(mask_index, x0, x)
+            conf = jnp.where(mask_index, x0_p, neg_inf)
+
+            # variable-k per row
+            k_vec = num_transfer_tokens[:, i]
+            transfer_index = _row_topk_mask_vmapped(conf, k_vec)
+
+            x = jnp.where(transfer_index, x0_sel, x)
+            return (x, state_next, rng), None
+
+        (x, state, rng), _ = lax.scan(do_step, (x, state, rng), xs=jnp.arange(steps_per_block, dtype=jnp.int32))
+        return (x, state, rng), None
+
+    (x, final_state, _), _ = lax.scan(do_block, (x, init_state, rng), xs=jnp.arange(num_blocks, dtype=jnp.int32))
+    return x, final_state

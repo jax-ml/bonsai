@@ -54,46 +54,93 @@ def tokenize(tokenizer, inputs: list[str]):
 # Demo queries
 queries = [
     "Why is the sky blue instead of a different color like purple?",
-    "Who invented the World Wide Web?",
 ]
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_CP_PATH, use_fast=True)
 tokens, pad_id, max_len, token_len = tokenize(tokenizer, queries)
+batch_size = tokens.shape[0]
 
 # Model + params
 cfg = modeling.ModelConfig.llada_8b_instruct()
+
 # Load weights into a constructed model
 model = params.create_llada_from_pretrained(MODEL_CP_PATH, cfg)
-graphdef, state = nnx.split((model, None))
-state = jax.tree.leaves(state)
+graphdef, state = nnx.split(model)
 
-# Generation loop
-batch_size = tokens.shape[0]
-gen_steps = 32  # how many new tokens to generate per sequence
 
-# Prefill with the prompt
-next_tokens, state = modeling.forward(graphdef, state, tokens, pad_id)
+def model_step(tokens, state):
+    logits, state = modeling.forward(graphdef, state, tokens)  # your forward above
+    return logits, state
 
-# Decode loop (one token at a time)
-generated = [next_tokens]
-t_start = None
-for step in range(gen_steps):
-    if step == 1:
-        # avoid XLA warmup in timing
-        jax.profiler.start_trace("/tmp/profile-llada")  # optional profiling
-    next_tokens, state = modeling.forward(graphdef, state, next_tokens, pad_id)
-    generated.append(next_tokens)
-    if step == 5:
-        jax.block_until_ready(generated)
-        jax.profiler.stop_trace()
-        t_start = time.perf_counter()
 
-jax.block_until_ready(generated)
-if t_start is not None:
-    print(f"Time for steps 6..{gen_steps}: {time.perf_counter() - t_start:.4f} s")
+out_tokens, state_final = modeling.generate(
+    model_step,
+    init_state=state,
+    prompt=tokens,
+    steps=128,
+    gen_length=32,
+    block_length=32,
+    temperature=0.0,
+    cfg_scale=0.0,
+    remasking="low_confidence",
+    mask_id=126336,
+    rng=jax.random.PRNGKey(42),
+)
+out_tokens.block_until_ready()
 
-# Pretty-print outputs
-generated = jnp.concatenate(generated, axis=-1)  # (B, T_gen)
-for i, q in enumerate(queries):
-    text = tokenizer.decode(np.array(generated[i]).tolist(), skip_special_tokens=True)
-    print(f"\nUser:\n{q}\n\nAnswer:\n{text}\n")
+# Measure runtime
+t0 = time.time()
+out_tokens, state_final = modeling.generate(
+    model_step,
+    init_state=state,
+    prompt=tokens,
+    steps=8,
+    gen_length=16,
+    block_length=16,
+    temperature=0.0,
+    cfg_scale=0.0,
+    remasking="low_confidence",
+    mask_id=126336,
+    rng=jax.random.PRNGKey(42),
+)
+jax.block_until_ready(out_tokens)  # wait for actual compute
+print(f"Elapsed: {time.time() - t0:.3f} sec")
+
+# Device profiler
+jax.profiler.start_trace("/tmp/jax_trace")
+out_tokens, state_final = modeling.generate(
+    model_step,
+    init_state=state,
+    prompt=tokens,
+    steps=128,
+    gen_length=32,
+    block_length=32,
+    temperature=0.0,
+    cfg_scale=0.0,
+    remasking="low_confidence",
+    mask_id=126336,
+    rng=jax.random.PRNGKey(42),
+)
+jax.block_until_ready(out_tokens)
+jax.profiler.stop_trace()
+
+# Profile a single run, print FLOPs, memory
+jax.profiler.profile(
+    lambda: modeling.generate(
+        model_step,
+        init_state=state,
+        prompt=tokens,
+        steps=128,
+        gen_length=32,
+        block_length=32,
+        temperature=0.0,
+        cfg_scale=0.0,
+        remasking="low_confidence",
+        mask_id=126336,
+        rng=jax.random.PRNGKey(42),
+    ),
+    duration=1,
+    num_traced_runs=1,
+    num_profiled_runs=1,
+)
+print("Generated token IDs:", out_tokens)

@@ -198,7 +198,7 @@ def create_llada_from_pretrained(
     # 4. Fill in missing keys with NaNs
     missing_keys = find_non_array_keys(jax_state)
     for path in missing_keys:
-        logging.warning(f"Missing param at: {path} - initializing with NaNs")
+        # logging.warning(f"Missing param at: {path} - initializing with NaNs")
         assign_nan_at_path(jax_state, path)
 
     # 5. Device placement
