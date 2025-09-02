@@ -36,14 +36,7 @@ class FPNNeck(nnx.Module):
         self.backbone_channel_list = backbone_channel_list
         self.d_model = d_model
         self.convs = [
-            nnx.Conv(
-                c,
-                d_model,
-                kernel_size=(kernel_size, kernel_size),
-                strides=stride,
-                padding=padding,
-                rngs=rngs,
-            )
+            nnx.Conv(c, d_model, kernel_size=(kernel_size, kernel_size), strides=stride, padding=padding, rngs=rngs)
             for c in backbone_channel_list
         ]
         self.fpn_interp_model = fpn_interp_model
@@ -62,9 +55,7 @@ class FPNNeck(nnx.Module):
 
             if i in self.fpn_top_down_levels and prev_features is not None:
                 prev_upsampled = jax.image.resize(
-                    prev_features.astype(jnp.float32),
-                    shape=lateral.shape,
-                    method=self.fpn_interp_model,
+                    prev_features.astype(jnp.float32), shape=lateral.shape, method=self.fpn_interp_model
                 )
                 fused = lateral + prev_upsampled
                 if self.fuse_type == "avg":
@@ -80,12 +71,7 @@ class FPNNeck(nnx.Module):
 
 
 class ImageEncoder(nnx.Module):
-    def __init__(
-        self,
-        trunk: nnx.Module,
-        neck: nnx.Module,
-        scalp: int = 0,
-    ):
+    def __init__(self, trunk: nnx.Module, neck: nnx.Module, scalp: int = 0):
         self.trunk = trunk
         self.neck = neck
         self.scalp = scalp
@@ -98,8 +84,4 @@ class ImageEncoder(nnx.Module):
             features = features[: -self.scalp]
             pos = pos[: -self.scalp]
 
-        return {
-            "vision_features": features[-1],
-            "vision_pos_enc": pos,
-            "backbone_fpn": features,
-        }
+        return {"vision_features": features[-1], "vision_pos_enc": pos, "backbone_fpn": features}
