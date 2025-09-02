@@ -42,12 +42,7 @@ class MaskDownSampler(nnx.Module):
             out_ch = in_ch * (stride**2)
             layers.append(
                 nnx.Conv(
-                    in_ch,
-                    out_ch,
-                    kernel_size=(kernel_size, kernel_size),
-                    strides=stride,
-                    padding=padding,
-                    rngs=rngs,
+                    in_ch, out_ch, kernel_size=(kernel_size, kernel_size), strides=stride, padding=padding, rngs=rngs
                 )
             )
             layers.append(LayerNorm2d(out_ch))
@@ -165,12 +160,7 @@ class MemoryEncoder(nnx.Module):
         else:
             self.out_proj = Identity()
 
-    def __call__(
-        self,
-        pix_feat: jnp.ndarray,
-        masks: jnp.ndarray,
-        skip_mask_sigmoid: bool = False,
-    ) -> dict[str, Any]:
+    def __call__(self, pix_feat: jnp.ndarray, masks: jnp.ndarray, skip_mask_sigmoid: bool = False) -> dict[str, Any]:
         if not skip_mask_sigmoid:
             masks = nnx.sigmoid(masks)
         masks = self.mask_downsampler(masks)

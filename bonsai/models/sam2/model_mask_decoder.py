@@ -56,20 +56,12 @@ class MaskDecoder(nnx.Module):
 
         self.output_upscaling = nnx.Sequential(
             nnx.ConvTranspose(
-                self.transformer_dim,
-                self.transformer_dim // 4,
-                kernel_size=(2, 2),
-                strides=(2, 2),
-                rngs=rngs,
+                self.transformer_dim, self.transformer_dim // 4, kernel_size=(2, 2), strides=(2, 2), rngs=rngs
             ),
             LayerNorm2d(self.transformer_dim // 4),
             activation,
             nnx.ConvTranspose(
-                self.transformer_dim // 4,
-                self.transformer_dim // 8,
-                kernel_size=(2, 2),
-                strides=(2, 2),
-                rngs=rngs,
+                self.transformer_dim // 4, self.transformer_dim // 8, kernel_size=(2, 2), strides=(2, 2), rngs=rngs
             ),
             activation,
         )
@@ -77,28 +69,14 @@ class MaskDecoder(nnx.Module):
         self.use_high_res_features = use_high_res_features
         if self.use_high_res_features:
             self.conv_s0 = nnx.Conv(
-                self.transformer_dim,
-                self.transformer_dim // 8,
-                kernel_size=(1, 1),
-                strides=(1, 1),
-                rngs=rngs,
+                self.transformer_dim, self.transformer_dim // 8, kernel_size=(1, 1), strides=(1, 1), rngs=rngs
             )
             self.conv_s1 = nnx.Conv(
-                self.transformer_dim,
-                self.transformer_dim // 4,
-                kernel_size=(1, 1),
-                strides=(1, 1),
-                rngs=rngs,
+                self.transformer_dim, self.transformer_dim // 4, kernel_size=(1, 1), strides=(1, 1), rngs=rngs
             )
 
         self.output_hypernetworks_mlps = [
-            MLP(
-                self.transformer_dim,
-                self.transformer_dim,
-                self.transformer_dim // 8,
-                3,
-                rngs=rngs,
-            )
+            MLP(self.transformer_dim, self.transformer_dim, self.transformer_dim // 8, 3, rngs=rngs)
             for _ in range(self.num_mask_tokens)
         ]
 
