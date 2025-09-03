@@ -365,6 +365,73 @@ class WhisperModel(nnx.Module):
         logits = self.decoder(tokens, xa, mask)
         
         return logits
+    
+    def generate(self, mel_features: Array, max_length: int = 448, temperature: float = 0.0) -> Array:
+        """Generate text tokens from audio features with improved stopping conditions."""
+        batch_size = mel_features.shape[0]
+        
+        # Start with HF Whisper prompt tokens: <|startoftranscript|><|en|><|transcribe|><|notimestamps|>
+        prompt_tokens = jnp.array([[50258, 50259, 50359, 50363]])
+        tokens = jnp.repeat(prompt_tokens, batch_size, axis=0)
+        
+        # Encode audio once
+        xa = self.encoder(mel_features)
+        
+        # Track if any sequence has finished
+        finished = jnp.zeros(batch_size, dtype=bool)
+        
+        # Track recent tokens for repetition detection
+        repetition_window = 5  # Smaller window for better detection
+        recent_tokens_history = []
+        
+        for step in range(max_length - len(prompt_tokens[0])):
+            # Create causal mask
+            seq_len = tokens.shape[1]
+            mask = create_causal_mask(seq_len)
+            
+            # Get logits
+            logits = self.decoder(tokens, xa, mask)
+            
+            # Get next token (greedy decoding)
+            next_logits = logits[:, -1, :]
+            next_token = jnp.argmax(next_logits, axis=-1, keepdims=True)
+            
+            # Check for EOS token (50257 = <|endoftext|>)
+            eos_mask = (next_token == 50257).flatten()
+            
+            # Check for repetition - look for exact token repetition in recent history
+            is_repetitive = False
+            if step >= repetition_window:
+                # Get the last few tokens
+                recent_tokens = tokens[:, -repetition_window:]
+                # Check if the last token repeats too many times in recent history
+                last_token = tokens[:, -1:]
+                repetition_count = jnp.sum(recent_tokens == last_token, axis=1)
+                is_repetitive = repetition_count >= 3  # If same token appears 3+ times in last 5 tokens
+            
+            # Stop if EOS or too repetitive
+            should_stop = eos_mask | is_repetitive
+            
+            # Update finished sequences
+            finished = finished | should_stop
+            
+            # Append new token
+            tokens = jnp.concatenate([tokens, next_token], axis=1)
+            
+            # Early stopping if all sequences are finished
+            if jnp.all(finished):
+                break
+            
+            # Also stop if we've generated a reasonable amount and see natural stopping patterns
+            if step > 50:  # After generating some content
+                # Check for natural speech endings (periods, pauses, etc.)
+                last_token_val = next_token[0, 0]
+                if last_token_val in [13, 11, 50257]:  # period, pause, or EOS
+                    # If we've seen this pattern before, consider stopping
+                    if step > 100:  # Give it some room to generate content
+                        break
+        
+        return tokens
 
 
 def create_causal_mask(size: int) -> Array:
