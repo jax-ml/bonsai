@@ -26,16 +26,17 @@ dependencies = [
   "jinja2",
   "setuptools",
   "huggingface-hub",
-  "transformers",
+  "transformers",  # for the tokenizer and checkpoint
   "xprof-nightly",
-  "pillow>=11.3.0",
   "xprof",
 ]
 
 [project.optional-dependencies]
 qwen3 = []
 resnet50 = []
-sam2 = []
+sam2 = [
+  "pillow>=11.3.0",
+]
 
 all = [
   "jax-bonsai[qwen3]",

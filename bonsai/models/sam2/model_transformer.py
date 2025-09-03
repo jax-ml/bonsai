@@ -84,10 +84,7 @@ class TwoWayAttentionBlock(nnx.Module):
         self.norm1 = nnx.LayerNorm(embedding_dim, rngs=rngs)
 
         self.cross_attn_token_to_image = Attention(
-            embedding_dim,
-            num_heads,
-            downsample_rate=attention_downsample_rate,
-            rngs=rngs,
+            embedding_dim, num_heads, downsample_rate=attention_downsample_rate, rngs=rngs
         )
         self.norm2 = nnx.LayerNorm(embedding_dim, rngs=rngs)
 
@@ -95,10 +92,7 @@ class TwoWayAttentionBlock(nnx.Module):
         self.norm3 = nnx.LayerNorm(embedding_dim, rngs=rngs)
 
         self.cross_attn_image_to_token = Attention(
-            embedding_dim,
-            num_heads,
-            downsample_rate=attention_downsample_rate,
-            rngs=rngs,
+            embedding_dim, num_heads, downsample_rate=attention_downsample_rate, rngs=rngs
         )
         self.norm4 = nnx.LayerNorm(embedding_dim, rngs=rngs)
 
@@ -157,10 +151,7 @@ class TwoWayTransformer(nnx.Module):
             for i in range(depth)
         ]
         self.final_attn_token_to_image = Attention(
-            embedding_dim,
-            num_heads,
-            downsample_rate=attention_downsample_rate,
-            rngs=rngs,
+            embedding_dim, num_heads, downsample_rate=attention_downsample_rate, rngs=rngs
         )
         self.norm_final_attn = nnx.LayerNorm(embedding_dim, rngs=rngs)
 

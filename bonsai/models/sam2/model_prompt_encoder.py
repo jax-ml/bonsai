@@ -59,21 +59,12 @@ class PromptEncoder(nnx.Module):
         self.not_a_point_embed = nnx.Embed(1, embed_dim, rngs=rngs)  # Used when label == -1
 
         # Conv tower for mask downscaling
-        self.mask_input_size = (
-            4 * image_embedding_size[0],
-            4 * image_embedding_size[1],
-        )
+        self.mask_input_size = (4 * image_embedding_size[0], 4 * image_embedding_size[1])
         self.mask_downscaling = nnx.Sequential(
             nnx.Conv(1, mask_in_chans // 4, kernel_size=(2, 2), strides=(2, 2), rngs=rngs),
             LayerNorm2d(mask_in_chans // 4),
             activation,
-            nnx.Conv(
-                mask_in_chans // 4,
-                mask_in_chans,
-                kernel_size=(2, 2),
-                strides=(2, 2),
-                rngs=rngs,
-            ),
+            nnx.Conv(mask_in_chans // 4, mask_in_chans, kernel_size=(2, 2), strides=(2, 2), rngs=rngs),
             LayerNorm2d(mask_in_chans),
             activation,
             nnx.Conv(mask_in_chans, embed_dim, kernel_size=(1, 1), rngs=rngs),
@@ -143,10 +134,7 @@ class PromptEncoder(nnx.Module):
         return 1
 
     def __call__(
-        self,
-        points: tuple[jnp.ndarray, jnp.ndarray] | None,
-        boxes: jnp.ndarray | None,
-        masks: jnp.ndarray | None,
+        self, points: tuple[jnp.ndarray, jnp.ndarray] | None, boxes: jnp.ndarray | None, masks: jnp.ndarray | None
     ) -> tuple[jnp.ndarray, jnp.ndarray]:
         """
         Embed all input prompts.

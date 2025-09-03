@@ -135,13 +135,7 @@ class MemoryAttention(nnx.Module):
 
         x = curr
         for layer in self.layers:
-            x = layer(
-                tgt=x,
-                memory=memory,
-                query_pos=curr_pos,
-                pos=memory_pos,
-                num_k_exclude_rope=num_obj_ptr_tokens,
-            )
+            x = layer(tgt=x, memory=memory, query_pos=curr_pos, pos=memory_pos, num_k_exclude_rope=num_obj_ptr_tokens)
 
         x = self.norm(x)
 

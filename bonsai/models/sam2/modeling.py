@@ -177,10 +177,7 @@ class SAM2Config:
                 ),
                 neck=FPNNeckConfig(
                     position_encoding=PositionEncodingConfig(
-                        num_pos_feats=256,
-                        normalize=True,
-                        scale=None,
-                        temperature=10000,
+                        num_pos_feats=256, normalize=True, scale=None, temperature=10000
                     ),
                     d_model=256,
                     backbone_channel_list=[768, 384, 192, 96],
@@ -223,23 +220,12 @@ class SAM2Config:
             memory_encoder=MemoryEncoderConfig(
                 out_dim=64,
                 position_encoding=PositionEncodingConfig(
-                    num_pos_feats=64,
-                    normalize=True,
-                    scale=None,
-                    temperature=10000,
+                    num_pos_feats=64, normalize=True, scale=None, temperature=10000
                 ),
-                mask_downsampler=MaskDownSamplerConfig(
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                ),
+                mask_downsampler=MaskDownSamplerConfig(kernel_size=3, stride=2, padding=1),
                 fuser=FuserConfig(
                     layer=CXBlockConfig(
-                        dim=256,
-                        kernel_size=7,
-                        padding=3,
-                        layer_scale_init_value=1e-6,
-                        use_dwconv=True,
+                        dim=256, kernel_size=7, padding=3, layer_scale_init_value=1e-6, use_dwconv=True
                     ),
                     num_layers=2,
                 ),
@@ -284,10 +270,7 @@ class SAM2Config:
                 ),
                 neck=FPNNeckConfig(
                     position_encoding=PositionEncodingConfig(
-                        num_pos_feats=256,
-                        normalize=True,
-                        scale=None,
-                        temperature=10000,
+                        num_pos_feats=256, normalize=True, scale=None, temperature=10000
                     ),
                     d_model=256,
                     backbone_channel_list=[768, 384, 192, 96],
@@ -330,23 +313,12 @@ class SAM2Config:
             memory_encoder=MemoryEncoderConfig(
                 out_dim=64,
                 position_encoding=PositionEncodingConfig(
-                    num_pos_feats=64,
-                    normalize=True,
-                    scale=None,
-                    temperature=10000,
+                    num_pos_feats=64, normalize=True, scale=None, temperature=10000
                 ),
-                mask_downsampler=MaskDownSamplerConfig(
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                ),
+                mask_downsampler=MaskDownSamplerConfig(kernel_size=3, stride=2, padding=1),
                 fuser=FuserConfig(
                     layer=CXBlockConfig(
-                        dim=256,
-                        kernel_size=7,
-                        padding=3,
-                        layer_scale_init_value=1e-6,
-                        use_dwconv=True,
+                        dim=256, kernel_size=7, padding=3, layer_scale_init_value=1e-6, use_dwconv=True
                     ),
                     num_layers=2,
                 ),
@@ -391,10 +363,7 @@ class SAM2Config:
                 ),
                 neck=FPNNeckConfig(
                     position_encoding=PositionEncodingConfig(
-                        num_pos_feats=256,
-                        normalize=True,
-                        scale=None,
-                        temperature=10000,
+                        num_pos_feats=256, normalize=True, scale=None, temperature=10000
                     ),
                     d_model=256,
                     backbone_channel_list=[896, 448, 224, 112],
@@ -437,23 +406,12 @@ class SAM2Config:
             memory_encoder=MemoryEncoderConfig(
                 out_dim=64,
                 position_encoding=PositionEncodingConfig(
-                    num_pos_feats=64,
-                    normalize=True,
-                    scale=None,
-                    temperature=10000,
+                    num_pos_feats=64, normalize=True, scale=None, temperature=10000
                 ),
-                mask_downsampler=MaskDownSamplerConfig(
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                ),
+                mask_downsampler=MaskDownSamplerConfig(kernel_size=3, stride=2, padding=1),
                 fuser=FuserConfig(
                     layer=CXBlockConfig(
-                        dim=256,
-                        kernel_size=7,
-                        padding=3,
-                        layer_scale_init_value=1e-6,
-                        use_dwconv=True,
+                        dim=256, kernel_size=7, padding=3, layer_scale_init_value=1e-6, use_dwconv=True
                     ),
                     num_layers=2,
                 ),
@@ -499,10 +457,7 @@ class SAM2Config:
                 ),
                 neck=FPNNeckConfig(
                     position_encoding=PositionEncodingConfig(
-                        num_pos_feats=256,
-                        normalize=True,
-                        scale=None,
-                        temperature=10000,
+                        num_pos_feats=256, normalize=True, scale=None, temperature=10000
                     ),
                     d_model=256,
                     backbone_channel_list=[1152, 576, 288, 144],
@@ -545,23 +500,12 @@ class SAM2Config:
             memory_encoder=MemoryEncoderConfig(
                 out_dim=64,
                 position_encoding=PositionEncodingConfig(
-                    num_pos_feats=64,
-                    normalize=True,
-                    scale=None,
-                    temperature=10000,
+                    num_pos_feats=64, normalize=True, scale=None, temperature=10000
                 ),
-                mask_downsampler=MaskDownSamplerConfig(
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                ),
+                mask_downsampler=MaskDownSamplerConfig(kernel_size=3, stride=2, padding=1),
                 fuser=FuserConfig(
                     layer=CXBlockConfig(
-                        dim=256,
-                        kernel_size=7,
-                        padding=3,
-                        layer_scale_init_value=1e-6,
-                        use_dwconv=True,
+                        dim=256, kernel_size=7, padding=3, layer_scale_init_value=1e-6, use_dwconv=True
                     ),
                     num_layers=2,
                 ),
@@ -729,10 +673,7 @@ class SAM2Base(nnx.Module):
         # Prompt encoder
         self.sam_prompt_encoder = PromptEncoder(
             embed_dim=self.sam_prompt_embed_dim,
-            image_embedding_size=(
-                self.sam_image_embedding_size,
-                self.sam_image_embedding_size,
-            ),
+            image_embedding_size=(self.sam_image_embedding_size, self.sam_image_embedding_size),
             input_image_size=(self.image_size, self.image_size),
             mask_in_chans=16,
             rngs=rngs,
@@ -772,12 +713,7 @@ class SAM2Base(nnx.Module):
             self.obj_ptr_tpos_proj = Identity()
 
     def _forward_sam_heads(
-        self,
-        backbone_features,
-        point_inputs=None,
-        mask_inputs=None,
-        high_res_features=None,
-        multimask_output=False,
+        self, backbone_features, point_inputs=None, mask_inputs=None, high_res_features=None, multimask_output=False
     ):
         """
         Forward SAM prompt encoders and mask heads.
@@ -840,9 +776,7 @@ class SAM2Base(nnx.Module):
             sam_mask_prompt = None
 
         sparse_embeddings, dense_embeddings = self.sam_prompt_encoder(
-            points=(sam_point_coords, sam_point_labels),
-            boxes=None,
-            masks=sam_mask_prompt,
+            points=(sam_point_coords, sam_point_labels), boxes=None, masks=sam_mask_prompt
         )
         low_res_multimasks, ious, sam_output_tokens, object_score_logits = self.sam_mask_decoder(
             image_embeddings=backbone_features,
@@ -860,9 +794,7 @@ class SAM2Base(nnx.Module):
         # ensure float32
         low_res_multimasks = low_res_multimasks.astype(jnp.float32)
         high_res_multimasks = jimage.resize(
-            low_res_multimasks,
-            (B, low_res_multimasks.shape[1], self.image_size, self.image_size),
-            method="bilinear",
+            low_res_multimasks, (B, low_res_multimasks.shape[1], self.image_size, self.image_size), method="bilinear"
         )
 
         sam_output_token = sam_output_tokens[:, 0]
@@ -928,15 +860,7 @@ class SAM2Base(nnx.Module):
             if self.fixed_no_obj_ptr:
                 obj_ptr = lam * obj_ptr
             obj_ptr = obj_ptr + (1 - lam) * self.no_obj_ptr
-        return (
-            low_res_masks,
-            high_res_masks,
-            ious,
-            low_res_masks,
-            high_res_masks,
-            obj_ptr,
-            object_score_logits,
-        )
+        return (low_res_masks, high_res_masks, ious, low_res_masks, high_res_masks, obj_ptr, object_score_logits)
 
     def forward_image(self, img_batch):
         """Get the image feature on the input batch."""
@@ -1102,12 +1026,7 @@ class SAM2Base(nnx.Module):
         return pix_feat
 
     def _encode_new_memory(
-        self,
-        current_vision_feats,
-        feat_sizes,
-        pred_masks_high_res,
-        object_score_logits,
-        is_mask_from_pts,
+        self, current_vision_feats, feat_sizes, pred_masks_high_res, object_score_logits, is_mask_from_pts
     ):
         """Encode the current image and its prediction into a memory feature."""
         # batch and dims
@@ -1263,13 +1182,7 @@ class SAM2Base(nnx.Module):
 
         # 4) optionally encode into memory
         self._encode_memory_in_output(
-            current_vision_feats,
-            feat_sizes,
-            point_inputs,
-            run_mem_encoder,
-            high_res_masks,
-            obj_logits,
-            current_out,
+            current_vision_feats, feat_sizes, point_inputs, run_mem_encoder, high_res_masks, obj_logits, current_out
         )
 
         return current_out
@@ -1422,11 +1335,7 @@ def build_sam2_model_from_config(cfg: SAM2Config, rngs: nnx.Rngs) -> SAM2Base:
         rngs=rngs,
     )
 
-    image_encoder = ImageEncoder(
-        scalp=cfg.image_encoder.scalp,
-        trunk=trunk,
-        neck=neck,
-    )
+    image_encoder = ImageEncoder(scalp=cfg.image_encoder.scalp, trunk=trunk, neck=neck)
 
     # === SAM2 ===
     return SAM2Base(
@@ -1498,11 +1407,7 @@ class SAM2ImagePredictor(nnx.Module):
         self.mask_threshold = mask_threshold
 
         # Spatial dim for backbone feature maps (low → high)
-        self._bb_feat_sizes = [
-            (256, 256),
-            (128, 128),
-            (64, 64),
-        ]
+        self._bb_feat_sizes = [(256, 256), (128, 128), (64, 64)]
 
     def set_image(self, image: np.ndarray | PILImage) -> None:
         """
@@ -1541,10 +1446,7 @@ class SAM2ImagePredictor(nnx.Module):
             jnp.transpose(f, (1, 2, 0)).reshape(1, -1, *feat_size)
             for f, feat_size in zip(vision_feats[::-1], self._bb_feat_sizes[::-1])
         ][::-1]
-        self._features = {
-            "image_embed": feats[-1],
-            "high_res_feats": feats[:-1],
-        }
+        self._features = {"image_embed": feats[-1], "high_res_feats": feats[:-1]}
         self._is_image_set = True
 
     def set_image_batch(self, image_list: list[np.ndarray]) -> None:
@@ -1566,9 +1468,9 @@ class SAM2ImagePredictor(nnx.Module):
         img_batch = self._transforms.forward_batch(image_list)  # Shape: (B, H, W, 3)
 
         batch_size = img_batch.shape[0]
-        assert img_batch.ndim == 4 and img_batch.shape[-1] == 3, (
-            f"img_batch must be (B, H, W, 3), got {img_batch.shape}"
-        )
+        assert (
+            img_batch.ndim == 4 and img_batch.shape[-1] == 3
+        ), f"img_batch must be (B, H, W, 3), got {img_batch.shape}"
 
         # Forward pass
         backbone_out = self.model.forward_image(img_batch)
@@ -1584,10 +1486,7 @@ class SAM2ImagePredictor(nnx.Module):
             for f, feat_size in zip(vision_feats[::-1], self._bb_feat_sizes[::-1])
         ][::-1]
 
-        self._features = {
-            "image_embed": feats[-1],
-            "high_res_feats": feats[:-1],
-        }
+        self._features = {"image_embed": feats[-1], "high_res_feats": feats[:-1]}
         self._is_image_set = True
         self._is_batch = True
 
@@ -1625,12 +1524,7 @@ class SAM2ImagePredictor(nnx.Module):
 
             # Transform prompts
             mask_input_tensor, coords, labels, box_tensor = self._prep_prompts(
-                point_coords,
-                point_labels,
-                box,
-                mask_input,
-                normalize_coords,
-                img_idx=i,
+                point_coords, point_labels, box, mask_input, normalize_coords, img_idx=i
             )
 
             # Predict
@@ -1676,11 +1570,7 @@ class SAM2ImagePredictor(nnx.Module):
             raise RuntimeError("set_image(...) must be called before predict(...)")
 
         mask_input_tensor, coords, labels, box_tensor = self._prep_prompts(
-            point_coords,
-            point_labels,
-            box,
-            mask_input,
-            normalize_coords,
+            point_coords, point_labels, box, mask_input, normalize_coords
         )
 
         # Forward pass
@@ -1719,9 +1609,7 @@ class SAM2ImagePredictor(nnx.Module):
             labels = jnp.array(point_labels, dtype=jnp.int32)
 
             unnorm_coords = self._transforms.transform_coords(
-                point_coords,
-                normalize=normalize_coords,
-                orig_hw=self._orig_hw[img_idx],
+                point_coords, normalize=normalize_coords, orig_hw=self._orig_hw[img_idx]
             )
 
             if unnorm_coords.ndim == 2:
@@ -1732,9 +1620,7 @@ class SAM2ImagePredictor(nnx.Module):
         if box is not None:
             box = jnp.array(box, dtype=jnp.float32)
             unnorm_box = self._transforms.transform_boxes(
-                box,
-                normalize=normalize_coords,
-                orig_hw=self._orig_hw[img_idx],
+                box, normalize=normalize_coords, orig_hw=self._orig_hw[img_idx]
             )
 
         if mask_logits is not None:
@@ -1783,9 +1669,7 @@ class SAM2ImagePredictor(nnx.Module):
 
         # Prompt encoding
         sparse_embeddings, dense_embeddings = self.model.sam_prompt_encoder(
-            points=concat_points,
-            boxes=None,
-            masks=mask_input,
+            points=concat_points, boxes=None, masks=mask_input
         )
 
         # Get features
