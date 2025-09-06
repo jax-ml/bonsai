@@ -81,7 +81,7 @@ class ModelCfg:
     num_layers: int
     vocab_size: int
     emb_dim: int
-    hidden_dim: int
+    mlp_dim: int
     num_heads: int
     head_dim: int
     num_kv_heads: int
@@ -98,7 +98,7 @@ class ModelCfg:
             num_layers=28,
             vocab_size=151936,
             emb_dim=1024,
-            hidden_dim=3072,
+            mlp_dim=3072,
             num_heads=16,
             head_dim=128,
             num_kv_heads=8,
@@ -115,7 +115,7 @@ class ModelCfg:
             num_layers=28,
             vocab_size=151936,
             emb_dim=2048,
-            hidden_dim=6144,
+            mlp_dim=6144,
             num_heads=16,
             head_dim=128,
             num_kv_heads=8,
@@ -132,7 +132,7 @@ class ModelCfg:
             num_layers=36,
             vocab_size=151936,
             emb_dim=2560,
-            hidden_dim=9728,
+            mlp_dim=9728,
             num_heads=32,
             head_dim=128,
             num_kv_heads=8,
@@ -149,7 +149,7 @@ class ModelCfg:
             num_layers=36,
             vocab_size=151936,
             emb_dim=4096,
-            hidden_dim=12288,
+            mlp_dim=12288,
             num_heads=32,
             head_dim=128,
             num_kv_heads=8,
@@ -166,7 +166,7 @@ class ModelCfg:
             num_layers=40,
             vocab_size=151936,
             emb_dim=5120,
-            hidden_dim=17408,
+            mlp_dim=17408,
             num_heads=40,
             head_dim=128,
             num_kv_heads=8,
@@ -183,7 +183,7 @@ class ModelCfg:
             num_layers=64,
             vocab_size=151936,
             emb_dim=5120,
-            hidden_dim=25600,
+            mlp_dim=25600,
             num_heads=64,
             head_dim=128,
             num_kv_heads=8,
@@ -354,20 +354,20 @@ class MLP(nnx.Module):
         kernel_init_fn = nnx.initializers.zeros_init()
         self.gate_proj = nnx.Linear(
             in_features=cfg.emb_dim,
-            out_features=cfg.hidden_dim,
+            out_features=cfg.mlp_dim,
             use_bias=False,
             kernel_init=nnx.with_partitioning(kernel_init_fn, shd_cfg.ffw_weight_df),
             rngs=rngs,
         )
         self.up_proj = nnx.Linear(
             in_features=cfg.emb_dim,
-            out_features=cfg.hidden_dim,
+            out_features=cfg.mlp_dim,
             use_bias=False,
             kernel_init=nnx.with_partitioning(kernel_init_fn, shd_cfg.ffw_weight_df),
             rngs=rngs,
         )
         self.down_proj = nnx.Linear(
-            in_features=cfg.hidden_dim,
+            in_features=cfg.mlp_dim,
             out_features=cfg.emb_dim,
             use_bias=False,
             kernel_init=nnx.with_partitioning(kernel_init_fn, shd_cfg.ffw_weight_fd),
