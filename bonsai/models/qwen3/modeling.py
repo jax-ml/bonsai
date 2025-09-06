@@ -89,6 +89,7 @@ class ModelCfg:
     rope_scaling_factor: int
     local_rope_theta: float
     norm_eps: float
+    tie_word_embeddings: bool
     shd_cfg: ShardingCfg = ShardingCfg.default()
 
     @classmethod
@@ -105,6 +106,7 @@ class ModelCfg:
             rope_theta=1_000_000,
             rope_scaling_factor=8.0,
             local_rope_theta=1e4,
+            tie_word_embeddings=True,
         )
 
     @classmethod
@@ -121,6 +123,41 @@ class ModelCfg:
             rope_theta=1_000_000,
             rope_scaling_factor=8.0,
             local_rope_theta=1e4,
+            tie_word_embeddings=True,
+        )
+
+    @classmethod
+    def qwen3_4b(cls):  # qwen3-4B
+        return cls(
+            num_layers=36,
+            vocab_size=151936,
+            emb_dim=2560,
+            hidden_dim=9728,
+            num_heads=32,
+            head_dim=128,
+            num_kv_heads=8,
+            norm_eps=1e-06,
+            rope_theta=1_000_000,
+            rope_scaling_factor=8.0,
+            local_rope_theta=1e4,
+            tie_word_embeddings=True,
+        )
+
+    @classmethod
+    def qwen3_8b(cls):  # qwen3-8B
+        return cls(
+            num_layers=36,
+            vocab_size=151936,
+            emb_dim=4096,
+            hidden_dim=12288,
+            num_heads=32,
+            head_dim=128,
+            num_kv_heads=8,
+            norm_eps=1e-06,
+            rope_theta=1_000_000,
+            rope_scaling_factor=8.0,
+            local_rope_theta=1e4,
+            tie_word_embeddings=False,
         )
 
     @classmethod
@@ -137,6 +174,24 @@ class ModelCfg:
             rope_theta=1_000_000,
             rope_scaling_factor=8.0,
             local_rope_theta=1e4,
+            tie_word_embeddings=False,
+        )
+
+    @classmethod
+    def qwen3_32b(cls):  # qwen3-32B
+        return cls(
+            num_layers=64,
+            vocab_size=151936,
+            emb_dim=5120,
+            hidden_dim=25600,
+            num_heads=64,
+            head_dim=128,
+            num_kv_heads=8,
+            norm_eps=1e-06,
+            rope_theta=1_000_000,
+            rope_scaling_factor=8.0,
+            local_rope_theta=1e4,
+            tie_word_embeddings=False,
         )
 
 

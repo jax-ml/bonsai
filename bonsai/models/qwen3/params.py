@@ -138,6 +138,8 @@ def create_model_from_safe_tensors(
         jax_key, transform = _torch_key_to_jax_key(_get_key_and_transform_mapping(cfg), k)
         jax_keys = [_stoi(s) for s in jax_key.split(".")]
         _assign_weights(jax_keys, v, state_dict, k, transform)
+    if cfg.tie_word_embeddings:
+        state_dict['lm_head']['w'] = state_dict['embedder']['input_emb'].T
     if mesh is not None:
         sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
         state_dict = jax.device_put(state_dict, sharding)
