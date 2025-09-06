@@ -57,7 +57,11 @@ def run_model(MODEL_CP_PATH=None):
     config = modeling.ModelCfg.qwen3_0_6b()
     model = params.create_model_from_safe_tensors(MODEL_CP_PATH, config)
     cache = modeling.init_cache(
-        num_layers=28, batch_size=batch_size, cache_size=cache_size, num_kv_heads=8, head_dim=128
+        num_layers=config.num_layers,
+        batch_size=batch_size,
+        cache_size=cache_size,
+        num_kv_heads=config.num_kv_heads,
+        head_dim=config.head_dim
     )
     graphdef, state = nnx.split((model, cache))
     state = jax.tree.leaves(state)  # Better perf from flattened jax state due to no pytree trasversals.
