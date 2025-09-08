@@ -14,7 +14,7 @@
 import jax
 import jax.numpy as jnp
 from typing import Optional
-from .modeling import WhisperModel, create_causal_mask
+from modeling import WhisperModel, create_causal_mask
 import numpy as np
 
 
