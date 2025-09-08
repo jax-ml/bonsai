@@ -25,10 +25,10 @@ from jax import lax
 
 
 class ActivationType(Enum):
-    gelu = auto()
-    relu = auto()
-    silu = auto()
-    swiglu = auto()
+    GELU = auto()
+    RELU = auto()
+    SILU = auto()
+    SWIGLU = auto()
 
 
 class ActSpec(NamedTuple):
@@ -38,22 +38,19 @@ class ActSpec(NamedTuple):
 
 def get_activation(act_type: ActivationType) -> ActSpec:
     """Return (callable, multiplier) matching LLaDA conventions."""
-    if act_type == ActivationType.gelu:
-        return ActSpec(nnx.gelu, 1.0)
 
-    if act_type == ActivationType.relu:
-        return ActSpec(nnx.relu, 1.0)
+    def swiglu(x: jax.Array) -> jax.Array:
+        a, b = jnp.split(x, 2, axis=-1)  # split last dim
+        return nnx.silu(b) * a
 
-    if act_type == ActivationType.silu:
-        return ActSpec(nnx.silu, 1.0)
-
-    if act_type == ActivationType.swiglu:
-
-        def swiglu(x: jax.Array) -> jax.Array:
-            a, b = jnp.split(x, 2, axis=-1)  # split last dim
-            return nnx.silu(b) * a
-
-        return ActSpec(swiglu, 0.5)
+    activations = {
+        ActivationType.GELU: ActSpec(nnx.gelu, 1.0),
+        ActivationType.RELU: ActSpec(nnx.relu, 1.0),
+        ActivationType.SILU: ActSpec(nnx.silu, 1.0),
+        ActivationType.SWIGLU: ActSpec(swiglu, 0.5),
+    }
+    if act_type in activations:
+        return activations[act_type]
     raise ValueError(f"Unknown activation: {act_type}")
 
 
@@ -78,7 +75,7 @@ class LayerNormType(Enum):
 class GemmaRMSNorm(nnx.Module):
     def __init__(self, dim: int, epsilon: float = 1e-5, use_bias: bool = False, *, rngs: nnx.Rngs):
         self.eps = epsilon
-        # initialise weight at zero so overall scale starts at 1
+        # initialise scale at zero so overall scale starts at 1
         self.scale = nnx.Param(jnp.zeros((dim,)), rngs=rngs)
         if use_bias:
             self.bias = nnx.Param(jnp.zeros((dim,)), rngs=rngs)
@@ -86,7 +83,7 @@ class GemmaRMSNorm(nnx.Module):
     def __call__(self, x: jax.Array) -> jax.Array:
         var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
         y = x * jax.lax.rsqrt(var + self.eps)
-        if hasattr(self, "weight"):
+        if hasattr(self, "scale"):
             y = y * (1.0 + self.scale.value)
         if hasattr(self, "bias"):
             y = y + self.bias.value
@@ -107,12 +104,7 @@ def get_layer_norm(cfg, dim: int | None = None, *, rngs: nnx.Rngs):
         return nnx.RMSNorm(dim, epsilon=eps, rngs=rngs)
 
     if ln_type == LayerNormType.GEMMA_RMS:
-        return GemmaRMSNorm(
-            dim,
-            epsilon=eps,
-            use_bias=use_bias,
-            rngs=rngs,
-        )
+        return GemmaRMSNorm(dim, epsilon=eps, use_bias=use_bias, rngs=rngs)
 
     raise ValueError(f"Unknown LayerNorm type: {ln_type}")
 
@@ -133,8 +125,8 @@ class ModelConfig:
 
     # feed-forward
     mlp_ratio: int = 4
-    mlp_hidden_size: int | None = None  # fagraphdef, state, tokens, pad_idlls back to mlp_ratio * d_model
-    activation_type: ActivationType = ActivationType.swiglu
+    mlp_hidden_size: int | None = None  # graphdef, state, tokens, pad_id fallback to mlp_ratio * d_model
+    activation_type: ActivationType = ActivationType.SWIGLU
 
     # block wiring / attention
     block_type: BlockType = BlockType.SEQUENTIAL
@@ -150,7 +142,7 @@ class ModelConfig:
     attention_layer_norm: bool = False
     attention_layer_norm_with_affine: bool = True
 
-    # dropout / normalisation
+    # dropout / normalization
     attention_dropout: float = 0.1
     residual_dropout: float = 0.1
     embedding_dropout: float = 0.1
@@ -195,7 +187,7 @@ class ModelConfig:
         """Return the configuration that matches the 8-B-parameter LLaDA-Instruct checkpoint."""
         return cls(
             # architecture
-            activation_type=ActivationType.silu,
+            activation_type=ActivationType.SILU,
             block_type=BlockType.LLAMA,
             d_model=4_096,
             n_layers=32,
@@ -231,11 +223,6 @@ class ModelConfig:
 
 
 class RotaryEmbedding(nnx.Module):
-    """
-    Rotary positional embeddings (RoPE) - JAX/nnx version.
-    Keeps a sin/cos cache in nnx.Cache so it can grow on demand.
-    """
-
     def __init__(self, cfg: ModelConfig):
         self.cfg = cfg
         dim = cfg.d_model // cfg.n_heads
@@ -252,8 +239,6 @@ class RotaryEmbedding(nnx.Module):
         """
         T_q, T_k = q.shape[-3], k.shape[-3]
 
-        qf, kf = q, k
-
         # Slice from full tables
         sin, cos = self.pos_sin.value, self.pos_cos.value
         sin = sin[:, :T_k, :, :]
@@ -261,8 +246,8 @@ class RotaryEmbedding(nnx.Module):
 
         sin_q, cos_q = sin[:, T_k - T_q : T_k, :, :], cos[:, T_k - T_q : T_k, :, :]
 
-        q_out = self._apply_rotary(qf, sin_q, cos_q)
-        k_out = self._apply_rotary(kf, sin, cos)
+        q_out = self._apply_rotary(q, sin_q, cos_q)
+        k_out = self._apply_rotary(k, sin, cos)
 
         return q_out.astype(q.dtype), k_out.astype(k.dtype)
 
@@ -631,20 +616,8 @@ def get_alibi_attention_bias(cache: dict[str, jax.Array], seq_len: int, cfg, dty
 
 class LLaDAOutput(NamedTuple):
     logits: jax.Array
-    """
-    A tensor of shape `(batch_size, seq_len, vocab_size)` representing the log probabilities
-    for the next token *before* normalization via (log) softmax.
-    """
-
     attn_key_values: list[tuple[jax.Array, jax.Array]] | None
-    """
-    Attention keys and values from each block.
-    """
-
     hidden_states: tuple[jax.Array, ...] | None
-    """
-    Hidden states from each block.
-    """
 
 
 class LLaDAModel(nnx.Module):
@@ -783,7 +756,7 @@ class LLaDAModel(nnx.Module):
         )
 
 
-def add_gumbel_noise(logits: jnp.ndarray, temperature: float, key: jax.Array) -> jnp.ndarray:
+def add_gumbel_noise(logits: jax.Array, temperature: float, key: jax.Array) -> jax.Array:
     if temperature == 0.0:
         return logits
     logits64 = logits.astype(jnp.float64)
@@ -792,7 +765,7 @@ def add_gumbel_noise(logits: jnp.ndarray, temperature: float, key: jax.Array) ->
     return jnp.exp(logits64) / g
 
 
-def get_num_transfer_tokens(mask_index: jnp.ndarray, steps: int) -> jnp.ndarray:
+def get_num_transfer_tokens(mask_index: jax.Array, steps: int) -> jax.Array:
     mask_num = jnp.sum(mask_index, axis=1, keepdims=True)  # (B,1)
     base = mask_num // steps  # (B,1)
     remainder = mask_num % steps  # (B,1)
@@ -801,26 +774,27 @@ def get_num_transfer_tokens(mask_index: jnp.ndarray, steps: int) -> jnp.ndarray:
     return (base + inc).astype(jnp.int32)
 
 
-def _row_topk_mask(conf_row: jnp.ndarray, k: jnp.ndarray) -> jnp.ndarray:
+def _row_topk_mask(conf_row: jax.Array, k: jax.Array) -> jax.Array:
     L = conf_row.shape[0]
     idx_sorted = jnp.argsort(conf_row)[::-1]
     ranks = jnp.empty((L,), dtype=jnp.int32).at[idx_sorted].set(jnp.arange(L, dtype=jnp.int32))
     return ranks < k
 
 
-_row_topk_mask_vmapped = jax.vmap(_row_topk_mask, in_axes=(0, 0), out_axes=0)
+row_topk_mask_vmapped = jax.vmap(_row_topk_mask, in_axes=(0, 0), out_axes=0)
 
 
-def forward(graphdef: nnx.GraphDef[tuple[nnx.Module, list]], state, tokens: jnp.ndarray):
+@jax.jit
+def forward(graphdef: nnx.GraphDef[nnx.Module], state: nnx.State, tokens: jax.Array):
     model = nnx.merge(graphdef, state)
     out = model(tokens)
-    return out.logits, nnx.state(model)
+    state = jax.tree.leaves(nnx.state(model))
+    return out.logits, state
 
 
 @partial(
     jax.jit,
     static_argnames=[
-        "model_step",
         "steps",
         "gen_length",
         "block_length",
@@ -831,9 +805,9 @@ def forward(graphdef: nnx.GraphDef[tuple[nnx.Module, list]], state, tokens: jnp.
     ],
 )
 def generate(
-    model_step,
-    init_state,
-    prompt: jnp.ndarray,
+    graphdef: nnx.GraphDef[nnx.Module],
+    init_state: nnx.State,
+    prompt: jax.Array,
     steps: int = 128,
     gen_length: int = 128,
     block_length: int = 128,
@@ -864,19 +838,17 @@ def generate(
             x, state, rng = carry_s
             mask_index = x == mask_id
 
-            # --- CFG: run both, keep the state from the *conditional* path ---
+            # CFG: run both, keep the state from the *conditional* path
             if cfg_scale > 0.0:
                 un_x = jnp.where(prompt_index, mask_id, x)
                 x_stack = jnp.concatenate([x, un_x], axis=0)  # (2B, L)
-                # Run conditional first to advance state:
-                logits_cond, state_cond = model_step(x, state)  # (B,L,V), new_state
-                # Run unconditional WITHOUT advancing state: call on the same `state`
-                logits_both, _ = model_step(x_stack, state)  # (2B,L,V), ignore state
-                _, logits_un = jnp.split(logits_both, 2, axis=0)  # (B,L,V)
-                logits = logits_un + (cfg_scale + 1.0) * (logits_cond - logits_un)
-                state_next = state_cond
+                # Run on both conditional and unconditional logits
+                logits_both, state = forward(graphdef, state, x_stack)  # (2B,L,V), ignore state
+                logits, logits_un = jnp.split(logits_both, 2, axis=0)  # (B,L,V)
+                logits = logits_un + (cfg_scale + 1.0) * (logits - logits_un)
+                state_next = state
             else:
-                logits, state_next = model_step(x, state)
+                logits, state_next = forward(graphdef, state, x)
 
             # Noise + argmax
             rng, sub = jax.random.split(rng)
@@ -903,7 +875,7 @@ def generate(
 
             # variable-k per row
             k_vec = num_transfer_tokens[:, i]
-            transfer_index = _row_topk_mask_vmapped(conf, k_vec)
+            transfer_index = row_topk_mask_vmapped(conf, k_vec)
 
             x = jnp.where(transfer_index, x0_sel, x)
             return (x, state_next, rng), None
@@ -913,3 +885,89 @@ def generate(
 
     (x, final_state, _), _ = lax.scan(do_block, (x, init_state, rng), xs=jnp.arange(num_blocks, dtype=jnp.int32))
     return x, final_state
+
+
+def generate_forloop(
+    graphdef: nnx.GraphDef[nnx.Module],
+    init_state: nnx.State,
+    prompt: jax.Array,
+    steps: int = 128,
+    gen_length: int = 128,
+    block_length: int = 128,
+    temperature: float = 0.0,
+    cfg_scale: float = 0.0,
+    remasking: str = "low_confidence",
+    mask_id: int = 126336,
+    rng: jax.Array = jax.random.PRNGKey(0),
+):
+    B, Lp = prompt.shape
+    x = jnp.full((B, Lp + gen_length), mask_id, dtype=jnp.int32).at[:, :Lp].set(prompt)
+    prompt_index = x != mask_id
+
+    assert gen_length % block_length == 0
+    num_blocks = gen_length // block_length
+    assert steps % num_blocks == 0
+    steps_per_block = steps // num_blocks
+
+    state = init_state
+
+    def do_step(x, state, rng, i, stop, num_transfer_tokens):
+        mask_index = x == mask_id
+
+        # CFG: run both, keep the state from the *conditional* path
+        if cfg_scale > 0.0:
+            un_x = jnp.where(prompt_index, mask_id, x)
+            x_stack = jnp.concatenate([x, un_x], axis=0)  # (2B, L)
+            logits_both, state = forward(graphdef, state, x_stack)
+            logits, logits_un = jnp.split(logits_both, 2, axis=0)
+            logits = logits_un + (cfg_scale + 1.0) * (logits - logits_un)
+            state_next = state
+        else:
+            logits, state_next = forward(graphdef, state, x)
+
+        # Noise + argmax
+        rng, sub = jax.random.split(rng)
+        logits_noisy = add_gumbel_noise(logits, temperature, sub)
+        x0 = jnp.argmax(logits_noisy, axis=-1).astype(jnp.int32)
+
+        # Confidence
+        if remasking == "low_confidence":
+            p = jax.nn.softmax(logits, axis=-1)
+            x0_p = jnp.squeeze(jnp.take_along_axis(p, x0[..., None], axis=-1), axis=-1)
+        elif remasking == "random":
+            rng, sub = jax.random.split(rng)
+            x0_p = jax.random.uniform(sub, shape=x0.shape, dtype=logits.dtype)
+        else:
+            raise NotImplementedError(remasking)
+
+        # Forbid beyond current block
+        neg_inf = jnp.array(-jnp.inf, dtype=x0_p.dtype)
+        pos = jnp.arange(x0.shape[1])[None, :]
+        x0_p = jnp.where(pos >= stop, neg_inf, x0_p)
+
+        x0_sel = jnp.where(mask_index, x0, x)
+        conf = jnp.where(mask_index, x0_p, neg_inf)
+
+        # variable-k per row
+        k_vec = num_transfer_tokens[:, i]
+        transfer_index = row_topk_mask_vmapped(conf, k_vec)
+
+        x = jnp.where(transfer_index, x0_sel, x)
+        return x, state_next, rng
+
+    def do_block(x, state, rng, b_idx):
+        start = Lp + b_idx * block_length
+        stop = Lp + (b_idx + 1) * block_length
+        block_mask = lax.dynamic_slice_in_dim(x, start_index=start, slice_size=block_length, axis=1)
+        block_mask_index = block_mask == mask_id
+        num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)
+
+        for i in range(steps_per_block):
+            x, state, rng = do_step(x, state, rng, i, stop, num_transfer_tokens)
+
+        return x, state, rng
+
+    for b_idx in range(num_blocks):
+        x, state, rng = do_block(x, state, rng, b_idx)
+
+    return x, state
