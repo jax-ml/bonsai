@@ -38,16 +38,12 @@ def tokenize(tokenizer, input: list[str]):
     return jnp.array([np.pad(l, (max_l - len(l), buffer_len - max_l), constant_values=pad_idx) for l in lines]), max_l
 
 
-def run_model(MODEL_CP_PATH=None):
-    model_name = "Qwen/Qwen3-0.6B"
-    if MODEL_CP_PATH is None:
-        MODEL_CP_PATH = "/tmp/models-bonsai/" + model_name.split("/")[1]
-    if not os.path.isdir(MODEL_CP_PATH):
-        snapshot_download(model_name, local_dir=MODEL_CP_PATH)
+def run_model():
+    model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
 
     query = ["Why is the sky blue instead of any other color like purple?", "Who am I?"]
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_CP_PATH)
+    tokenizer = AutoTokenizer.from_pretrained(model_ckpt_path)
     tokens, max_len = tokenize(tokenizer, query)
     batch_size, token_len = tokens.shape
 
@@ -55,13 +51,13 @@ def run_model(MODEL_CP_PATH=None):
     assert cache_size >= max_len + gen_steps, f"Cache size ({cache_size}) must be >= {max_len} + {gen_steps}"
 
     config = modeling.ModelCfg.qwen3_0_6b()
-    model = params.create_model_from_safe_tensors(MODEL_CP_PATH, config)
+    model = params.create_model_from_safe_tensors(model_ckpt_path, config)
     cache = modeling.init_cache(
         num_layers=config.num_layers,
         batch_size=batch_size,
         cache_size=cache_size,
         num_kv_heads=config.num_kv_heads,
-        head_dim=config.head_dim
+        head_dim=config.head_dim,
     )
     graphdef, state = nnx.split((model, cache))
     state = jax.tree.leaves(state)  # Better perf from flattened jax state due to no pytree trasversals.
@@ -82,10 +78,10 @@ def run_model(MODEL_CP_PATH=None):
             t = time.perf_counter()  # measure steps 6-10
     jax.block_until_ready(tokens_list)
     print(f"{time.perf_counter() - t:.4f} s")
-    tokens_list = jnp.concatenate(tokens_list, -1)
+    tokens_list = jnp.concatenate(tokens_list, axis=-1)
     for i, q in enumerate(query):
         print(f"User:\n {q}")
-        print(f"Answer:\n {''.join([tokenizer.decode(t) for t in tokens_list[i, :]])}\n\n")
+        print(f"Answer:\n {tokenizer.decode(tokens_list[i], skip_special_tokens=True)}\n\n")
 
 
 if __name__ == "__main__":
