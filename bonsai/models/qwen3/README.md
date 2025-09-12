@@ -19,7 +19,7 @@ This directory contains a pure JAX implementation of the [Qwen3 language model](
 | [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B) | ✅ Supported | ❔ Needs check | ❔ Needs check | ✅ Runs | ❔ Needs check | ❔ Needs check| ❔ Needs check | ❔ Needs check|
 | [Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) | ✅ Supported | ❔ Needs check | ❔ Needs check| ✅ Runs | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |
 | [Qwen3-14B](https://huggingface.co/Qwen/Qwen3-14B) | ✅ Supported | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |
-| [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B) | ✅ Supported | ❔ Needs check | ❔ Needs check | ⛔️ OOM | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |
+| [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B) | ✅ Supported | ❔ Needs check | ❔ Needs check | ⛔️ Not supported | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |
 | **MoE Models** | | | | | | | | |
 | [Qwen3-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B) | 🟡 Not started | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |
 | [Qwen3-235B-A22B](https://huggingface.co/Qwen/Qwen3-235B-A22B) | 🟡 Not started | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |
