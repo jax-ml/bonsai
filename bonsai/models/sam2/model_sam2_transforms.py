@@ -50,11 +50,7 @@ def _postprocess_mask_numpy(mask, threshold, max_hole_area, max_sprinkle_area):
 
 class SAM2Transforms:
     def __init__(
-        self,
-        resolution: int,
-        mask_threshold: float,
-        max_hole_area: float = 0.0,
-        max_sprinkle_area: float = 0.0,
+        self, resolution: int, mask_threshold: float, max_hole_area: float = 0.0, max_sprinkle_area: float = 0.0
     ):
         self.resolution = resolution
         self.mask_threshold = mask_threshold
@@ -82,10 +78,7 @@ class SAM2Transforms:
         return jnp.stack([self(img) for img in img_list], axis=0)
 
     def transform_coords(
-        self,
-        coords: jnp.ndarray,
-        normalize: bool = False,
-        orig_hw: tuple[int, int] | None = None,
+        self, coords: jnp.ndarray, normalize: bool = False, orig_hw: tuple[int, int] | None = None
     ) -> jnp.ndarray:
         if normalize:
             assert orig_hw is not None
@@ -96,21 +89,14 @@ class SAM2Transforms:
         return coords
 
     def transform_boxes(
-        self,
-        boxes: jnp.ndarray,
-        normalize: bool = False,
-        orig_hw: tuple[int, ...] | None = None,
+        self, boxes: jnp.ndarray, normalize: bool = False, orig_hw: tuple[int, ...] | None = None
     ) -> jnp.ndarray:
         boxes = boxes.reshape(-1, 2, 2)
         return self.transform_coords(boxes, normalize, orig_hw)
 
     @partial(jax.jit, static_argnames=["self", "orig_hw", "do_postprocess"])
     def postprocess_masks(
-        self,
-        masks: jnp.ndarray,
-        orig_hw: tuple[int, int],
-        *,
-        do_postprocess: bool = False,
+        self, masks: jnp.ndarray, orig_hw: tuple[int, int], *, do_postprocess: bool = False
     ) -> jnp.ndarray:
         """
         Perform post-processing on output masks. Safe for JIT if do_postprocess=False.
@@ -132,17 +118,13 @@ class SAM2Transforms:
                 import warnings
 
                 warnings.warn(
-                    f"{e}\n\nSkipping post-processing due to the error above.",
-                    category=UserWarning,
-                    stacklevel=2,
+                    f"{e}\n\nSkipping post-processing due to the error above.", category=UserWarning, stacklevel=2
                 )
                 masks_np = np.array(masks)
             masks = jnp.array(masks_np)  # Back to JAX
 
         # Resize to original shape (always in JAX)
         resized = jax.image.resize(
-            masks,
-            shape=(masks.shape[0], masks.shape[1], orig_hw[0], orig_hw[1]),
-            method="bilinear",
+            masks, shape=(masks.shape[0], masks.shape[1], orig_hw[0], orig_hw[1]), method="bilinear"
         )
         return resized

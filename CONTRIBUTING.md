@@ -39,7 +39,7 @@ Follow these steps to contribute code:
    ```bash
    git clone https://github.com/YOUR_USERNAME/bonsai
    cd bonsai
-   pip install -r build/test-requirements.txt  # Installs all testing requirements.
+   pip install -e .  # Installs all testing requirements.
    ```
 
 4. Add the Bonsai repo as an upstream remote, so you can use it to sync your
@@ -80,10 +80,10 @@ Follow these steps to contribute code:
    git push --set-upstream origin name-of-change
    ```
 
-   Please ensure your contribution is a single commit (see {ref}`single-change-commits`)
+   Please ensure your contribution is a single commit (see [single change commits](https://docs.jax.dev/en/latest/contributing.html#single-change-commits))
 
 7. Create a pull request from the Bonsai repository and send it for review.
-    Check the {ref}`pr-checklist` for considerations when preparing your PR, and
+    Check the [PR checklist](#bonsai-pull-request-checklist) for considerations when preparing your PR, and
     consult [GitHub Help](https://help.github.com/articles/about-pull-requests/)
     if you need more information on using pull requests.
 
