@@ -548,7 +548,7 @@ class LLaDABlock(nnx.Module):
         return x, cache
 
 
-_NEG_INF_F32 = jnp.finfo(jnp.float32).min
+_NEG_INF_F32 = jnp.finfo(jnp.bfloat16).min
 
 
 def ensure_finite(x: jax.Array, check_neg_inf: bool = True, check_pos_inf: bool = False) -> jax.Array:
@@ -575,7 +575,7 @@ def ensure_finite(x: jax.Array, check_neg_inf: bool = True, check_pos_inf: bool 
     return x
 
 
-def causal_attention_bias(seq_len: int, dtype=jnp.float32) -> jax.Array:
+def causal_attention_bias(seq_len: int, dtype=jnp.bfloat16) -> jax.Array:
     """
     Return a bias of shape (1, 1, L, L) whose i j entry is 0 when
     j <= i and -infty when j > i.  (Used to mask out future tokens.)
@@ -586,7 +586,7 @@ def causal_attention_bias(seq_len: int, dtype=jnp.float32) -> jax.Array:
     return bias[None, None, :, :]  # (1,1,L,L)
 
 
-def get_causal_attention_bias(cache: dict[str, jax.Array], seq_len: int, dtype=jnp.float32) -> jax.Array:
+def get_causal_attention_bias(cache: dict[str, jax.Array], seq_len: int, dtype=jnp.bfloat16) -> jax.Array:
     """
     Retrieve (or create) a causal-mask bias from a simple Python dict.
     """
@@ -601,7 +601,7 @@ def get_causal_attention_bias(cache: dict[str, jax.Array], seq_len: int, dtype=j
     return bias
 
 
-def alibi_attention_bias(seq_len: int, cfg, dtype=jnp.float32) -> jax.Array:
+def alibi_attention_bias(seq_len: int, cfg, dtype=jnp.bfloat16) -> jax.Array:
     """
     Construct the ALiBi (Attention with Linear Biases) bias tensor.
     """
@@ -622,7 +622,7 @@ def alibi_attention_bias(seq_len: int, cfg, dtype=jnp.float32) -> jax.Array:
     return alibi * scale  # (1,n_heads,L,L)
 
 
-def get_alibi_attention_bias(cache: dict[str, jax.Array], seq_len: int, cfg, dtype=jnp.float32) -> jax.Array:
+def get_alibi_attention_bias(cache: dict[str, jax.Array], seq_len: int, cfg, dtype=jnp.bfloat16) -> jax.Array:
     """
     Retrieve (or create) the ALiBi (Attention with Linear Biases) bias tensor.
     """
