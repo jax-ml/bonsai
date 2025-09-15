@@ -96,7 +96,6 @@ def generate_for_benchmark(
 
     state = init_state
 
-    # --- define do_step exactly like the scan body, but as a pure function
     def _do_step(x, state, rng, i, stop, num_transfer_tokens, *, remasking: str):
         mask_index = x == mask_id
 
@@ -143,7 +142,7 @@ def generate_for_benchmark(
 
     # JIT the step function for realistic per-step timing.
     do_step = partial(_do_step, remasking=remasking)
-    do_step_jit = jax.jit(do_step, donate_argnames=["state"])  # donate state
+    do_step_jit = jax.jit(do_step)
 
     # Optional warmup compile outside the timing window
     # (uses the very first block/step's shapes & branches)
@@ -190,7 +189,7 @@ def generate_for_benchmark(
 x_final, state_final, step_times = generate_for_benchmark(
     graphdef,
     state,
-    prompt,
+    tokens,
     steps=64,
     gen_length=32,
     block_length=32,
@@ -205,7 +204,7 @@ x_final, state_final, step_times = generate_for_benchmark(
 )
 
 print("Per-step (s):", [f"{t:.4f}" for t in step_times])
-print(f"Avg: {sum(step_times)/len(step_times):.4f} s")
+print(f"Avg: {sum(step_times) / len(step_times):.4f} s")
 
 # Decode
 B, L_total = x_final.shape
