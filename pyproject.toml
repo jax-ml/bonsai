@@ -37,6 +37,9 @@ resnet50 = []
 sam2 = [
   "pillow>=11.3.0",
 ]
+vgg19 = [
+  "h5py",
+]
 
 all = [
   "jax-bonsai[qwen3]",

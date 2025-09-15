@@ -9,11 +9,23 @@ This directory contains a pure JAX implementation of the [VGG-19](https://huggin
 
 ### Running this model
 
-Run ResNet model inference in action:
+Run VGG model inference in action:
 
 ```python
 python bonsai/models/vgg19/tests/run_model.py
 ```
+
+
+### Validation with Real Images
+
+For comprehensive validation of the VGG-19 model on actual images, see the [ImageNet validation colab](tests/VGG19_ImageNet_validation_example.ipynb). This notebook demonstrates:
+
+- ImageNet classification on real downloaded images
+- Proper image preprocessing and normalization
+- Top-k predictions with confidence scores
+- Batch processing for efficiency
+- Performance benchmarking across batch sizes
+
 
 
 ## How to contribute to this model

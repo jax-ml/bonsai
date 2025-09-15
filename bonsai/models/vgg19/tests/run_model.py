@@ -12,52 +12,56 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import time
 
 import jax
 import jax.numpy as jnp
+from flax import nnx
 from huggingface_hub import snapshot_download
 
-from bonsai.models.vgg19 import modeling as model_lib
-from bonsai.models.vgg19 import params
+from bonsai.models.vgg19 import modeling, params
 
-# 1. Download safetensors file
-model_name = "keras/vgg_19_imagenet"
-MODEL_CP_PATH = "/tmp/models-bonsai/" + model_name.split("/")[1]
 
-if not os.path.isdir(MODEL_CP_PATH):
-    snapshot_download(model_name, local_dir=MODEL_CP_PATH)
+def run_model():
+    # 1. Download h5 file
+    model_ckpt_path = snapshot_download("keras/vgg_19_imagenet")
 
-task_weights_path = os.path.join(MODEL_CP_PATH, "task.weights.h5")
+    # 2. Load pretrained model
+    config = modeling.ModelCfg.vgg_19()
+    model = params.create_model_from_h5(model_ckpt_path, config)
+    graphdef, state = nnx.split(model)
 
-# 2. Load pretrained model
-model = params.create_vgg19_from_pretrained(task_weights_path)
+    # 3. Prepare dummy input
+    batch_size = 8
+    image_size = 224
+    dummy_input = jnp.ones((batch_size, image_size, image_size, 3), dtype=jnp.float32)
 
-# 3. Prepare dummy input
-batch_size = 8
-image_size = 224
-dummy_input = jnp.ones((batch_size, image_size, image_size, 3), dtype=jnp.float32)
+    # 4. Warmup + profiling
+    # Warmup (triggers compilation)
+    _ = modeling.forward(graphdef, state, dummy_input)
+    jax.block_until_ready(_)
 
-# 4. Warmup + profiling
-# Warmup (triggers compilation)
-_ = model_lib.forward(model, dummy_input)
-jax.block_until_ready(_)
+    # Profile a few steps
+    jax.profiler.start_trace("/tmp/profile-vgg19")
+    for _ in range(5):
+        logits = modeling.forward(graphdef, state, dummy_input)
+        jax.block_until_ready(logits)
+    jax.profiler.stop_trace()
 
-# Profile a few steps
-jax.profiler.start_trace("/tmp/profile-vgg19")
-for _ in range(5):
-    logits = model_lib.forward(model, dummy_input)
-    jax.block_until_ready(logits)
-jax.profiler.stop_trace()
+    # 5. Timed execution
+    t0 = time.perf_counter()
+    for _ in range(10):
+        logits = modeling.forward(graphdef, state, dummy_input)
+        jax.block_until_ready(logits)
+    print(f"10 runs took {time.perf_counter() - t0:.4f} s")
 
-# 5. Timed execution
-t0 = time.perf_counter()
-for _ in range(10):
-    logits = model_lib.forward(model, dummy_input)
-    jax.block_until_ready(logits)
-print(f"10 runs took {time.perf_counter() - t0:.4f} s")
+    # 6. Show top-1 predicted class
+    pred = jnp.argmax(logits, axis=-1)
+    print("Predicted classes:", pred)
 
-# 6. Show top-1 predicted class
-pred = jnp.argmax(logits, axis=-1)
-print("Predicted classes:", pred)
+
+if __name__ == "__main__":
+    run_model()
+
+
+__all__ = ["run_model"]

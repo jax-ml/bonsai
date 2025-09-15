@@ -18,6 +18,7 @@ import re
 import h5py
 import jax
 import numpy as np
+from etils import epath
 from flax import nnx
 
 from bonsai.models.vgg19 import modeling as model_lib
@@ -25,16 +26,16 @@ from bonsai.models.vgg19 import modeling as model_lib
 
 def _load_h5_file(file_path: str):
     """Load weights from an HDF5 file into a flat dictionary."""
-    state_dict = {}
+    tensor_dict = {}
     with h5py.File(file_path, "r") as f:
         # Recursively visit all items in the HDF5 file
         def visit_items(name, obj):
             if isinstance(obj, h5py.Dataset):
                 # Load the data as a numpy array
-                state_dict[name] = np.array(obj)
+                tensor_dict[name] = np.array(obj)
 
         f.visititems(visit_items)
-    return state_dict
+    return tensor_dict
 
 
 def _get_key_and_transform_mapping():
@@ -88,7 +89,7 @@ def _get_key_and_transform_mapping():
 
 
 def _st_key_to_jax_key(mapping, source_key):
-    """Map a safetensors key to exactly one JAX key & transform, else warn/error."""
+    """Map a h5 key to exactly one JAX key & transform, else warn/error."""
     subs = [
         (re.sub(pat, repl, source_key), transform)
         for pat, (repl, transform) in mapping.items()
@@ -127,36 +128,39 @@ def _stoi(s):
         return s
 
 
-def create_vgg19_from_pretrained(
-    file_path: str,
-    num_classes: int = 1000,
-    *,
+def create_model_from_h5(
+    file_dir: str,
+    cfg: model_lib.ModelCfg,
     mesh: jax.sharding.Mesh | None = None,
-):
+) -> model_lib.VGG:
     """
-    Load safetensor weights from a file, then convert & merge into a flax.nnx VGG19 model.
+    Load h5 weights from a file, then convert & merge into a flax.nnx VGG19 model.
 
     Returns:
       A flax.nnx.Model instance with loaded parameters.
     """
-    state_dict = _load_h5_file(file_path)
+    file = epath.Path(file_dir).expanduser() / "task.weights.h5"
+    if not file:
+        raise ValueError(f"No safetensors found in {file_dir}")
 
-    vgg19 = nnx.eval_shape(lambda: model_lib.VGG19(num_classes=num_classes, rngs=nnx.Rngs(params=0)))
-    graph_def, abs_state = nnx.split(vgg19)
-    jax_state = abs_state.to_pure_dict()
+    tensor_dict = _load_h5_file(file)
+
+    vgg = nnx.eval_shape(lambda: model_lib.VGG(cfg, rngs=nnx.Rngs(params=0)))
+    graph_def, abs_state = nnx.split(vgg)
+    state_dict = abs_state.to_pure_dict()
 
     mapping = _get_key_and_transform_mapping()
-    for st_key, tensor in state_dict.items():
+    for st_key, tensor in tensor_dict.items():
         jax_key, transform = _st_key_to_jax_key(mapping, st_key)
         if jax_key is None:
             continue
         keys = [_stoi(k) for k in jax_key.split(".")]
-        _assign_weights(keys, tensor, jax_state, st_key, transform)
+        _assign_weights(keys, tensor, state_dict, st_key, transform)
 
     if mesh is not None:
         sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
-        jax_state = jax.device_put(jax_state, sharding)
+        state_dict = jax.device_put(state_dict, sharding)
     else:
-        jax_state = jax.device_put(jax_state, jax.devices()[0])
+        state_dict = jax.device_put(state_dict, jax.devices()[0])
 
-    return nnx.merge(graph_def, jax_state)
+    return nnx.merge(graph_def, state_dict)

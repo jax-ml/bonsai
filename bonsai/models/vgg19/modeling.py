@@ -12,11 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 from functools import partial
 
 import jax
 from flax import nnx
 from flax.linen.pooling import max_pool
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelCfg:
+    num_classes: int
+    conv_sizes: list[int]
+
+    @classmethod
+    def vgg_19(cls):
+        return cls(
+            num_classes=1000,
+            conv_sizes=[2, 2, 4, 4, 4],
+        )
 
 
 class ConvBlock(nnx.Module):
@@ -38,12 +52,12 @@ class ConvBlock(nnx.Module):
 
 
 class VGG(nnx.Module):
-    def __init__(self, conv_sizes: list[int], num_classes: int, *, rngs: nnx.Rngs):
-        self.conv_block0 = ConvBlock(conv_sizes[0], in_channels=3, out_channels=64, rngs=rngs)
-        self.conv_block1 = ConvBlock(conv_sizes[1], in_channels=64, out_channels=128, rngs=rngs)
-        self.conv_block2 = ConvBlock(conv_sizes[2], in_channels=128, out_channels=256, rngs=rngs)
-        self.conv_block3 = ConvBlock(conv_sizes[3], in_channels=256, out_channels=512, rngs=rngs)
-        self.conv_block4 = ConvBlock(conv_sizes[4], in_channels=512, out_channels=512, rngs=rngs)
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        self.conv_block0 = ConvBlock(cfg.conv_sizes[0], in_channels=3, out_channels=64, rngs=rngs)
+        self.conv_block1 = ConvBlock(cfg.conv_sizes[1], in_channels=64, out_channels=128, rngs=rngs)
+        self.conv_block2 = ConvBlock(cfg.conv_sizes[2], in_channels=128, out_channels=256, rngs=rngs)
+        self.conv_block3 = ConvBlock(cfg.conv_sizes[3], in_channels=256, out_channels=512, rngs=rngs)
+        self.conv_block4 = ConvBlock(cfg.conv_sizes[4], in_channels=512, out_channels=512, rngs=rngs)
 
         self.flatten = partial(lambda x: x.reshape(x.shape[0], -1))
         self.classifier = nnx.Sequential(
@@ -51,7 +65,7 @@ class VGG(nnx.Module):
             nnx.relu,
             nnx.Linear(4096, 4096, rngs=rngs),
             nnx.relu,
-            nnx.Linear(4096, num_classes, rngs=rngs),
+            nnx.Linear(4096, cfg.num_classes, rngs=rngs),
         )
 
     def __call__(self, x):
@@ -67,10 +81,7 @@ class VGG(nnx.Module):
         return x
 
 
-def VGG19(num_classes=1000, *, rngs: nnx.Rngs):
-    return VGG([2, 2, 4, 4, 4], num_classes=num_classes, rngs=rngs)
-
-
-@partial(jax.jit, static_argnames=["model"])
-def forward(model, x):
+@partial(jax.jit, donate_argnums=(1))
+def forward(graphdef: nnx.GraphDef, state: nnx.State, x: jax.Array) -> jax.Array:
+    model = nnx.merge(graphdef, state)
     return model(x)
