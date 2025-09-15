@@ -72,6 +72,26 @@ class LayerNormType(Enum):
     GEMMA_RMS = auto()
 
 
+class RMSNorm(nnx.Module):
+    def __init__(self, dim: int, epsilon: float = 1e-5, use_bias: bool = False, *, rngs: nnx.Rngs):
+        self.eps = epsilon
+        self.scale = nnx.Param(jnp.ones((dim,)), rngs=rngs)
+        if use_bias:
+            self.bias = nnx.Param(jnp.zeros((dim,)), rngs=rngs)
+
+    def __call__(self, x: jax.Array):
+        og_dtype = x.dtype
+        var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
+        x = x.astype(jnp.float32)
+        x = x * jax.lax.rsqrt(var + self.eps)
+        if hasattr(self, "scale"):
+            if hasattr(self, "bias"):
+                x = x * self.scale.value + self.bias.value
+            else:
+                x = x * self.scale.value
+        return x.astype(og_dtype)
+
+
 class GemmaRMSNorm(nnx.Module):
     def __init__(self, dim: int, epsilon: float = 1e-5, use_bias: bool = False, *, rngs: nnx.Rngs):
         self.eps = epsilon
@@ -81,13 +101,16 @@ class GemmaRMSNorm(nnx.Module):
             self.bias = nnx.Param(jnp.zeros((dim,)), rngs=rngs)
 
     def __call__(self, x: jax.Array) -> jax.Array:
+        og_dtype = x.dtype
         var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
+        x = x.astype(jnp.float32)
         y = x * jax.lax.rsqrt(var + self.eps)
         if hasattr(self, "scale"):
-            y = y * (1.0 + self.scale.value)
-        if hasattr(self, "bias"):
-            y = y + self.bias.value
-        return y.astype(x.dtype)
+            if hasattr(self, "bias"):
+                y = y * (1.0 + self.scale.value) + self.bias.value
+            else:
+                y = y * (1.0 + self.scale.value)
+        return y.astype(og_dtype)
 
 
 def get_layer_norm(cfg, dim: int | None = None, *, rngs: nnx.Rngs):
@@ -101,7 +124,7 @@ def get_layer_norm(cfg, dim: int | None = None, *, rngs: nnx.Rngs):
         return nnx.LayerNorm(dim, epsilon=eps, use_bias=use_bias, rngs=rngs)
 
     if ln_type == LayerNormType.RMS:
-        return nnx.RMSNorm(dim, epsilon=eps, rngs=rngs)
+        return RMSNorm(dim, epsilon=eps, use_bias=use_bias, rngs=rngs)
 
     if ln_type == LayerNormType.GEMMA_RMS:
         return GemmaRMSNorm(dim, epsilon=eps, use_bias=use_bias, rngs=rngs)
