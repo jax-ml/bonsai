@@ -353,15 +353,15 @@ class LLaDABlock(nnx.Module):
         self.dropout = nnx.Dropout(self.cfg.residual_dropout)
 
         # Layer norms
-        self.q_norm = None
         self.k_norm = None
+        self.q_norm = None
         if cfg.attention_layer_norm:
-            self.q_norm = get_layer_norm(
+            self.k_norm = get_layer_norm(
                 cfg,
                 dim=(cfg.d_model // cfg.n_heads) * cfg.effective_n_kv_heads,
                 rngs=rngs,
             )
-            self.k_norm = get_layer_norm(cfg, rngs=rngs)
+            self.q_norm = get_layer_norm(cfg, rngs=rngs)
 
         self.attn_norm = get_layer_norm(cfg, rngs=rngs)
         self.ff_norm = get_layer_norm(cfg, rngs=rngs)
