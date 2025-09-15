@@ -788,8 +788,7 @@ row_topk_mask_vmapped = jax.vmap(_row_topk_mask, in_axes=(0, 0), out_axes=0)
 def forward(graphdef: nnx.GraphDef[nnx.Module], state: nnx.State, tokens: jax.Array):
     model = nnx.merge(graphdef, state)
     out = model(tokens)
-    state = jax.tree.leaves(nnx.state(model))
-    return out.logits, state
+    return out.logits
 
 
 @partial(
@@ -918,12 +917,11 @@ def generate_forloop(
         if cfg_scale > 0.0:
             un_x = jnp.where(prompt_index, mask_id, x)
             x_stack = jnp.concatenate([x, un_x], axis=0)  # (2B, L)
-            logits_both, state = forward(graphdef, state, x_stack)
+            logits_both = forward(graphdef, state, x_stack)
             logits, logits_un = jnp.split(logits_both, 2, axis=0)
             logits = logits_un + (cfg_scale + 1.0) * (logits - logits_un)
-            state_next = state
         else:
-            logits, state_next = forward(graphdef, state, x)
+            logits = forward(graphdef, state, x)
 
         # Noise + argmax
         rng, sub = jax.random.split(rng)
@@ -953,7 +951,7 @@ def generate_forloop(
         transfer_index = row_topk_mask_vmapped(conf, k_vec)
 
         x = jnp.where(transfer_index, x0_sel, x)
-        return x, state_next, rng
+        return x, rng
 
     def do_block(x, state, rng, b_idx):
         start = Lp + b_idx * block_length
@@ -963,11 +961,11 @@ def generate_forloop(
         num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)
 
         for i in range(steps_per_block):
-            x, state, rng = do_step(x, state, rng, i, stop, num_transfer_tokens)
+            x, rng = do_step(x, state, rng, i, stop, num_transfer_tokens)
 
-        return x, state, rng
+        return x, rng
 
     for b_idx in range(num_blocks):
-        x, state, rng = do_block(x, state, rng, b_idx)
+        x, rng = do_block(x, state, rng, b_idx)
 
-    return x, state
+    return x
