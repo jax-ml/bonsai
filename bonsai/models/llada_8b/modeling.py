@@ -760,9 +760,10 @@ def add_gumbel_noise(logits: jax.Array, temperature: float, key: jax.Array) -> j
     if temperature == 0.0:
         return logits
     logits64 = logits.astype(jnp.float64)
-    u = jax.random.uniform(key, shape=logits.shape, dtype=jnp.float64, minval=1e-6, maxval=1.0)
-    g = (-jnp.log(u)) ** temperature
-    return jnp.exp(logits64) / g
+    u = jax.random.uniform(key, shape=logits.shape, dtype=jnp.float64, minval=1e-6, maxval=1 - 1e-6)
+    g = jnp.power(-jnp.log(u), temperature)
+    z = jnp.exp(logits64) / g
+    return z.astype(logits.dtype)
 
 
 def get_num_transfer_tokens(mask_index: jax.Array, steps: int) -> jax.Array:
@@ -775,10 +776,10 @@ def get_num_transfer_tokens(mask_index: jax.Array, steps: int) -> jax.Array:
 
 
 def _row_topk_mask(conf_row: jax.Array, k: jax.Array) -> jax.Array:
-    L = conf_row.shape[0]
-    idx_sorted = jnp.argsort(conf_row)[::-1]
-    ranks = jnp.empty((L,), dtype=jnp.int32).at[idx_sorted].set(jnp.arange(L, dtype=jnp.int32))
-    return ranks < k
+    k = jnp.minimum(k, conf_row.shape[0])  # guard
+    _, idx = jax.lax.top_k(conf_row, k)
+    mask = jnp.zeros_like(conf_row, dtype=jnp.bool_).at[idx].set(True)
+    return mask
 
 
 row_topk_mask_vmapped = jax.vmap(_row_topk_mask, in_axes=(0, 0), out_axes=0)
