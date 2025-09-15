@@ -18,7 +18,7 @@ import logging
 import re
 
 import jax
-import numpy as np
+import jax.numpy as np
 import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
@@ -91,8 +91,8 @@ def find_non_array_keys(tree):
             for i, v in enumerate(subtree):
                 _recurse(v, f"{path}[{i}]")
         else:
-            # treat both numpy ndarrays and JAX Arrays as “good”
-            if not isinstance(subtree, (np.ndarray, jax.Array)):
+            # treat JAX Arrays as “good”
+            if not isinstance(subtree, jax.Array):
                 bad.append(path)
 
     _recurse(tree, "")
@@ -158,7 +158,7 @@ def assign_nan_at_path(tree, dotted_path):
     else:
         shape = (1,)  # fallback
 
-    subtree[leaf_key] = np.full(shape, np.nan, dtype=np.float32)
+    subtree[leaf_key] = np.full(shape, np.nan, dtype=np.bfloat16)
 
 
 def create_llada_from_pretrained(
