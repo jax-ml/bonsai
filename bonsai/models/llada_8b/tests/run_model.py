@@ -43,7 +43,7 @@ def tokenize(tokenizer, inputs: list[str]):
         tokenizer.apply_chat_template([{"role": "user", "content": l}], tokenize=False, add_generation_prompt=True)
         for l in inputs
     ]
-    encoded = [tokenizer.encode(s) for s in lines]
+    encoded = [tokenizer(s)["input_ids"] for s in lines]
     max_l = max(len(e) for e in encoded) if encoded else 1
     buffer_len = 2 ** math.ceil(math.log2(max(max_l, 1)))
     batch = np.stack([np.pad(e, (0, buffer_len - len(e)), constant_values=pad_id) for e in encoded], axis=0)
@@ -103,12 +103,11 @@ def generate_for_benchmark(
         if cfg_scale > 0.0:
             un_x = jnp.where(prompt_index, mask_id, x)
             x_stack = jnp.concatenate([x, un_x], axis=0)  # (2B, L)
-            logits_both, state = modeling.forward(graphdef, state, x_stack)  # (2B,L,V)
+            logits_both = modeling.forward(graphdef, state, x_stack)  # (2B,L,V)
             logits, logits_un = jnp.split(logits_both, 2, axis=0)
             logits = logits_un + (cfg_scale + 1.0) * (logits - logits_un)
-            state_next = state
         else:
-            logits, state_next = modeling.forward(graphdef, state, x)
+            logits = modeling.forward(graphdef, state, x)
 
         # Noise + argmax
         rng, sub = jax.random.split(rng)
@@ -138,7 +137,7 @@ def generate_for_benchmark(
         transfer_index = modeling.row_topk_mask_vmapped(conf, k_vec)
 
         x = jnp.where(transfer_index, x0_sel, x)
-        return x, state_next, rng
+        return x, rng
 
     # JIT the step function for realistic per-step timing.
     do_step = partial(_do_step, remasking=remasking)
@@ -151,7 +150,7 @@ def generate_for_benchmark(
     block_mask0 = lax.dynamic_slice_in_dim(x, start_index=start0, slice_size=block_length, axis=1)
     block_mask_index0 = block_mask0 == mask_id
     num_transfer_tokens0 = modeling.get_num_transfer_tokens(block_mask_index0, steps_per_block)
-    x_w, state_w, rng = do_step_jit(x, state, rng, jnp.int32(0), jnp.int32(stop0), num_transfer_tokens0)
+    x_w, rng = do_step_jit(x, state, rng, jnp.int32(0), jnp.int32(stop0), num_transfer_tokens0)
     _ = x_w.block_until_ready()  # ensure compile happens before we start measuring
 
     step_times: list[float] = []
@@ -172,7 +171,7 @@ def generate_for_benchmark(
                 jax.profiler.start_trace(profile_dir)
 
             t0 = time.perf_counter()
-            x, state, rng = do_step_jit(x, state, rng, jnp.int32(i), jnp.int32(stop), num_transfer_tokens)
+            x, rng = do_step_jit(x, state, rng, jnp.int32(i), jnp.int32(stop), num_transfer_tokens)
             _ = x.block_until_ready()  # sync to measure device time
             dt = time.perf_counter() - t0
             step_times.append(dt)
@@ -183,20 +182,19 @@ def generate_for_benchmark(
 
             global_step += 1
 
-    return x, state, step_times
+    return x, step_times
 
 
-x_final, state_final, step_times = generate_for_benchmark(
+x_final, step_times = generate_for_benchmark(
     graphdef,
     state,
     tokens,
-    steps=64,
-    gen_length=32,
+    steps=128,
+    gen_length=128,
     block_length=32,
-    temperature=0.2,
-    cfg_scale=1.0,
+    temperature=0.0,
+    cfg_scale=0.0,
     remasking="low_confidence",
-    mask_id=126336,
     rng=jax.random.PRNGKey(0),
     profile_dir="/tmp/profile-data",
     profile_start_step=1,
@@ -212,7 +210,7 @@ B, L_total = x_final.shape
 
 def decode_batch(seqs):
     if hasattr(tokenizer, "batch_decode"):
-        return tokenizer.batch_decode(seqs, skip_special_tokens=False)
+        return tokenizer.batch_decode(seqs, skip_special_tokens=True)
     return [tokenizer.decode(s) for s in seqs]
 
 
