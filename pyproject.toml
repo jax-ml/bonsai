@@ -39,6 +39,7 @@ sam2 = [
 ]
 vgg19 = [
   "h5py",
+]
 testing = [
   "torch",
 ]
