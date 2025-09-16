@@ -1,41 +1,58 @@
-# JAX NNX implementation of Whisper model
-# This replaces the original PyTorch model.py with JAX NNX while keeping the same interface
+# Copyright 2025 The JAX Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-import base64
-import gzip
-from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Tuple
+"""Whisper model implementation in JAX NNX - FIXED VERSION based on original PyTorch."""
 
-import numpy as np
-import jax
-import jax.numpy as jnp
-from flax import nnx
+from typing import Optional, Dict, Tuple
 import math
 
-from decoding import decode as decode_function
-from decoding import detect_language as detect_language_function
-from transcribe import transcribe as transcribe_function
+import jax
+import jax.numpy as jnp
+import numpy as np
+from flax import nnx
 
-def _gelu_pytorch_compatible(x):
-    """PyTorch-compatible GELU implementation."""
-    # PyTorch uses the exact GELU formula: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
-    return 0.5 * x * (1 + jnp.tanh(jnp.sqrt(2 / math.pi) * (x + 0.044715 * x**3)))
 
-@dataclass
 class ModelDimensions:
-    n_mels: int
-    n_audio_ctx: int
-    n_audio_state: int
-    n_audio_head: int
-    n_audio_layer: int
-    n_vocab: int
-    n_text_ctx: int
-    n_text_state: int
-    n_text_head: int
-    n_text_layer: int
+    """Model dimensions for Whisper."""
+    def __init__(
+        self,
+        n_mels: int,
+        n_audio_ctx: int,
+        n_audio_state: int,
+        n_audio_head: int,
+        n_audio_layer: int,
+        n_vocab: int,
+        n_text_ctx: int,
+        n_text_state: int,
+        n_text_head: int,
+        n_text_layer: int,
+    ):
+        self.n_mels = n_mels
+        self.n_audio_ctx = n_audio_ctx
+        self.n_audio_state = n_audio_state
+        self.n_audio_head = n_audio_head
+        self.n_audio_layer = n_audio_layer
+        self.n_vocab = n_vocab
+        self.n_text_ctx = n_text_ctx
+        self.n_text_state = n_text_state
+        self.n_text_head = n_text_head
+        self.n_text_layer = n_text_layer
+
 
 class MultiHeadAttention(nnx.Module):
+    """Multi-head attention - FIXED VERSION based on original PyTorch."""
+    
     def __init__(self, n_state: int, n_head: int, rngs: nnx.Rngs):
         self.n_head = n_head
         self.query = nnx.Linear(n_state, n_state, rngs=rngs)
@@ -43,23 +60,32 @@ class MultiHeadAttention(nnx.Module):
         self.value = nnx.Linear(n_state, n_state, rngs=rngs)
         self.out = nnx.Linear(n_state, n_state, rngs=rngs)
 
-    def __call__(self, x: jnp.ndarray, xa: Optional[jnp.ndarray] = None, mask: Optional[jnp.ndarray] = None, kv_cache: Optional[Dict] = None):
+    @jax.jit
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        xa: Optional[jnp.ndarray] = None,
+        mask: Optional[jnp.ndarray] = None,
+        kv_cache: Optional[Dict] = None,
+    ) -> Tuple[jnp.ndarray, Optional[jnp.ndarray]]:
         q = self.query(x)
 
         if kv_cache is None or xa is None or self.key not in kv_cache:
-            # hooks, if installed (i.e. kv_cache is not None), will prepend the cached kv tensors;
-            # otherwise, perform key/value projections for self- or cross-attention as usual.
+            # For self-attention: use x, for cross-attention: use xa
             k = self.key(x if xa is None else xa)
             v = self.value(x if xa is None else xa)
         else:
-            # for cross-attention, calculate keys and values once and reuse in subsequent calls.
+            # For cross-attention, reuse cached keys and values
             k = kv_cache[self.key]
             v = kv_cache[self.value]
 
         wv, qk = self.qkv_attention(q, k, v, mask)
         return self.out(wv), qk
 
-    def qkv_attention(self, q: jnp.ndarray, k: jnp.ndarray, v: jnp.ndarray, mask: Optional[jnp.ndarray] = None):
+    @jax.jit
+    def qkv_attention(
+        self, q: jnp.ndarray, k: jnp.ndarray, v: jnp.ndarray, mask: Optional[jnp.ndarray] = None
+    ) -> Tuple[jnp.ndarray, Optional[jnp.ndarray]]:
         n_batch, n_ctx, n_state = q.shape
         scale = (n_state // self.n_head) ** -0.25
         
@@ -85,35 +111,56 @@ class MultiHeadAttention(nnx.Module):
         
         return wv, qk
 
+
 class ResidualAttentionBlock(nnx.Module):
+    """Residual attention block - FIXED VERSION based on original PyTorch."""
+    
     def __init__(self, n_state: int, n_head: int, cross_attention: bool = False, rngs: nnx.Rngs = None):
         self.attn = MultiHeadAttention(n_state, n_head, rngs=rngs)
         self.attn_ln = nnx.LayerNorm(n_state, rngs=rngs)
-        
-        self.cross_attn = MultiHeadAttention(n_state, n_head, rngs=rngs) if cross_attention else None
-        self.cross_attn_ln = nnx.LayerNorm(n_state, rngs=rngs) if cross_attention else None
-        
+
+        if cross_attention:
+            self.cross_attn = MultiHeadAttention(n_state, n_head, rngs=rngs)
+            self.cross_attn_ln = nnx.LayerNorm(n_state, rngs=rngs)
+        else:
+            self.cross_attn = None
+            self.cross_attn_ln = None
+
+        # MLP: n_state -> n_state * 4 -> n_state (same as PyTorch)
         n_mlp = n_state * 4
         self.mlp_linear1 = nnx.Linear(n_state, n_mlp, rngs=rngs)
         self.mlp_linear2 = nnx.Linear(n_mlp, n_state, rngs=rngs)
         self.mlp_ln = nnx.LayerNorm(n_state, rngs=rngs)
 
-    def __call__(self, x: jnp.ndarray, xa: Optional[jnp.ndarray] = None, mask: Optional[jnp.ndarray] = None, kv_cache: Optional[Dict] = None):
+    @jax.jit
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        xa: Optional[jnp.ndarray] = None,
+        mask: Optional[jnp.ndarray] = None,
+        kv_cache: Optional[Dict] = None,
+    ) -> jnp.ndarray:
+        # Self-attention with residual connection
         x = x + self.attn(self.attn_ln(x), mask=mask, kv_cache=kv_cache)[0]
         
+        # Cross-attention with residual connection (if enabled)
         if self.cross_attn:
             x = x + self.cross_attn(self.cross_attn_ln(x), xa, mask=None, kv_cache=kv_cache)[0]
-            
-        # Use PyTorch-compatible GELU implementation
-        x = x + self.mlp_linear2(_gelu_pytorch_compatible(self.mlp_linear1(self.mlp_ln(x))))
+        
+        # MLP with residual connection (same as PyTorch: Sequential(Linear, GELU, Linear))
+        x = x + self.mlp_linear2(jax.nn.gelu(self.mlp_linear1(self.mlp_ln(x))))
+        
         return x
 
+
 class AudioEncoder(nnx.Module):
+    """Audio encoder - same as before."""
+    
     def __init__(self, n_mels: int, n_ctx: int, n_state: int, n_head: int, n_layer: int, rngs: nnx.Rngs):
         self.conv1 = nnx.Conv(n_mels, n_state, kernel_size=(3,), padding=1, rngs=rngs)
         self.conv2 = nnx.Conv(n_state, n_state, kernel_size=(3,), strides=(2,), padding=1, rngs=rngs)
         
-        # Positional embeddings (this was missing!)
+        # Positional embeddings
         self.positional_embedding = nnx.Param(jnp.empty((n_ctx, n_state)))
         
         # Transformer blocks
@@ -124,6 +171,7 @@ class AudioEncoder(nnx.Module):
         
         self.ln_post = nnx.LayerNorm(n_state, rngs=rngs)
 
+    @jax.jit
     def __call__(self, x: jnp.ndarray):
         # x shape: (batch, n_mels, time) -> (batch, time, n_mels) for NNX Conv
         x = x.transpose(0, 2, 1)  # (batch, time, n_mels)
@@ -131,7 +179,7 @@ class AudioEncoder(nnx.Module):
         x = jax.nn.gelu(self.conv2(x))  # (batch, time/2, n_state)
         # x is now (batch, time/2, n_state)
         
-        # Add positional embeddings (this was missing!)
+        # Add positional embeddings
         seq_len = x.shape[1]
         x = x + self.positional_embedding[:seq_len]
         
@@ -141,65 +189,88 @@ class AudioEncoder(nnx.Module):
         x = self.ln_post(x)
         return x
 
+
 class TextDecoder(nnx.Module):
+    """Text decoder - FIXED VERSION based on original PyTorch."""
+    
     def __init__(self, n_vocab: int, n_ctx: int, n_state: int, n_head: int, n_layer: int, rngs: nnx.Rngs):
         self.token_embedding = nnx.Embed(n_vocab, n_state, rngs=rngs)
         self.positional_embedding = nnx.Param(jnp.empty((n_ctx, n_state)))
-        
+
+        # Create blocks with cross-attention (same as PyTorch)
         self.blocks = [
             ResidualAttentionBlock(n_state, n_head, cross_attention=True, rngs=rngs)
             for _ in range(n_layer)
         ]
         
         self.ln = nnx.LayerNorm(n_state, rngs=rngs)
-        self.mask = jnp.full((n_ctx, n_ctx), -jnp.inf).at[jnp.triu_indices(n_ctx, k=1)].set(0)
 
-    def __call__(self, x: jnp.ndarray, xa: jnp.ndarray, kv_cache: Optional[Dict] = None):
+        # Create causal mask (same as PyTorch)
+        mask = jnp.full((n_ctx, n_ctx), -jnp.inf)
+        mask = jnp.triu(mask, k=1)
+        self.mask = mask
+
+    @jax.jit
+    def __call__(self, x: jnp.ndarray, xa: jnp.ndarray, kv_cache: Optional[Dict] = None) -> jnp.ndarray:
+        """
+        x : jnp.ndarray, shape = (batch_size, <= n_ctx)
+            the text tokens
+        xa : jnp.ndarray, shape = (batch_size, n_audio_ctx, n_audio_state)
+            the encoded audio features to be attended on
+        """
+        # Calculate offset for positional embeddings (same as PyTorch)
         offset = next(iter(kv_cache.values())).shape[1] if kv_cache and len(kv_cache) > 0 else 0
-        x = self.token_embedding(x) + self.positional_embedding[offset : offset + x.shape[1]]
+        
+        # Token embedding + positional embedding (same as PyTorch)
+        x = (
+            self.token_embedding(x)
+            + self.positional_embedding[offset : offset + x.shape[-1]]
+        )
         x = x.astype(xa.dtype)
 
-        for i, block in enumerate(self.blocks):
+        # Apply transformer blocks (same as PyTorch)
+        for block in self.blocks:
             x = block(x, xa, mask=self.mask, kv_cache=kv_cache)
 
+        # Final layer norm
         x = self.ln(x)
-        # Use matmul instead of einsum to avoid dimension issues
+        
+        # Compute logits (same as PyTorch: x @ token_embedding.weight.T)
         logits = jnp.matmul(x, self.token_embedding.embedding.astype(x.dtype).T)
-
+        
         return logits
 
+
 class Whisper(nnx.Module):
+    """Whisper model - FIXED VERSION based on original PyTorch."""
+    
     def __init__(self, dims: ModelDimensions, rngs: nnx.Rngs):
         self.dims = dims
+        
         self.encoder = AudioEncoder(
-            dims.n_mels,
-            dims.n_audio_ctx,
-            dims.n_audio_state,
-            dims.n_audio_head,
-            dims.n_audio_layer,
-            rngs=rngs
-        )
-        self.decoder = TextDecoder(
-            dims.n_vocab,
-            dims.n_text_ctx,
-            dims.n_text_state,
-            dims.n_text_head,
-            dims.n_text_layer,
-            rngs=rngs
+            dims.n_mels, dims.n_audio_ctx, dims.n_audio_state, 
+            dims.n_audio_head, dims.n_audio_layer, rngs=rngs
         )
         
-        # Add required attributes for compatibility
-        self.is_multilingual = True  # Default to multilingual
-        self.num_languages = 99  # Default number of languages
+        self.decoder = TextDecoder(
+            dims.n_vocab, dims.n_text_ctx, dims.n_text_state,
+            dims.n_text_head, dims.n_text_layer, rngs=rngs
+        )
 
-    def embed_audio(self, mel: jnp.ndarray):
+    @jax.jit
+    def embed_audio(self, mel: jnp.ndarray) -> jnp.ndarray:
+        """Embed audio features."""
         return self.encoder(mel)
 
-    def logits(self, tokens: jnp.ndarray, audio_features: jnp.ndarray):
+    @jax.jit
+    def logits(self, tokens: jnp.ndarray, audio_features: jnp.ndarray) -> jnp.ndarray:
+        """Compute logits for given tokens and audio features."""
         return self.decoder(tokens, audio_features)
 
+    @jax.jit
     def __call__(self, mel: jnp.ndarray, tokens: jnp.ndarray) -> Dict[str, jnp.ndarray]:
         return self.decoder(tokens, self.encoder(mel))
+
 
 # Compatibility functions to match original interface
 def load_model(name: str, device: str = "cpu", download_root: str = None):
@@ -221,9 +292,11 @@ def load_model(name: str, device: str = "cpu", download_root: str = None):
     rngs = nnx.Rngs(0)
     return Whisper(dims, rngs=rngs)
 
+
 def available_models():
     """Return available model names - placeholder for compatibility"""
     return ["tiny", "base", "small", "medium", "large"]
+
 
 def disable_sdpa():
     """Disable scaled dot product attention - placeholder for compatibility"""

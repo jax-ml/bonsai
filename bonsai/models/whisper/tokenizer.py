@@ -329,14 +329,14 @@ class Tokenizer:
 
 @lru_cache(maxsize=None)
 def get_encoding(name: str = "gpt2", num_languages: int = 99):
-    vocab_path = os.path.join(os.path.dirname(__file__), "assets", f"{name}.tiktoken")
-    ranks = {
-        base64.b64decode(token): int(rank)
-        for token, rank in (line.split() for line in open(vocab_path) if line)
-    }
-    n_vocab = len(ranks)
-    special_tokens = {}
-
+    # Use tiktoken library instead of loading from file
+    base_encoding = tiktoken.get_encoding("gpt2")
+    
+    # Get the base mergeable ranks (vocabulary without special tokens)
+    base_ranks = base_encoding._mergeable_ranks
+    base_special_tokens = base_encoding._special_tokens
+    
+    # Define Whisper special tokens
     specials = [
         "<|endoftext|>",
         "<|startoftranscript|>",
@@ -350,16 +350,26 @@ def get_encoding(name: str = "gpt2", num_languages: int = 99):
         *[f"<|{i * 0.02:.2f}|>" for i in range(1501)],
     ]
 
+    # Create special tokens mapping starting after base vocabulary
+    whisper_special_tokens = {}
+    next_id = len(base_ranks)
+    
     for token in specials:
-        special_tokens[token] = n_vocab
-        n_vocab += 1
+        whisper_special_tokens[token] = next_id
+        next_id += 1
+
+    # Merge base special tokens with Whisper special tokens
+    merged_special_tokens = {**base_special_tokens, **whisper_special_tokens}
+    
+    # Total vocabulary size
+    total_vocab = len(base_ranks) + len(merged_special_tokens)
 
     return tiktoken.Encoding(
-        name=os.path.basename(vocab_path),
-        explicit_n_vocab=n_vocab,
+        name="gpt2_whisper",
+        explicit_n_vocab=total_vocab,
         pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
-        mergeable_ranks=ranks,
-        special_tokens=special_tokens,
+        mergeable_ranks=base_ranks,
+        special_tokens=merged_special_tokens,
     )
 
 
