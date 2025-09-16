@@ -37,14 +37,11 @@ resnet50 = []
 sam2 = [
   "pillow>=11.3.0",
 ]
-testing = [
-    "torch",
+vgg19 = [
+  "h5py",
 ]
-
-all = [
-  "jax-bonsai[qwen3]",
-  "jax-bonsai[resnet50]",
-  "jax-bonsai[sam2]",
+testing = [
+  "torch",
 ]
 
 [project.urls]
