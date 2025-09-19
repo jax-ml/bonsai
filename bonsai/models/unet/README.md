@@ -16,7 +16,7 @@ This directory contains a pure JAX implementation of the [U-Net](https://arxiv.o
 
 ### Running this model
 
-Run U-Net in action, implemented in [121 lines of code](bonsai/models/unet/modeling.py) in JAX.
+Run U-Net in action, implemented in [121 lines of code](modeling.py) in JAX.
 
 ```sh
 python3 -m bonsai.models.unet.tests.run_model
