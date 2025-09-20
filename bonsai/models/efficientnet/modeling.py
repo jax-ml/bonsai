@@ -85,9 +85,6 @@ class SqueezeAndExcitation(nnx.Module):
         excitation = nnx.sigmoid(excitation)
         return x * excitation
 
-# In bonsai/models/efficientnet/modeling.py
-# Replace the entire old MBConv class with this one.
-
 class MBConv(nnx.Module):
     """Mobile Inverted Bottleneck Convolution (MBConv) block."""
     def __init__(
@@ -142,8 +139,6 @@ class MBConv(nnx.Module):
     def __call__(self, x: jax.Array, training: bool) -> jax.Array:
         identity = x
         
-        # The use_running_average flag is the key for inference mode.
-        # It should be True when training is False.
         is_inference = not training
 
         if self.expand_conv is not None:
@@ -217,7 +212,7 @@ class EfficientNet(nnx.Module):
         in_channels = round_filters(block_configs[-1].output_filters, cfg.width_coefficient)
         out_channels = 1280
         self.head_conv = nnx.Conv(in_channels, out_channels, kernel_size=(1, 1), padding="SAME", use_bias=False, rngs=rngs)
-        # FIX: Added 'rngs=rngs'
+
         self.head_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
         
         self.gap = partial(jnp.mean, axis=(1, 2))

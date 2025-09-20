@@ -26,10 +26,7 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     return {k: v.numpy() for k, v in m.state_dict().items()}
 
 
-# --- The Core Name-Mapping Logic ---
-
-# In bonsai/models/efficientnet/weights.py
-# Replace the entire create_name_map function with this one.
+# --- Core Name-Mapping Logic ---
 
 def create_name_map(cfg: model_lib.ModelCfg):
     """
@@ -130,14 +127,13 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
             # PyTorch (O, I) -> JAX (I, O)
             weight_np = np.transpose(weight_np, (1, 0))
 
-        # --- Navigate the model and set the weight ---
         target_module = model
         # Navigate through modules like 'blocks.0.expand_conv'
         for part in path[:-1]:
             if part.isdigit():
-                target_module = target_module[int(part)]  # Access list items
+                target_module = target_module[int(part)]
             else:
-                target_module = getattr(target_module, part) # Access attributes
+                target_module = getattr(target_module, part)
         
         # Get the actual parameter object to check shape
         param_to_update = getattr(target_module, param_name)
