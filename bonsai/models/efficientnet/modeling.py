@@ -1,0 +1,242 @@
+# Copyright 2025 The JAX Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import dataclasses
+import math
+from functools import partial
+from typing import Sequence
+
+import jax
+import jax.numpy as jnp
+from flax import nnx
+
+
+# --- Configuration Classes ---
+
+@dataclasses.dataclass(frozen=True)
+class BlockConfig:
+    """Configuration for a single MBConv block."""
+    input_filters: int
+    output_filters: int
+    kernel_size: int
+    num_repeat: int
+    expand_ratio: int
+    strides: int
+    se_ratio: float
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelCfg:
+    """Configuration for the EfficientNet model."""
+    width_coefficient: float
+    depth_coefficient: float
+    resolution: int
+    dropout_rate: float
+    num_classes: int = 1000
+
+    @classmethod
+    def b0(cls):
+        return cls(width_coefficient=1.0, depth_coefficient=1.0, resolution=224, dropout_rate=0.2)
+    
+    @classmethod
+    def b7(cls):
+        return cls(width_coefficient=2.0, depth_coefficient=3.1, resolution=600, dropout_rate=0.5)
+
+
+# --- Building Blocks ---
+
+def round_filters(filters: int, width_coefficient: float, divisor: int = 8) -> int:
+    """Round number of filters based on width multiplier."""
+    filters *= width_coefficient
+    new_filters = max(divisor, int(filters + divisor / 2) // divisor * divisor)
+    if new_filters < 0.9 * filters:
+        new_filters += divisor
+    return int(new_filters)
+
+
+def round_repeats(repeats: int, depth_coefficient: float) -> int:
+    """Round number of repeats based on depth multiplier."""
+    return int(math.ceil(depth_coefficient * repeats))
+
+
+class SqueezeAndExcitation(nnx.Module):
+    """Squeeze-and-Excitation block."""
+    def __init__(self, in_channels: int, se_channels: int, *, rngs: nnx.Rngs):
+        self.gap = partial(jnp.mean, axis=(1, 2), keepdims=True)
+        self.fc1 = nnx.Conv(in_channels, se_channels, kernel_size=(1, 1), rngs=rngs)
+        self.fc2 = nnx.Conv(se_channels, in_channels, kernel_size=(1, 1), rngs=rngs)
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        squeeze = self.gap(x)
+        excitation = self.fc1(squeeze)
+        excitation = nnx.silu(excitation)
+        excitation = self.fc2(excitation)
+        excitation = nnx.sigmoid(excitation)
+        return x * excitation
+
+class MBConv(nnx.Module):
+    """Mobile Inverted Bottleneck Convolution (MBConv) block."""
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        strides: int,
+        expand_ratio: int,
+        se_ratio: float,
+        *,
+        rngs: nnx.Rngs,
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.strides = strides
+        self.expand_ratio = expand_ratio
+        self.has_skip = strides == 1 and in_channels == out_channels
+
+        # Expansion phase (1x1 Conv) - skipped if expand_ratio is 1
+        expanded_channels = in_channels * expand_ratio
+        self.expand_conv = None
+        if expand_ratio != 1:
+            self.expand_conv = nnx.Conv(in_channels, expanded_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)
+            self.bn0 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
+
+        # Depthwise convolution
+        self.depthwise_conv = nnx.Conv(
+            expanded_channels,
+            expanded_channels,
+            kernel_size=(kernel_size, kernel_size),
+            strides=(strides, strides),
+            feature_group_count=expanded_channels,
+            padding="SAME",
+            use_bias=False,
+            rngs=rngs,
+        )
+        self.bn1 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
+
+        # Squeeze-and-Excitation layer
+        self.se = None
+        if 0 < se_ratio <= 1:
+            # This calculation correctly matches timm's implementation
+            se_channels = max(1, int(in_channels * se_ratio))
+            self.se = SqueezeAndExcitation(expanded_channels, se_channels, rngs=rngs)
+
+        # Projection phase (1x1 Conv)
+        self.project_conv = nnx.Conv(expanded_channels, out_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)
+        self.bn2 = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
+
+    def __call__(self, x: jax.Array, training: bool) -> jax.Array:
+        identity = x
+        
+        is_inference = not training
+
+        if self.expand_conv is not None:
+            x = self.expand_conv(x)
+            x = self.bn0(x, use_running_average=is_inference)
+            x = nnx.silu(x)
+
+        x = self.depthwise_conv(x)
+        x = self.bn1(x, use_running_average=is_inference)
+        x = nnx.silu(x)
+
+        if self.se is not None:
+            x = self.se(x)
+
+        x = self.project_conv(x)
+        x = self.bn2(x, use_running_average=is_inference)
+        
+        if self.has_skip:
+            x += identity
+        return x
+
+
+class EfficientNet(nnx.Module):
+    """
+    EfficientNet implementation.
+    See: https://arxiv.org/abs/1905.11946
+    """
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        super().__init__()
+        self.cfg = cfg
+        
+        # Define block configurations for EfficientNet-B0
+        block_configs = [
+            BlockConfig(32, 16, 3, 1, 1, 1, 0.25),
+            BlockConfig(16, 24, 3, 2, 6, 2, 0.25),
+            BlockConfig(24, 40, 5, 2, 6, 2, 0.25),
+            BlockConfig(40, 80, 3, 3, 6, 2, 0.25),
+            BlockConfig(80, 112, 5, 3, 6, 1, 0.25),
+            BlockConfig(112, 192, 5, 4, 6, 2, 0.25),
+            BlockConfig(192, 320, 3, 1, 6, 1, 0.25),
+        ]
+
+        out_channels = round_filters(32, cfg.width_coefficient)
+        self.stem_conv = nnx.Conv(3, out_channels, kernel_size=(3, 3), strides=(2, 2), padding="SAME", use_bias=False, rngs=rngs)
+        self.stem_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
+
+        # Build blocks
+        self.blocks = []
+        for bc in block_configs:
+            input_filters = round_filters(bc.input_filters, cfg.width_coefficient)
+            output_filters = round_filters(bc.output_filters, cfg.width_coefficient)
+            num_repeat = round_repeats(bc.num_repeat, cfg.depth_coefficient)
+
+            for i in range(num_repeat):
+                strides = bc.strides if i == 0 else 1
+                in_ch = input_filters if i == 0 else output_filters
+                
+                self.blocks.append(
+                    MBConv(
+                        in_ch,
+                        output_filters,
+                        kernel_size=bc.kernel_size,
+                        strides=strides,
+                        expand_ratio=bc.expand_ratio,
+                        se_ratio=bc.se_ratio,
+                        rngs=rngs,
+                    )
+                )
+
+        # Head
+        in_channels = round_filters(block_configs[-1].output_filters, cfg.width_coefficient)
+        out_channels = 1280
+        self.head_conv = nnx.Conv(in_channels, out_channels, kernel_size=(1, 1), padding="SAME", use_bias=False, rngs=rngs)
+
+        self.head_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
+        
+        self.gap = partial(jnp.mean, axis=(1, 2))
+        self.dropout = nnx.Dropout(rate=cfg.dropout_rate)
+        self.classifier = nnx.Linear(out_channels, cfg.num_classes, rngs=rngs)
+
+    def __call__(self, x: jax.Array, training: bool = False) -> jax.Array:
+        is_inference = not training
+
+        # Stem
+        x = self.stem_conv(x)
+        x = self.stem_bn(x, use_running_average=is_inference)
+        x = nnx.silu(x)
+
+        # Blocks - Pass the training flag down to each block
+        for block in self.blocks:
+            x = block(x, training=training)
+
+        # Head
+        x = self.head_conv(x)
+        x = self.head_bn(x, use_running_average=is_inference)
+        x = nnx.silu(x)
+        
+        x = self.gap(x)
+        x = self.dropout(x, deterministic=not training)
+        x = self.classifier(x)
+        return x
