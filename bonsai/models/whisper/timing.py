@@ -13,7 +13,7 @@ from audio import HOP_LENGTH, SAMPLE_RATE, TOKENS_PER_SECOND
 from tokenizer import Tokenizer
 
 if TYPE_CHECKING:
-    from model import Whisper
+    from modeling import Whisper
 
 
 def median_filter(x: torch.Tensor, filter_width: int):
@@ -191,7 +191,7 @@ def find_alignment(
         for i, block in enumerate(model.decoder.blocks)
     ]
 
-    from model import disable_sdpa
+    from modeling import disable_sdpa
 
     with torch.no_grad(), disable_sdpa():
         logits = model(mel.unsqueeze(0), tokens.unsqueeze(0))[0]
