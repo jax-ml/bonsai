@@ -7,10 +7,8 @@ Uses HuggingFace WhisperTokenizer for proper tokenization.
 
 import sys
 import os
-import jax
 import jax.numpy as jnp
 import time
-from flax import nnx
 
 # Add the parent directory to the path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -113,24 +111,7 @@ def main():
             print(f"   Token count: {token_count}")
             print(f"   Unique tokens: {unique_tokens}")
             print(f"   Token diversity: {unique_tokens}/{token_count} ({token_diversity:.1f}%)")
-            
-            # Check for special tokens using HF tokenizer
-            special_tokens = {
-                tokenizer_instance.sot: "<|startoftranscript|>",
-                tokenizer_instance.to_language_token("en"): "<|en|>",
-                tokenizer_instance.transcribe: "<|transcribe|>",
-                tokenizer_instance.no_timestamps: "<|notimestamps|>",
-                tokenizer_instance.eot: "<|endoftext|>"
-            }
-            
-            found_special = []
-            for token in tokens_list:
-                if token in special_tokens:
-                    found_special.append(special_tokens[token])
-            
-            print(f"   Special tokens found: {found_special}")
-            print(f"   Special token IDs: {[token for token in tokens_list if token in special_tokens]}")
-            
+                 
         except Exception as e:
             print(f"❌ Text decoding failed: {e}")
             print(f"   Raw tokens: {jax_tokens[0].tolist()}")
