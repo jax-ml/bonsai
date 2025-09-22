@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import math
+from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
 from functools import partial
@@ -70,66 +71,6 @@ class LayerNormType(Enum):
     DEFAULT = auto()
     RMS = auto()
     GEMMA_RMS = auto()
-
-
-class RMSNorm(nnx.Module):
-    def __init__(self, dim: int, epsilon: float = 1e-5, use_bias: bool = False, *, rngs: nnx.Rngs):
-        self.eps = epsilon
-        self.scale = nnx.Param(jnp.ones((dim,)), rngs=rngs)
-        if use_bias:
-            self.bias = nnx.Param(jnp.zeros((dim,)), rngs=rngs)
-
-    def __call__(self, x: jax.Array):
-        og_dtype = x.dtype
-        var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
-        x = x.astype(jnp.float32)
-        x = x * jax.lax.rsqrt(var + self.eps)
-        if hasattr(self, "scale"):
-            if hasattr(self, "bias"):
-                x = x * self.scale.value + self.bias.value
-            else:
-                x = x * self.scale.value
-        return x.astype(og_dtype)
-
-
-class GemmaRMSNorm(nnx.Module):
-    def __init__(self, dim: int, epsilon: float = 1e-5, use_bias: bool = False, *, rngs: nnx.Rngs):
-        self.eps = epsilon
-        # initialise scale at zero so overall scale starts at 1
-        self.scale = nnx.Param(jnp.zeros((dim,)), rngs=rngs)
-        if use_bias:
-            self.bias = nnx.Param(jnp.zeros((dim,)), rngs=rngs)
-
-    def __call__(self, x: jax.Array) -> jax.Array:
-        og_dtype = x.dtype
-        var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
-        x = x.astype(jnp.float32)
-        y = x * jax.lax.rsqrt(var + self.eps)
-        if hasattr(self, "scale"):
-            if hasattr(self, "bias"):
-                y = y * (1.0 + self.scale.value) + self.bias.value
-            else:
-                y = y * (1.0 + self.scale.value)
-        return y.astype(og_dtype)
-
-
-def get_layer_norm(cfg, dim: int | None = None, *, rngs: nnx.Rngs):
-    """Return an nnx.Module that implements the requested norm."""
-    dim = dim or cfg.d_model
-    eps = getattr(cfg, "rms_norm_eps", 1e-6)
-
-    ln_type = cfg.layer_norm_type
-    use_bias = getattr(cfg, "bias_for_layer_norm", False)
-    if ln_type == LayerNormType.DEFAULT:
-        return nnx.LayerNorm(dim, epsilon=eps, use_bias=use_bias, rngs=rngs)
-
-    if ln_type == LayerNormType.RMS:
-        return RMSNorm(dim, epsilon=eps, use_bias=use_bias, rngs=rngs)
-
-    if ln_type == LayerNormType.GEMMA_RMS:
-        return GemmaRMSNorm(dim, epsilon=eps, use_bias=use_bias, rngs=rngs)
-
-    raise ValueError(f"Unknown LayerNorm type: {ln_type}")
 
 
 @dataclass
@@ -243,6 +184,94 @@ class ModelConfig:
             alibi=False,
             scale_logits=False,
         )
+
+
+class LayerNormBase(nnx.Module):
+    def __init__(
+        self, config, *, dim: int | None, elementwise_affine: bool | None = None, eps: float = 1e-05, rngs: nnx.Rngs
+    ):
+        self.config = config
+        self.eps = eps
+        self.normalized_shape = (dim or config.d_model,)
+        if elementwise_affine or (elementwise_affine is None and self.config.layer_norm_with_affine):
+            self.scale = nnx.Param(jnp.ones(self.normalized_shape), rngs=rngs)
+            use_bias = self.config.bias_for_layer_norm
+            if use_bias is None:
+                use_bias = self.config.include_bias
+            if use_bias:
+                self.bias = nnx.Param(jnp.zeros(self.normalized_shape))
+            else:
+                self.bias = None
+        else:
+            self.bias = None
+            self.weight = None
+
+    @abstractmethod
+    def __call__(self, x):
+        raise NotImplementedError
+
+    @classmethod
+    def build(cls, config, dim: int | None = None, *, rngs: nnx.Rngs, **kwargs):
+        if config.layer_norm_type == LayerNormType.DEFAULT:
+            return LayerNorm(config, dim=dim, rngs=rngs, **kwargs)
+        if config.layer_norm_type == LayerNormType.RMS:
+            return RMSNorm(config, dim=dim, rngs=rngs, **kwargs)
+        if config.layer_norm_type == LayerNormType.GEMMA_RMS:
+            return GemmaRMSNorm(config, dim=dim, rngs=rngs, **kwargs)
+
+
+class LayerNorm(LayerNormBase):
+    def __init__(self, config, dim: int | None, elementwise_affine: bool | None = None, eps: float = 1e-05, *, rngs):
+        super().__init__(config, dim=dim, elementwise_affine=elementwise_affine, eps=eps, rngs=rngs)
+
+    def __call__(self, x: jax.Array):
+        mean = jnp.mean(x, axis=-1, keepdims=True)
+        var = jnp.var(x, axis=-1, keepdims=True)
+        x = (x - mean) / jnp.sqrt(var + self.eps)
+        if self.scale is not None:
+            if self.bias is not None:
+                x = x * self.scale.value + self.bias.value
+            else:
+                x = x * self.scale.value
+        return x
+
+
+class RMSNorm(LayerNormBase):
+    def __init__(
+        self, config, dim: int | None, elementwise_affine: bool | None = None, eps: float = 1e-5, *, rngs: nnx.Rngs
+    ):
+        super().__init__(config, dim=dim, elementwise_affine=elementwise_affine, eps=eps, rngs=rngs)
+
+    def __call__(self, x: jax.Array):
+        og_dtype = x.dtype
+        var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
+        x = x.astype(jnp.float32)
+        x = x * jax.lax.rsqrt(var + self.eps)
+        if self.scale is not None:
+            if self.bias is not None:
+                x = x * self.scale.value + self.bias.value
+            else:
+                x = x * self.scale.value
+        return x.astype(og_dtype)
+
+
+class GemmaRMSNorm(LayerNormBase):
+    def __init__(
+        self, config, dim: int | None, elementwise_affine: bool | None = None, eps: float = 1e-5, *, rngs: nnx.Rngs
+    ):
+        super().__init__(config, dim=dim, elementwise_affine=elementwise_affine, eps=eps, rngs=rngs)
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        og_dtype = x.dtype
+        var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
+        x = x.astype(jnp.float32)
+        y = x * jax.lax.rsqrt(var + self.eps)
+        if self.scale is not None:
+            if self.bias is not None:
+                y = y * (1.0 + self.scale) + self.bias
+            else:
+                y = y * (1.0 + self.scale)
+        return y.astype(og_dtype)
 
 
 class RotaryEmbedding(nnx.Module):
@@ -370,7 +399,7 @@ class LLaDABlock(nnx.Module):
         hd = cfg.d_model // cfg.n_heads
         kv_hd = hd
 
-        self.hidden_size = cfg.mlp_hidden_size or cfg.mlp_ratio * cfg.d_model
+        self.hidden_size = cfg.mlp_hidden_size if cfg.mlp_hidden_size is not None else cfg.mlp_ratio * cfg.d_model
 
         # Dropout
         self.dropout = nnx.Dropout(self.cfg.residual_dropout)
@@ -379,15 +408,16 @@ class LLaDABlock(nnx.Module):
         self.k_norm = None
         self.q_norm = None
         if cfg.attention_layer_norm:
-            self.k_norm = get_layer_norm(
+            self.k_norm = LayerNormBase.build(
                 cfg,
                 dim=(cfg.d_model // cfg.n_heads) * cfg.effective_n_kv_heads,
+                elementwise_affine=cfg.attention_layer_norm_with_affine,
                 rngs=rngs,
             )
-            self.q_norm = get_layer_norm(cfg, rngs=rngs)
+            self.q_norm = LayerNormBase.build(cfg, elementwise_affine=cfg.attention_layer_norm_with_affine, rngs=rngs)
 
-        self.attn_norm = get_layer_norm(cfg, rngs=rngs)
-        self.ff_norm = get_layer_norm(cfg, rngs=rngs)
+        self.attn_norm = LayerNormBase.build(cfg, rngs=rngs)
+        self.ff_norm = LayerNormBase.build(cfg, rngs=rngs)
 
         # Activation function
         self.act, self.act_output_mult = get_activation(cfg.activation_type)
@@ -658,7 +688,7 @@ class LLaDAModel(nnx.Module):
         self.blocks = [LLaDABlock(i, self.cfg, rngs=rngs) for i in range(self.cfg.n_layers)]
 
         # Final layer norm
-        self.ln_f = get_layer_norm(self.cfg, dim=self.cfg.d_model, rngs=rngs)
+        self.ln_f = LayerNormBase.build(self.cfg, rngs=rngs)
 
         # Output projection
         if not self.cfg.weight_tying:
