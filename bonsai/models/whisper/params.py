@@ -261,10 +261,8 @@ def convert_hf_whisper_to_nnx(model_dir: str, config: model_lib.WhisperConfig) -
     
     print(f"Created NNX model with {len(state_dict)} top-level keys")
     
-    # Get key mapping
     key_mapping = _get_key_and_transform_mapping(config)
     
-    # Assign weights
     state_dict = _assign_weights(hf_weights, state_dict, key_mapping)
     
     return graph_def, state_dict
@@ -274,7 +272,6 @@ def create_model_from_safe_tensors(model_dir: str, config: model_lib.WhisperConf
     """Create NNX Whisper model from HuggingFace safetensors."""
     graph_def, state_dict = convert_hf_whisper_to_nnx(model_dir, config)
     
-    # Merge the model
     model = nnx.merge(graph_def, state_dict)
     return model
 

@@ -32,7 +32,7 @@ from utils import (
 )
 
 if TYPE_CHECKING:
-    from model import Whisper
+    from modeling import Whisper
 
 
 def transcribe(
