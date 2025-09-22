@@ -141,7 +141,7 @@ def create_model_from_h5(
     """
     file = epath.Path(file_dir).expanduser() / "task.weights.h5"
     if not file:
-        raise ValueError(f"No safetensors found in {file_dir}")
+        raise ValueError(f"No h5 found in {file_dir}")
 
     tensor_dict = _load_h5_file(file)
 
