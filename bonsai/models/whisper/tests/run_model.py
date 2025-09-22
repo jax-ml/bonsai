@@ -50,7 +50,7 @@ def main():
         # Import the modules
         import audio
         import modeling
-        from tokenizer_new import get_tokenizer
+        from tokenizer import get_tokenizer
         
         print("✅ All modules imported successfully")
         
