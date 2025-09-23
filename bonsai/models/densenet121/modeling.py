@@ -37,22 +37,18 @@ class ModelCfg:
 
 class DenseBlock(nnx.Module):
     def __init__(self, num_layers: int, in_channels: int, growth_rate: int, *, rngs: nnx.Rngs):
-        self.conv_layers = []
         self.bn_layers = []
+        self.conv_layers = []
 
         for i in range(num_layers):
-            self.bn_layers.append(
-                nnx.BatchNorm(in_channels, use_running_average=True, rngs=rngs),
-            )
-            self.bn_layers.append(
-                nnx.BatchNorm(4 * growth_rate, use_running_average=True, rngs=rngs),
-            )
+            self.bn_layers.append(nnx.BatchNorm(in_channels, use_running_average=True, rngs=rngs))
+            self.bn_layers.append(nnx.BatchNorm(4 * growth_rate, use_running_average=True, rngs=rngs))
 
             self.conv_layers.append(
-                nnx.Conv(in_channels, 4 * growth_rate, kernel_size=(1, 1), padding="SAME", use_bias=False, rngs=rngs),
+                nnx.Conv(in_channels, 4 * growth_rate, kernel_size=(1, 1), padding="SAME", use_bias=False, rngs=rngs)
             )
             self.conv_layers.append(
-                nnx.Conv(4 * growth_rate, growth_rate, kernel_size=(3, 3), padding="SAME", use_bias=False, rngs=rngs),
+                nnx.Conv(4 * growth_rate, growth_rate, kernel_size=(3, 3), padding="SAME", use_bias=False, rngs=rngs)
             )
 
             in_channels += growth_rate
@@ -96,40 +92,31 @@ class DenseNet(nnx.Module):
         self.init_pool = partial(nnx.max_pool, window_shape=(3, 3), strides=(2, 2), padding="SAME")
 
         channels = 2 * cfg.growth_rate
-        self.dense_blocks = []
-        self.transition_layers = []
-
+        layers = []
         for i, num_layers in enumerate(cfg.dense_block_layers):
-            self.dense_blocks.append(DenseBlock(num_layers, channels, cfg.growth_rate, rngs=rngs))
+            layers.append(DenseBlock(num_layers, channels, cfg.growth_rate, rngs=rngs))
             channels += num_layers * cfg.growth_rate
 
             if i == len(cfg.dense_block_layers) - 1:
                 continue
 
             out_channels = int(channels * 0.5)
-            self.transition_layers.append(TransitionLayer(channels, out_channels, rngs=rngs))
+            layers.append(TransitionLayer(channels, out_channels, rngs=rngs))
             channels = out_channels
 
+        self.blocks = nnx.Sequential(*layers)
         self.final_bn = nnx.BatchNorm(channels, use_running_average=True, rngs=rngs)
+        self.global_average_pool = lambda x: jnp.mean(x, axis=(1, 2))
         self.linear = nnx.Linear(channels, cfg.num_classes, rngs=rngs)
 
     def __call__(self, x):
         x = self.init_conv(x)
         x = self.init_bn(x)
         x = self.init_pool(x)
-
-        for i, dense_block in enumerate(self.dense_blocks):
-            x = dense_block(x)
-
-            if i == len(self.dense_blocks) - 1:
-                continue
-
-            x = self.transition_layers[i](x)
-
+        x = self.blocks(x)
         x = self.final_bn(x)
         x = nnx.relu(x)
-        # Global Average Pooling
-        x = jnp.mean(x, axis=(1, 2))
+        x = self.global_average_pool(x)
         x = self.linear(x)
 
         return x
