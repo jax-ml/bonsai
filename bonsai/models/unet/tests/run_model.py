@@ -21,12 +21,6 @@ from flax import nnx
 
 from bonsai.models.unet import modeling, params
 
-
-@partial(jax.jit, static_argnums=(0,))
-def forward(model, x):
-    return model(x)
-
-
 def run_model():
     # 1. Create model and PRNG key
     rngs = nnx.Rngs(params=0)
@@ -40,7 +34,7 @@ def run_model():
 
     # 3. Warmup (triggers compilation)
     print("Starting JIT compilation (warmup)...")
-    _ = forward(model, dummy_input)
+    _ = modeling.UNet.forward(model, dummy_input)
     jax.block_until_ready(_)
     print("Warmup complete.")
 
@@ -48,8 +42,8 @@ def run_model():
     num_runs = 10
     t0 = time.perf_counter()
     for _ in range(num_runs):
-        logits = forward(model, dummy_input)
-        jax.block_until_ready(logits)
+        logits = modeling.UNet.forward(model, dummy_input)
+    jax.block_until_ready(logits)
     t1 = time.perf_counter()
     print(f"{num_runs} runs took {t1 - t0:.4f} s")
     print(f"Average inference time: {(t1 - t0) / num_runs * 1000:.2f} ms")

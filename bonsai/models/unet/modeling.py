@@ -102,6 +102,10 @@ class UNet(nnx.Module):
         self.up4 = Up(features[1], features[0], rngs=rngs)
         self.outc = OutConv(features[0], cfg.num_classes, rngs=rngs)
 
+    @partial(jax.jit, static_argnums=(0,))
+    def forward(model, x):
+        return model(x)
+
     def __call__(self, x: jax.Array) -> jax.Array:
         # Encoder path
         x1 = self.inc(x)
