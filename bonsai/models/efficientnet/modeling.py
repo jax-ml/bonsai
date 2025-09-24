@@ -218,6 +218,10 @@ class EfficientNet(nnx.Module):
         self.gap = partial(jnp.mean, axis=(1, 2))
         self.dropout = nnx.Dropout(rate=cfg.dropout_rate)
         self.classifier = nnx.Linear(out_channels, cfg.num_classes, rngs=rngs)
+    
+    def forward(model, x, training=False):
+        return model(x, training=training)
+
 
     def __call__(self, x: jax.Array, training: bool = False) -> jax.Array:
         is_inference = not training

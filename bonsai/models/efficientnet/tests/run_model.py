@@ -21,12 +21,6 @@ from flax import nnx
 
 from bonsai.models.efficientnet import modeling, params
 
-
-@partial(jax.jit, static_argnames=('training',))
-def forward(model, x, training=False):
-    return model(x, training=training)
-
-
 def run_model():
     # 1. Create model and PRNG keys
     rngs = nnx.Rngs(params=0, dropout=1)
@@ -40,7 +34,7 @@ def run_model():
 
     # 3. Warmup (triggers JIT compilation)
     print("Starting JIT compilation (warmup)...")
-    _ = forward(model, dummy_input, training=False)
+    _ = modeling.EfficientNet.forward(model, dummy_input, training=False)
     jax.block_until_ready(_)
     print("Warmup complete.")
 
@@ -48,7 +42,7 @@ def run_model():
     num_runs = 10
     t0 = time.perf_counter()
     for _ in range(num_runs):
-        logits = forward(model, dummy_input, training=False)
+        logits = modeling.EfficientNet.forward(model, dummy_input, training=False)
         jax.block_until_ready(logits)
     t1 = time.perf_counter()
     print(f"{num_runs} inference runs took {t1 - t0:.4f} s")
