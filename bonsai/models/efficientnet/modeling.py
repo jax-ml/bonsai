@@ -66,6 +66,13 @@ class ModelCfg:
     def b5(cls, num_classes=1000):
         return cls(1.6, 2.2, 456, 0.4, num_classes)
 
+    @classmethod
+    def b6(cls, num_classes=1000):
+        return cls(1.8, 2.6, 528, 0.5, num_classes)
+
+    @classmethod
+    def b7(cls, num_classes=1000):
+        return cls(2.0, 3.1, 600, 0.5, num_classes)
 
 # --- Building Blocks ---
 
