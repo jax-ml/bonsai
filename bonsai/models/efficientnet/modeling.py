@@ -162,7 +162,6 @@ class MBConv(nnx.Module):
         # Squeeze-and-Excitation layer
         self.se = None
         if 0 < se_ratio <= 1:
-            # This calculation correctly matches timm's implementation
             se_channels = max(1, int(in_channels * se_ratio))
             self.se = SqueezeAndExcitation(expanded_channels, se_channels, rngs=rngs)
 

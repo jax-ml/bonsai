@@ -6,7 +6,6 @@ from bonsai.models.efficientnet import modeling as model_lib
 
 # --- Model Factory Functions ---
 
-
 def create_model(
     cfg: model_lib.ModelCfg,
     rngs: nnx.Rngs,
