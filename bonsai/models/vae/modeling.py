@@ -1,4 +1,5 @@
 import dataclasses
+from functools import partial
 from typing import Sequence
 
 import jax
@@ -71,3 +72,7 @@ class VAE(nnx.Module):
         z = self.reparameterize(mu, logvar, sample_key)
         reconstruction = self.decoder(z)
         return reconstruction, mu, logvar
+
+@partial(jax.jit, static_argnums=(0,))
+def forward(model, x, key):
+    return model(x, key)

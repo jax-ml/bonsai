@@ -1,13 +1,9 @@
-from functools import partial
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
 from bonsai.models.vae import modeling, params
 
-@partial(jax.jit, static_argnums=(0,))
-def forward(model, x, key):
-    return model(x, key)
 
 def run_model():
     # 1. Create model and PRNG keys
@@ -26,7 +22,7 @@ def run_model():
 
     # 3. Run a forward pass
     print("Running forward pass...")
-    reconstruction, mu, logvar = forward(model, dummy_input, sample_key)
+    reconstruction, mu, logvar = modeling.forward(model, dummy_input, sample_key)
     print("Forward pass complete.")
 
     # 4. Show output shapes
