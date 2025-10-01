@@ -148,7 +148,7 @@ def create_name_map(cfg: model_lib.ModelCfg):
                     jax_n: f"{timm_base}.bn3.{timm_n}"
                     for jax_n, timm_n in bn_map.items()
                 }
-            else:
+            else: # This block handles the first MBConv layer where expand_ratio = 1
                 name_map[f"{jax_base}.depthwise_conv"] = {
                     "kernel": f"{timm_base}.conv_dw.weight"
                 }
@@ -157,7 +157,7 @@ def create_name_map(cfg: model_lib.ModelCfg):
                     for jax_n, timm_n in bn_map.items()
                 }
                 name_map[f"{jax_base}.project_conv"] = {
-                    "kernel": f"{timm_base}.conv_pwl.weight"
+                    "kernel": f"{timm_base}.conv_pw.weight"  # <--- THIS IS THE CORRECTED LINE
                 }
                 name_map[f"{jax_base}.bn2"] = {
                     jax_n: f"{timm_base}.bn2.{timm_n}"
