@@ -31,16 +31,16 @@ class TestModuleForwardPasses(absltest.TestCase):
         model_ckpt_path = snapshot_download("keras/vgg_19_imagenet")
         self.nnx_model = params_lib.create_model_from_h5(model_ckpt_path, modeling.ModelCfg.vgg_19())
 
+        image = np.random.uniform(size=(1, 224, 224, 3)).astype(np.float32)
+        self.jx = jnp.array(image)
+        self.tx = tf.constant(image)
+
     def test_conv(self):
         ref_model = self.ref_model.backbone
         nnx_model = self.nnx_model.conv_block0
 
-        image = np.random.uniform(size=(1, 224, 224, 3)).astype(np.float32)
-        jx = jnp.array(image)
-        tx = tf.constant(image)
-
-        ty = ref_model.layers[1](tx)
-        ny = nnx.relu(nnx_model.conv_layers[0](jx))
+        ty = ref_model.layers[1](self.tx)
+        ny = nnx.relu(nnx_model.conv_layers[0](self.jx))
 
         np.testing.assert_allclose(ty.numpy(), ny, atol=1e-3)
 
@@ -48,25 +48,16 @@ class TestModuleForwardPasses(absltest.TestCase):
         ref_model = self.ref_model.backbone
         nnx_model = self.nnx_model.conv_block0
 
-        image = np.random.uniform(size=(1, 224, 224, 3)).astype(np.float32)
-        jx = jnp.array(image)
-        tx = tf.constant(image)
-
-        tx = ref_model.layers[1](tx)
+        tx = ref_model.layers[1](self.tx)
         tx = ref_model.layers[2](tx)
         ty = ref_model.layers[3](tx)
-        ny = nnx_model(jx)
+        ny = nnx_model(self.jx)
 
         np.testing.assert_allclose(ty.numpy(), ny, atol=1e-5)
 
     def test_full(self):
-        image = np.random.uniform(size=(1, 224, 224, 3)).astype(np.float32)
-        jx = jnp.array(image)
-        tx = tf.constant(image)
-
-        ty = self.ref_model(tx)
-        ny = self.nnx_model(jx)
-
+        ty = self.ref_model(self.tx)
+        ny = self.nnx_model(self.jx)
         np.testing.assert_allclose(ty.numpy(), ny, atol=1e-3)
 
 

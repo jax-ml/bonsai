@@ -42,6 +42,7 @@ vgg19 = [
 ]
 testing = [
   "torch",
+  "keras_hub",
 ]
 
 [project.urls]
