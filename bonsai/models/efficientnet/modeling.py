@@ -75,8 +75,6 @@ class ModelCfg:
         return cls(2.0, 3.1, 600, 0.5, num_classes)
 
 # --- Building Blocks ---
-
-
 def round_filters(filters: int, width_coefficient: float, divisor: int = 8) -> int:
     """Round number of filters based on width multiplier."""
     filters *= width_coefficient
@@ -93,7 +91,6 @@ def round_repeats(repeats: int, depth_coefficient: float) -> int:
 
 class SqueezeAndExcitation(nnx.Module):
     """Squeeze-and-Excitation block."""
-
     def __init__(self, in_channels: int, se_channels: int, *, rngs: nnx.Rngs):
         self.gap = partial(jnp.mean, axis=(1, 2), keepdims=True)
         self.fc1 = nnx.Conv(in_channels, se_channels, kernel_size=(1, 1), rngs=rngs)
@@ -106,7 +103,6 @@ class SqueezeAndExcitation(nnx.Module):
         excitation = self.fc2(excitation)
         excitation = nnx.sigmoid(excitation)
         return x * excitation
-
 
 class MBConv(nnx.Module):
     """Mobile Inverted Bottleneck Convolution (MBConv) block."""
@@ -173,7 +169,6 @@ class MBConv(nnx.Module):
 
     def __call__(self, x: jax.Array, training: bool) -> jax.Array:
         identity = x
-
         is_inference = not training
 
         if self.expand_conv is not None:
@@ -190,7 +185,6 @@ class MBConv(nnx.Module):
 
         x = self.project_conv(x)
         x = self.bn2(x, use_running_average=is_inference)
-
         if self.has_skip:
             x += identity
         return x
@@ -238,7 +232,6 @@ class EfficientNet(nnx.Module):
             for i in range(num_repeat):
                 strides = bc.strides if i == 0 else 1
                 in_ch = input_filters if i == 0 else output_filters
-
                 self.blocks.append(
                     MBConv(
                         in_ch,
@@ -287,9 +280,7 @@ class EfficientNet(nnx.Module):
         x = self.head_conv(x)
         x = self.head_bn(x, use_running_average=is_inference)
         x = nnx.silu(x)
-
         x = self.gap(x)
         x = self.dropout(x, deterministic=not training)
         x = self.classifier(x)
         return x
-

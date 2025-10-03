@@ -234,4 +234,3 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
 
     print("Successfully loaded pre-trained weights into the model.")
     return model
-
