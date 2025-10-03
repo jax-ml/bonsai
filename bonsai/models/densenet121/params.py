@@ -62,12 +62,12 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
                 key = (
                     rf"^layers/dense_net_backbone/layers/batch_normalization_{layer_index + 1}/vars/{bn_params_index}$"
                 )
-                val = (f"blocks.layers.{i*2}.bn_layers.{layer_index - str_index}.{bn_params[bn_params_index]}", None)
+                val = (f"blocks.layers.{i * 2}.bn_layers.{layer_index - str_index}.{bn_params[bn_params_index]}", None)
                 mapping[key] = val
 
             # dense block.conv
             key = rf"^layers/dense_net_backbone/layers/conv2d_{layer_index + 1}/vars/0$"
-            val = (f"blocks.layers.{i*2}.conv_layers.{layer_index - str_index}.kernel", None)
+            val = (f"blocks.layers.{i * 2}.conv_layers.{layer_index - str_index}.kernel", None)
             mapping[key] = val
 
         if i < len(cfg.dense_block_layers) - 1:
@@ -75,12 +75,12 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
             for bn_params_index in range(len(bn_params)):
                 # transition.bn
                 key = rf"^layers/dense_net_backbone/layers/batch_normalization_{end_index + 1}/vars/{bn_params_index}$"
-                val = (f"blocks.layers.{i*2+1}.bn.{bn_params[bn_params_index]}", None)
+                val = (f"blocks.layers.{i * 2 + 1}.bn.{bn_params[bn_params_index]}", None)
                 mapping[key] = val
 
             # transition.conv
             key = rf"^layers/dense_net_backbone/layers/conv2d_{end_index + 1}/vars/0$"
-            val = (f"blocks.layers.{i*2+1}.conv.kernel", None)
+            val = (f"blocks.layers.{i * 2 + 1}.conv.kernel", None)
             mapping[key] = val
 
             str_index = end_index + 1

@@ -2,15 +2,14 @@ import dataclasses
 import math
 from functools import partial
 from typing import Sequence
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
-# --- Configuration Classes ---
+
 @dataclasses.dataclass(frozen=True)
 class BlockConfig:
-    """Configuration for a single MBConv block."""
-
     input_filters: int
     output_filters: int
     kernel_size: int
@@ -18,24 +17,23 @@ class BlockConfig:
     expand_ratio: int
     strides: int
     se_ratio: float
+    padding: int
 
 
 # Base block configurations for EfficientNet-B0. Other variants scale from this.
 DEFAULT_BLOCK_CONFIGS = [
-    BlockConfig(32, 16, 3, 1, 1, 1, 0.25),
-    BlockConfig(16, 24, 3, 2, 6, 2, 0.25),
-    BlockConfig(24, 40, 5, 2, 6, 2, 0.25),
-    BlockConfig(40, 80, 3, 3, 6, 2, 0.25),
-    BlockConfig(80, 112, 5, 3, 6, 1, 0.25),
-    BlockConfig(112, 192, 5, 4, 6, 2, 0.25),
-    BlockConfig(192, 320, 3, 1, 6, 1, 0.25),
+    BlockConfig(32, 16, 3, 1, 1, 1, 0.25, 1),
+    BlockConfig(16, 24, 3, 2, 6, 2, 0.25, 1),
+    BlockConfig(24, 40, 5, 2, 6, 2, 0.25, 2),
+    BlockConfig(40, 80, 3, 3, 6, 2, 0.25, 1),
+    BlockConfig(80, 112, 5, 3, 6, 1, 0.25, 2),  # here
+    BlockConfig(112, 192, 5, 4, 6, 2, 0.25, 2),
+    BlockConfig(192, 320, 3, 1, 6, 1, 0.25, 1),
 ]
 
 
 @dataclasses.dataclass(frozen=True)
 class ModelCfg:
-    """Configuration for the EfficientNet model."""
-
     width_coefficient: float
     depth_coefficient: float
     resolution: int
@@ -74,8 +72,6 @@ class ModelCfg:
     def b7(cls, num_classes=1000):
         return cls(2.0, 3.1, 600, 0.5, num_classes)
 
-# --- Building Blocks ---
-
 
 def round_filters(filters: int, width_coefficient: float, divisor: int = 8) -> int:
     """Round number of filters based on width multiplier."""
@@ -96,15 +92,13 @@ class SqueezeAndExcitation(nnx.Module):
 
     def __init__(self, in_channels: int, se_channels: int, *, rngs: nnx.Rngs):
         self.gap = partial(jnp.mean, axis=(1, 2), keepdims=True)
-        self.fc1 = nnx.Conv(in_channels, se_channels, kernel_size=(1, 1), rngs=rngs)
-        self.fc2 = nnx.Conv(se_channels, in_channels, kernel_size=(1, 1), rngs=rngs)
+        self.conv1 = nnx.Conv(in_channels, se_channels, kernel_size=(1, 1), rngs=rngs)
+        self.conv2 = nnx.Conv(se_channels, in_channels, kernel_size=(1, 1), rngs=rngs)
 
     def __call__(self, x: jax.Array) -> jax.Array:
-        squeeze = self.gap(x)
-        excitation = self.fc1(squeeze)
-        excitation = nnx.silu(excitation)
-        excitation = self.fc2(excitation)
-        excitation = nnx.sigmoid(excitation)
+        squeeze = jnp.mean(x, axis=(1, 2), keepdims=True)
+        excitation = nnx.silu(self.conv1(squeeze))
+        excitation = nnx.sigmoid(self.conv2(excitation))
         return x * excitation
 
 
@@ -119,6 +113,7 @@ class MBConv(nnx.Module):
         strides: int,
         expand_ratio: int,
         se_ratio: float,
+        padding: int,
         *,
         rngs: nnx.Rngs,
     ):
@@ -133,16 +128,8 @@ class MBConv(nnx.Module):
         expanded_channels = in_channels * expand_ratio
         self.expand_conv = None
         if expand_ratio != 1:
-            self.expand_conv = nnx.Conv(
-                in_channels,
-                expanded_channels,
-                kernel_size=(1, 1),
-                use_bias=False,
-                rngs=rngs,
-            )
-            self.bn0 = nnx.BatchNorm(
-                expanded_channels, use_running_average=True, rngs=rngs
-            )
+            self.expand_conv = nnx.Conv(in_channels, expanded_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)
+            self.bn0 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
 
         # Depthwise convolution
         self.depthwise_conv = nnx.Conv(
@@ -151,24 +138,21 @@ class MBConv(nnx.Module):
             kernel_size=(kernel_size, kernel_size),
             strides=(strides, strides),
             feature_group_count=expanded_channels,
-            padding="SAME",
+            # padding="SAME",
+            padding=padding,
             use_bias=False,
             rngs=rngs,
         )
-        self.bn1 = nnx.BatchNorm(
-            expanded_channels, use_running_average=True, rngs=rngs
-        )
+        self.bn1 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
 
         # Squeeze-and-Excitation layer
         self.se = None
-        if 0 < se_ratio <= 1:
+        if 0 < se_ratio and se_ratio <= 1:
             se_channels = max(1, int(in_channels * se_ratio))
             self.se = SqueezeAndExcitation(expanded_channels, se_channels, rngs=rngs)
 
         # Projection phase (1x1 Conv)
-        self.project_conv = nnx.Conv(
-            expanded_channels, out_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs
-        )
+        self.project_conv = nnx.Conv(expanded_channels, out_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)
         self.bn2 = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
     def __call__(self, x: jax.Array, training: bool) -> jax.Array:
@@ -216,17 +200,9 @@ class EfficientNet(nnx.Module):
 
         out_channels = round_filters(32, cfg.width_coefficient)
         self.stem_conv = nnx.Conv(
-            3,
-            out_channels,
-            kernel_size=(3, 3),
-            strides=(2, 2),
-            padding="SAME",
-            use_bias=False,
-            rngs=rngs,
+            3, out_channels, kernel_size=(3, 3), strides=(2, 2), padding=1, use_bias=False, rngs=rngs
         )
-        self.stem_bn = nnx.BatchNorm(
-            out_channels, use_running_average=True, rngs=rngs
-        )
+        self.stem_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
         # Build blocks
         self.blocks = []
@@ -247,22 +223,16 @@ class EfficientNet(nnx.Module):
                         strides=strides,
                         expand_ratio=bc.expand_ratio,
                         se_ratio=bc.se_ratio,
+                        padding=bc.padding,
                         rngs=rngs,
                     )
                 )
 
         # Head
-        in_channels = round_filters(
-            block_configs[-1].output_filters, cfg.width_coefficient
-        )
+        in_channels = round_filters(block_configs[-1].output_filters, cfg.width_coefficient)
         out_channels = round_filters(1280, cfg.width_coefficient)
         self.head_conv = nnx.Conv(
-            in_channels,
-            out_channels,
-            kernel_size=(1, 1),
-            padding="SAME",
-            use_bias=False,
-            rngs=rngs,
+            in_channels, out_channels, kernel_size=(1, 1), padding="SAME", use_bias=False, rngs=rngs
         )
 
         self.head_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
@@ -280,7 +250,7 @@ class EfficientNet(nnx.Module):
         x = nnx.silu(x)
 
         # Blocks - Pass the training flag down to each block
-        for block in self.blocks:
+        for i, block in enumerate(self.blocks):
             x = block(x, training=training)
 
         # Head
@@ -292,4 +262,3 @@ class EfficientNet(nnx.Module):
         x = self.dropout(x, deterministic=not training)
         x = self.classifier(x)
         return x
-

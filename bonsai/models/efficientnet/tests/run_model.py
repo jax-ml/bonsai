@@ -1,9 +1,11 @@
 import time
-from functools import partial
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
+
 from bonsai.models.efficientnet import modeling, params
+
 
 def run_model():
     # 1. Create model and PRNG keys
@@ -14,9 +16,7 @@ def run_model():
     # 2. Prepare dummy input
     batch_size = 4
     image_size = config.resolution
-    dummy_input = jnp.ones(
-        (batch_size, image_size, image_size, 3), dtype=jnp.float32
-    )
+    dummy_input = jnp.ones((batch_size, image_size, image_size, 3), dtype=jnp.float32)
 
     # 3. Warmup (triggers JIT compilation)
     print("Starting JIT compilation (warmup)...")
@@ -37,6 +37,7 @@ def run_model():
     # 5. Show output shape
     print(f"\nInput shape: {dummy_input.shape}")
     print(f"Output logits shape: {logits.shape}")
+
 
 if __name__ == "__main__":
     run_model()
