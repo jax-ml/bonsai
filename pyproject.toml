@@ -40,8 +40,12 @@ sam2 = [
 vgg19 = [
   "h5py",
 ]
+densenet121 = [
+  "h5py",
+]
 testing = [
   "torch",
+  "keras_hub",
 ]
 
 [project.urls]

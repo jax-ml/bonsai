@@ -1,4 +1,4 @@
-# U-Net in JAX
+# Efficientnet in JAX
 
 This directory contains a pure JAX implementation of the [Efficientnet](https://arxiv.org/abs/1905.11946), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
 
