@@ -16,6 +16,7 @@ import dataclasses
 from functools import partial
 
 import jax
+import jax.numpy as jnp
 from flax import nnx
 from flax.linen.pooling import max_pool
 
@@ -58,13 +59,11 @@ class VGG(nnx.Module):
         self.conv_block2 = ConvBlock(cfg.conv_sizes[2], in_channels=128, out_channels=256, rngs=rngs)
         self.conv_block3 = ConvBlock(cfg.conv_sizes[3], in_channels=256, out_channels=512, rngs=rngs)
         self.conv_block4 = ConvBlock(cfg.conv_sizes[4], in_channels=512, out_channels=512, rngs=rngs)
-
-        self.flatten = partial(lambda x: x.reshape(x.shape[0], -1))
+        self.global_mean_pool = lambda x: jnp.mean(x, axis=(1, 2))
         self.classifier = nnx.Sequential(
-            nnx.Linear(512 * 7 * 7, 4096, rngs=rngs),
-            nnx.relu,
-            nnx.Linear(4096, 4096, rngs=rngs),
-            nnx.relu,
+            nnx.Conv(512, 4096, (7, 7), rngs=rngs),
+            nnx.Conv(4096, 4096, (1, 1), rngs=rngs),
+            self.global_mean_pool,
             nnx.Linear(4096, cfg.num_classes, rngs=rngs),
         )
 
@@ -74,10 +73,7 @@ class VGG(nnx.Module):
         x = self.conv_block2(x)
         x = self.conv_block3(x)
         x = self.conv_block4(x)
-
-        x = self.flatten(x)
         x = self.classifier(x)
-
         return x
 
 
