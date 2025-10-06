@@ -174,3 +174,7 @@ def run_model():
     print("Full text (prompt + generated)")
     for i, text in enumerate(decoded_full):
         print(f"[Sample {i}] {text}\n")
+
+
+if __name__ == "__main__":
+    run_model()
