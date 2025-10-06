@@ -15,8 +15,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def jax_greedy_decode(model, audio_features, tokenizer, max_length=200):
     """Simple greedy decoding for JAX model using HuggingFace tokenizer."""
-    # Start with initial tokens using HF tokenizer
-    initial_tokens = [tokenizer.sot, tokenizer.to_language_token("en"), tokenizer.transcribe, tokenizer.no_timestamps]
+    # Get special tokens from HuggingFace tokenizer
+    sot = tokenizer.convert_tokens_to_ids("<|startoftranscript|>")
+    en_token = tokenizer.convert_tokens_to_ids("<|en|>")
+    transcribe = tokenizer.convert_tokens_to_ids("<|transcribe|>")
+    no_timestamps = tokenizer.convert_tokens_to_ids("<|notimestamps|>")
+    eot = tokenizer.convert_tokens_to_ids("<|endoftext|>")
+    
+    # Start with initial tokens (multilingual format)
+    initial_tokens = [sot, en_token, transcribe, no_timestamps]
     tokens = jnp.array([initial_tokens], dtype=jnp.int32)
     
     # Generate tokens greedily using JAX
@@ -34,7 +41,7 @@ def jax_greedy_decode(model, audio_features, tokenizer, max_length=200):
         tokens = jnp.concatenate([tokens, jnp.array([[next_token]], dtype=jnp.int32)], axis=1)
         
         # Stop if we hit the end token
-        if next_token == tokenizer.eot:  # <|endoftext|>
+        if next_token == eot:  # <|endoftext|>
             break
     
     return tokens
@@ -48,7 +55,7 @@ def main():
         # Import the modules
         import audio
         import modeling
-        from tokenizer import get_tokenizer
+        from transformers import WhisperTokenizer
         
         print("✅ All modules imported successfully")
         
@@ -58,8 +65,9 @@ def main():
         print(f"✅ JAX NNX model loaded with real weights")
         
         # Load audio and compute mel
-        print(f"\n📁 Loading audio from: bonsai/models/whisper/tests/audio_samples/bush_speech.wav")
-        audio_tensor = audio.load_audio("bonsai/models/whisper/tests/audio_samples/bush_speech.wav")
+        audio_path = os.path.join(os.path.dirname(__file__), "audio_samples", "bush_speech.wav")
+        print(f"\n📁 Loading audio from: {audio_path}")
+        audio_tensor = audio.load_audio(audio_path)
         print(f"✅ Audio loaded - shape: {audio_tensor.shape}")
         
         print(f"\n🎵 Computing mel spectrogram...")
@@ -82,7 +90,8 @@ def main():
         # Generate tokens
         # Initialize HuggingFace tokenizer
         print(f"\n🔤 Initializing HuggingFace tokenizer...")
-        tokenizer_instance = get_tokenizer(multilingual=True, language="en", task="transcribe")
+        tokenizer_instance = WhisperTokenizer.from_pretrained("openai/whisper-tiny")
+        tokenizer_instance.set_prefix_tokens(language="en", task="transcribe")
         print(f"✅ HF tokenizer initialized")
         
         print(f"\n🤖 Generating tokens with JAX Whisper...")
