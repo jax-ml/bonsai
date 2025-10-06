@@ -30,10 +30,7 @@ from bonsai.models.llada_8b import params as params
 
 # Config / paths
 HF_REPO = "GSAI-ML/LLaDA-8B-Instruct"
-MODEL_CP_PATH = "/tmp/models-bonsai/" + HF_REPO.split("/")[1]
-
-if not os.path.isdir(MODEL_CP_PATH):
-    snapshot_download(HF_REPO, local_dir=MODEL_CP_PATH)
+MODEL_CP_PATH = snapshot_download(HF_REPO, local_dir="/tmp/models-bonsai")
 
 
 # Tokenization helper
