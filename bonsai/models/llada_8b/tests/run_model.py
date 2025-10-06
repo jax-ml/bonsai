@@ -50,21 +50,10 @@ def tokenize(tokenizer, inputs: list[str]):
     return jnp.array(batch), pad_id, max_l, buffer_len
 
 
-# Demo queries
-prompt = ["Why is the sky blue instead of a different color like purple?", "Who am I?"]
-
-tokenizer = AutoTokenizer.from_pretrained(MODEL_CP_PATH, use_fast=True)
-tokens, pad_id, max_len, token_len = tokenize(tokenizer, prompt)
-batch_size = tokens.shape[0]
-
-cfg = modeling.ModelConfig.llada_8b_instruct()
-model = params.create_llada_from_pretrained(MODEL_CP_PATH, cfg)
-graphdef, state = nnx.split(model)
-
-
+# Benchmarking helper
 def generate_for_benchmark(
     graphdef: nnx.GraphDef[nnx.Module],
-    init_state: nnx.State,
+    state: nnx.State,
     prompt: jax.Array,
     *,
     steps: int = 128,
@@ -76,17 +65,16 @@ def generate_for_benchmark(
     mask_id: int = 126336,
     rng: jax.Array = jax.random.PRNGKey(0),
     profile_dir: str | None = None,
-    profile_start_step: int | None = None,  # global step index at which to start profiling
-    profile_stop_step: int | None = None,  # global step index at which to stop profiling
+    profile_start_step: int | None = None,  # global step index to start profiling
+    profile_stop_step: int | None = None,  # global step index to stop profiling
 ):
     """
     Returns:
-      x: final tokens (B, Lp+gen_length)
-      state: final nnx.State
-      step_times: list[float] of per-step latencies (seconds), length == steps
+      x: final tokens (B, prompt_len + gen_length)
+      step_times: list[float] of per-step latencies (seconds), length == `steps`
     """
-    B, Lp = prompt.shape
-    x = jnp.full((B, Lp + gen_length), mask_id, dtype=jnp.int32).at[:, :Lp].set(prompt)
+    B, prompt_len = prompt.shape
+    x = jnp.full((B, prompt_len + gen_length), mask_id, dtype=jnp.int32).at[:, :prompt_len].set(prompt)
     prompt_index = x != mask_id
 
     assert gen_length % block_length == 0
@@ -94,89 +82,43 @@ def generate_for_benchmark(
     assert steps % num_blocks == 0
     steps_per_block = steps // num_blocks
 
-    state = init_state
-
-    def _do_step(x, state, rng, i, stop, num_transfer_tokens, *, remasking: str):
-        mask_index = x == mask_id
-
-        # CFG path: run conditional + unconditional; keep state from the conditional path
-        if cfg_scale > 0.0:
-            un_x = jnp.where(prompt_index, mask_id, x)
-            x_stack = jnp.concatenate([x, un_x], axis=0)  # (2B, L)
-            logits_both = modeling.forward(graphdef, state, x_stack)  # (2B,L,V)
-            logits, logits_un = jnp.split(logits_both, 2, axis=0)
-            logits = logits_un + (cfg_scale + 1.0) * (logits - logits_un)
-        else:
-            logits = modeling.forward(graphdef, state, x)
-
-        # Noise + argmax
-        rng, sub = jax.random.split(rng)
-        logits_noisy = modeling.add_gumbel_noise(logits, temperature, sub)
-        x0 = jnp.argmax(logits_noisy, axis=-1).astype(jnp.int32)
-
-        # Confidence
-        if remasking == "low_confidence":
-            p = jax.nn.softmax(logits, axis=-1)
-            x0_p = jnp.squeeze(jnp.take_along_axis(p, x0[..., None], axis=-1), axis=-1)
-        elif remasking == "random":
-            rng, sub = jax.random.split(rng)
-            x0_p = jax.random.uniform(sub, shape=x0.shape, dtype=logits.dtype)
-        else:
-            raise NotImplementedError(remasking)
-
-        # Forbid beyond current block
-        neg_inf = jnp.array(-jnp.inf, dtype=x0_p.dtype)
-        pos = jnp.arange(x0.shape[1])[None, :]
-        x0_p = jnp.where(pos >= stop, neg_inf, x0_p)
-
-        x0_sel = jnp.where(mask_index, x0, x)
-        conf = jnp.where(mask_index, x0_p, neg_inf)
-
-        # variable-k per row
-        k_vec = num_transfer_tokens[:, i]
-        transfer_index = modeling.row_topk_mask_vmapped(conf, k_vec)
-
-        x = jnp.where(transfer_index, x0_sel, x)
-        return x, rng
-
-    # JIT the step function for realistic per-step timing.
-    do_step = partial(_do_step, remasking=remasking)
-    do_step_jit = jax.jit(do_step)
-
-    # Optional warmup compile outside the timing window
-    # (uses the very first block/step's shapes & branches)
-    start0 = Lp + 0 * block_length
-    stop0 = Lp + (0 + 1) * block_length
-    block_mask0 = lax.dynamic_slice_in_dim(x, start_index=start0, slice_size=block_length, axis=1)
-    block_mask_index0 = block_mask0 == mask_id
-    num_transfer_tokens0 = modeling.get_num_transfer_tokens(block_mask_index0, steps_per_block)
-    x_w, rng = do_step_jit(x, state, rng, jnp.int32(0), jnp.int32(stop0), num_transfer_tokens0)
-    _ = x_w.block_until_ready()  # ensure compile happens before we start measuring
-
     step_times: list[float] = []
     global_step = 0
 
-    # Main loop with per-step timing
-    for b_idx in range(num_blocks):
-        start = Lp + b_idx * block_length
-        stop = Lp + (b_idx + 1) * block_length
+    for block_idx in range(num_blocks):
+        start = prompt_len + block_idx * block_length
+        stop = prompt_len + (block_idx + 1) * block_length
 
+        # Per-block transfer schedule matches the reference
         block_mask = lax.dynamic_slice_in_dim(x, start_index=start, slice_size=block_length, axis=1)
         block_mask_index = block_mask == mask_id
-        num_transfer_tokens = modeling.get_num_transfer_tokens(block_mask_index, steps_per_block)
+        num_transfer_tokens = modeling.get_num_transfer_tokens(
+            block_mask_index, steps_per_block
+        )  # (B, steps_per_block)
 
         for i in range(steps_per_block):
-            # Start trace exactly at profile_start_step if requested
             if profile_dir and profile_start_step is not None and global_step == profile_start_step:
                 jax.profiler.start_trace(profile_dir)
 
             t0 = time.perf_counter()
-            x, rng = do_step_jit(x, state, rng, jnp.int32(i), jnp.int32(stop), num_transfer_tokens)
-            _ = x.block_until_ready()  # sync to measure device time
-            dt = time.perf_counter() - t0
-            step_times.append(dt)
+            x, rng = modeling.generate_step(
+                graphdef=graphdef,
+                state=state,
+                x=x,
+                prompt_index=prompt_index,
+                rng=rng,
+                step_idx=i,
+                start=start,
+                stop=stop,
+                num_transfer_tokens=num_transfer_tokens,
+                temperature=temperature,
+                cfg_scale=cfg_scale,
+                remasking=remasking,
+                mask_id=mask_id,
+            )
+            _ = x.block_until_ready()  # ensure device sync for accurate timing
+            step_times.append(time.perf_counter() - t0)
 
-            # Stop trace after profile_stop_step if requested
             if profile_dir and profile_stop_step is not None and global_step == profile_stop_step:
                 jax.profiler.stop_trace()
 
@@ -185,38 +127,50 @@ def generate_for_benchmark(
     return x, step_times
 
 
-x_final, step_times = generate_for_benchmark(
-    graphdef,
-    state,
-    tokens,
-    steps=128,
-    gen_length=128,
-    block_length=32,
-    temperature=0.0,
-    cfg_scale=0.0,
-    remasking="low_confidence",
-    rng=jax.random.PRNGKey(0),
-    profile_dir="/tmp/profile-data",
-    profile_start_step=1,
-    profile_stop_step=5,
-)
-
-print("Per-step (s):", [f"{t:.4f}" for t in step_times])
-print(f"Avg: {sum(step_times) / len(step_times):.4f} s")
-
-# Decode
-B, L_total = x_final.shape
-
-
-def decode_batch(seqs):
+def decode_batch(tokenizer, seqs):
     if hasattr(tokenizer, "batch_decode"):
         return tokenizer.batch_decode(seqs, skip_special_tokens=True)
     return [tokenizer.decode(s) for s in seqs]
 
 
-decoded_full = decode_batch(np.asarray(x_final))
+def run_model():
+    # Demo prompts
+    prompt = [
+        "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?",
+        "Johnny picked 8 apples this morning and put them on his desk. Bonnie eats 3 of them. How many apples does Johnny have left?",
+    ]
 
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_CP_PATH, use_fast=True)
+    tokens, pad_id, max_len, token_len = tokenize(tokenizer, prompt)
+    print("Tokenized batch")
 
-print("Full text (prompt + generated)")
-for i, text in enumerate(decoded_full):
-    print(f"[Sample {i}] {text}\n")
+    cfg = modeling.ModelConfig.llada_8b_instruct()
+    model = params.create_llada_from_pretrained(MODEL_CP_PATH, cfg)
+    graphdef, state = nnx.split(model)
+    print("Loaded model")
+
+    x_final, step_times = generate_for_benchmark(
+        graphdef,
+        state,
+        tokens,
+        steps=128,
+        gen_length=128,
+        block_length=16,
+        temperature=0.0,
+        cfg_scale=0.0,
+        remasking="low_confidence",
+        rng=jax.random.PRNGKey(0),
+        profile_dir="/tmp/profile-data",
+        profile_start_step=1,
+        profile_stop_step=5,
+    )
+
+    print("Per-step (s):", [f"{t:.4f}" for t in step_times])
+    print(f"Avg: {sum(step_times) / len(step_times):.4f} s")
+
+    # Decode
+    decoded_full = decode_batch(tokenizer, np.asarray(x_final))
+
+    print("Full text (prompt + generated)")
+    for i, text in enumerate(decoded_full):
+        print(f"[Sample {i}] {text}\n")

@@ -845,21 +845,125 @@ def forward(graphdef: nnx.GraphDef[nnx.Module], state: nnx.State, tokens: jax.Ar
     return out.logits
 
 
-@partial(
-    jax.jit,
-    static_argnames=[
-        "steps",
-        "gen_length",
-        "block_length",
-        "temperature",
-        "cfg_scale",
-        "remasking",
-        "mask_id",
-    ],
-)
+def generate_step(
+    graphdef: nnx.GraphDef[nnx.Module],
+    state: nnx.State,
+    x: jax.Array,
+    prompt_index: jax.Array,
+    rng: jax.Array,
+    step_idx: int,
+    start: int,
+    stop: int,
+    num_transfer_tokens: jax.Array,
+    temperature: float = 0.0,
+    cfg_scale: float = 0.0,
+    remasking: str = "low_confidence",
+    mask_id: int = 126336,
+) -> tuple[jax.Array, jax.Array]:
+    """
+    Execute a single generation step.
+
+    Returns:
+        (updated_x, updated_rng)
+    """
+    mask_index = x == mask_id
+
+    # CFG: run both, keep the state from the *conditional* path
+    if cfg_scale > 0.0:
+        un_x = jnp.where(prompt_index, mask_id, x)
+        x_stack = jnp.concatenate([x, un_x], axis=0)
+        logits_both = forward(graphdef, state, x_stack)
+        logits, logits_un = jnp.split(logits_both, 2, axis=0)
+        logits = logits_un + (cfg_scale + 1.0) * (logits - logits_un)
+    else:
+        logits = forward(graphdef, state, x)
+
+    # Noise + argmax
+    rng, sub = jax.random.split(rng)
+    if temperature > 0:
+        logits_noisy = add_gumbel_noise(logits, temperature, sub)
+    else:
+        logits_noisy = logits
+    x0 = jnp.argmax(logits_noisy, axis=-1).astype(jnp.int32)
+
+    # Confidence
+    if remasking == "low_confidence":
+        p = jax.nn.softmax(logits, axis=-1)
+        x0_p = jnp.squeeze(jnp.take_along_axis(p, x0[..., None], axis=-1), axis=-1)
+    elif remasking == "random":
+        rng, sub = jax.random.split(rng)
+        x0_p = jax.random.uniform(sub, shape=x0.shape, dtype=logits.dtype)
+    else:
+        raise NotImplementedError(remasking)
+
+    # Forbid beyond current block
+    neg_inf = jnp.array(-jnp.inf, dtype=x0_p.dtype)
+    pos = jnp.arange(x.shape[1])[None, :]
+    x0_p = jnp.where(pos >= stop, neg_inf, x0_p)
+
+    x0_sel = jnp.where(mask_index, x0, x)
+    conf = jnp.where(mask_index, x0_p, neg_inf)
+
+    # variable-k per row
+    k_vec = num_transfer_tokens[:, step_idx]
+    transfer_index = row_topk_mask_vmapped(conf, k_vec)
+
+    x = jnp.where(transfer_index, x0_sel, x)
+    return x, rng
+
+
+def generate_block(
+    graphdef: nnx.GraphDef[nnx.Module],
+    state: nnx.State,
+    x: jax.Array,
+    prompt_index: jax.Array,
+    rng: jax.Array,
+    block_idx: int,
+    prompt_len: int,
+    block_length: int,
+    steps_per_block: int,
+    *,
+    temperature: float = 0.0,
+    cfg_scale: float = 0.0,
+    remasking: str = "low_confidence",
+    mask_id: int = 126336,
+) -> tuple[jax.Array, jax.Array]:
+    """
+    Generate one block of tokens.
+
+    Returns:
+        (updated_x, updated_rng)
+    """
+    start = prompt_len + block_idx * block_length
+    stop = prompt_len + (block_idx + 1) * block_length
+
+    block_mask = lax.dynamic_slice_in_dim(x, start_index=start, slice_size=block_length, axis=1)
+    block_mask_index = block_mask == mask_id
+    num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)
+
+    for i in range(steps_per_block):
+        x, rng = generate_step(
+            graphdef,
+            state,
+            x,
+            prompt_index,
+            rng,
+            step_idx=i,
+            start=start,
+            stop=stop,
+            num_transfer_tokens=num_transfer_tokens,
+            temperature=temperature,
+            cfg_scale=cfg_scale,
+            remasking=remasking,
+            mask_id=mask_id,
+        )
+
+    return x, rng
+
+
 def generate(
     graphdef: nnx.GraphDef[nnx.Module],
-    init_state: nnx.State,
+    state: nnx.State,
     prompt: jax.Array,
     steps: int = 128,
     gen_length: int = 128,
@@ -869,9 +973,15 @@ def generate(
     remasking: str = "low_confidence",
     mask_id: int = 126336,
     rng: jax.Array = jax.random.PRNGKey(0),
-):
-    B, Lp = prompt.shape
-    x = jnp.full((B, Lp + gen_length), mask_id, dtype=jnp.int32).at[:, :Lp].set(prompt)
+) -> jax.Array:
+    """
+    Generate tokens using masked iterative decoding.
+
+    Returns:
+        (B, prompt_len + gen_length) generated tokens
+    """
+    B, prompt_len = prompt.shape
+    x = jnp.full((B, prompt_len + gen_length), mask_id, dtype=jnp.int32).at[:, :prompt_len].set(prompt)
     prompt_index = x != mask_id
 
     assert gen_length % block_length == 0
@@ -879,147 +989,21 @@ def generate(
     assert steps % num_blocks == 0
     steps_per_block = steps // num_blocks
 
-    def do_block(carry, b_idx):
-        x, state, rng = carry
-        start = Lp + b_idx * block_length
-        stop = Lp + (b_idx + 1) * block_length
-        block_mask = lax.dynamic_slice_in_dim(x, start_index=start, slice_size=block_length, axis=1)
-        block_mask_index = block_mask == mask_id  # (B, block_len)
-        num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)  # (B,S)
-
-        def do_step(carry_s, i):
-            x, state, rng = carry_s
-            mask_index = x == mask_id
-
-            # CFG: run both, keep the state from the *conditional* path
-            if cfg_scale > 0.0:
-                un_x = jnp.where(prompt_index, mask_id, x)
-                x_stack = jnp.concatenate([x, un_x], axis=0)  # (2B, L)
-                # Run on both conditional and unconditional logits
-                logits_both, state = forward(graphdef, state, x_stack)  # (2B,L,V), ignore state
-                logits, logits_un = jnp.split(logits_both, 2, axis=0)  # (B,L,V)
-                logits = logits_un + (cfg_scale + 1.0) * (logits - logits_un)
-                state_next = state
-            else:
-                logits, state_next = forward(graphdef, state, x)
-
-            # Noise + argmax
-            rng, sub = jax.random.split(rng)
-            logits_noisy = add_gumbel_noise(logits, temperature, sub)
-            x0 = jnp.argmax(logits_noisy, axis=-1).astype(jnp.int32)
-
-            # Confidence
-            if remasking == "low_confidence":
-                p = jax.nn.softmax(logits, axis=-1)
-                x0_p = jnp.squeeze(jnp.take_along_axis(p, x0[..., None], axis=-1), axis=-1)
-            elif remasking == "random":
-                rng, sub = jax.random.split(rng)
-                x0_p = jax.random.uniform(sub, shape=x0.shape, dtype=logits.dtype)
-            else:
-                raise NotImplementedError(remasking)
-
-            # Forbid beyond current block
-            neg_inf = jnp.array(-jnp.inf, dtype=x0_p.dtype)
-            pos = jnp.arange(x0.shape[1])[None, :]
-            x0_p = jnp.where(pos >= stop, neg_inf, x0_p)
-
-            x0_sel = jnp.where(mask_index, x0, x)
-            conf = jnp.where(mask_index, x0_p, neg_inf)
-
-            # variable-k per row
-            k_vec = num_transfer_tokens[:, i]
-            transfer_index = row_topk_mask_vmapped(conf, k_vec)
-
-            x = jnp.where(transfer_index, x0_sel, x)
-            return (x, state_next, rng), None
-
-        (x, state, rng), _ = lax.scan(do_step, (x, state, rng), xs=jnp.arange(steps_per_block, dtype=jnp.int32))
-        return (x, state, rng), None
-
-    (x, final_state, _), _ = lax.scan(do_block, (x, init_state, rng), xs=jnp.arange(num_blocks, dtype=jnp.int32))
-    return x, final_state
-
-
-def generate_forloop(
-    graphdef: nnx.GraphDef[nnx.Module],
-    init_state: nnx.State,
-    prompt: jax.Array,
-    steps: int = 128,
-    gen_length: int = 128,
-    block_length: int = 128,
-    temperature: float = 0.0,
-    cfg_scale: float = 0.0,
-    remasking: str = "low_confidence",
-    mask_id: int = 126336,
-    rng: jax.Array = jax.random.PRNGKey(0),
-):
-    B, Lp = prompt.shape
-    x = jnp.full((B, Lp + gen_length), mask_id, dtype=jnp.int32).at[:, :Lp].set(prompt)
-    prompt_index = x != mask_id
-
-    assert gen_length % block_length == 0
-    num_blocks = gen_length // block_length
-    assert steps % num_blocks == 0
-    steps_per_block = steps // num_blocks
-
-    state = init_state
-
-    def do_step(x, state, rng, i, stop, num_transfer_tokens):
-        mask_index = x == mask_id
-
-        # CFG: run both, keep the state from the *conditional* path
-        if cfg_scale > 0.0:
-            un_x = jnp.where(prompt_index, mask_id, x)
-            x_stack = jnp.concatenate([x, un_x], axis=0)  # (2B, L)
-            logits_both = forward(graphdef, state, x_stack)
-            logits, logits_un = jnp.split(logits_both, 2, axis=0)
-            logits = logits_un + (cfg_scale + 1.0) * (logits - logits_un)
-        else:
-            logits = forward(graphdef, state, x)
-
-        # Noise + argmax
-        rng, sub = jax.random.split(rng)
-        logits_noisy = add_gumbel_noise(logits, temperature, sub)
-        x0 = jnp.argmax(logits_noisy, axis=-1).astype(jnp.int32)
-
-        # Confidence
-        if remasking == "low_confidence":
-            p = jax.nn.softmax(logits, axis=-1)
-            x0_p = jnp.squeeze(jnp.take_along_axis(p, x0[..., None], axis=-1), axis=-1)
-        elif remasking == "random":
-            rng, sub = jax.random.split(rng)
-            x0_p = jax.random.uniform(sub, shape=x0.shape, dtype=logits.dtype)
-        else:
-            raise NotImplementedError(remasking)
-
-        # Forbid beyond current block
-        neg_inf = jnp.array(-jnp.inf, dtype=x0_p.dtype)
-        pos = jnp.arange(x0.shape[1])[None, :]
-        x0_p = jnp.where(pos >= stop, neg_inf, x0_p)
-
-        x0_sel = jnp.where(mask_index, x0, x)
-        conf = jnp.where(mask_index, x0_p, neg_inf)
-
-        # variable-k per row
-        k_vec = num_transfer_tokens[:, i]
-        transfer_index = row_topk_mask_vmapped(conf, k_vec)
-
-        x = jnp.where(transfer_index, x0_sel, x)
-        return x, rng
-
-    def do_block(x, state, rng, b_idx):
-        start = Lp + b_idx * block_length
-        stop = Lp + (b_idx + 1) * block_length
-        block_mask = lax.dynamic_slice_in_dim(x, start_index=start, slice_size=block_length, axis=1)
-        block_mask_index = block_mask == mask_id
-        num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)
-
-        for i in range(steps_per_block):
-            x, rng = do_step(x, state, rng, i, stop, num_transfer_tokens)
-
-        return x, rng
-
-    for b_idx in range(num_blocks):
-        x, rng = do_block(x, state, rng, b_idx)
+    for block_idx in range(num_blocks):
+        x, rng = generate_block(
+            graphdef,
+            state,
+            x,
+            prompt_index,
+            rng,
+            block_idx=block_idx,
+            prompt_len=prompt_len,
+            block_length=block_length,
+            steps_per_block=steps_per_block,
+            temperature=temperature,
+            cfg_scale=cfg_scale,
+            remasking=remasking,
+            mask_id=mask_id,
+        )
 
     return x
