@@ -22,7 +22,7 @@ dependencies = [
   "jax",  # "jax[tpu]" for TPU, "jax[cuda12]" for GPU.
   "jaxlib",
   "jaxtyping",
-  "flax",
+  "flax >= 0.12.0",
   "jinja2",
   "setuptools",
   "huggingface-hub",
