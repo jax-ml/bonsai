@@ -399,7 +399,7 @@ class DecoderLayer(nnx.Module):
 class Qwen3(nnx.Module):
     def __init__(self, cfg: ModelCfg, *, shd_cfg: ShardingCfg = ShardingCfg.default(), rngs: nnx.Rngs):
         self.embedder = Embedder(vocab_size=cfg.vocab_size, emb_dim=cfg.emb_dim, rngs=rngs, shd_cfg=shd_cfg)
-        self.layers = [DecoderLayer(cfg=cfg, shd_cfg=shd_cfg, rngs=rngs) for _ in range(cfg.num_layers)]
+        self.layers = nnx.List([DecoderLayer(cfg=cfg, shd_cfg=shd_cfg, rngs=rngs) for _ in range(cfg.num_layers)])
         self.final_norm = RMSNorm(cfg.emb_dim, norm_eps=cfg.norm_eps, shd_cfg=shd_cfg, rngs=rngs)
         self.lm_head = Einsum(
             einsum_str="BTD,DV->BTV", shape=(cfg.emb_dim, cfg.vocab_size), shd=shd_cfg.emb_dv, rngs=rngs
