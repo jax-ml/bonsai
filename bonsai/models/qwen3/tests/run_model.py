@@ -51,14 +51,17 @@ def run_model():
     assert cache_size >= max_len + gen_steps, f"Cache size ({cache_size}) must be >= {max_len} + {gen_steps}"
 
     config = modeling.ModelCfg.qwen3_0_6b()
-    model = params.create_model_from_safe_tensors(model_ckpt_path, config)
-    cache = modeling.init_cache(
-        num_layers=config.num_layers,
-        batch_size=batch_size,
-        cache_size=cache_size,
-        num_kv_heads=config.num_kv_heads,
-        head_dim=config.head_dim,
-    )
+    fsdp, tp = 1, jax.device_count()  # change this to meet your sharding setup.
+    mesh = jax.make_mesh(((fsdp, tp)), ("fsdp", "tp"))
+    with mesh:
+        model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh)
+        cache = modeling.init_cache(
+            num_layers=config.num_layers,
+            batch_size=batch_size,
+            cache_size=cache_size,
+            num_kv_heads=config.num_kv_heads,
+            head_dim=config.head_dim,
+        )
     graphdef, state = nnx.split((model, cache))
     state = jax.tree.leaves(state)  # Better perf from flattened jax state due to no pytree trasversals.
 
