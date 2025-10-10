@@ -36,19 +36,18 @@ class ModelCfg:
 
 class ConvBlock(nnx.Module):
     def __init__(self, num_conv: int, in_channels: int, out_channels: int, *, rngs: nnx.Rngs):
-        self.conv_layers = []
+        self.conv_layers = nnx.List()
         for i in range(num_conv):
             in_ch = in_channels if i == 0 else out_channels
             self.conv_layers.append(
                 nnx.Conv(in_ch, out_channels, kernel_size=(3, 3), padding="SAME", use_bias=True, rngs=rngs)
             )
-        self.max_pool = partial(max_pool, window_shape=(2, 2), strides=(2, 2), padding="VALID")
 
     def __call__(self, x):
         for conv in self.conv_layers:
             x = conv(x)
             x = nnx.relu(x)
-        x = self.max_pool(x)
+        x = nnx.max_pool(x, window_shape=(2, 2), strides=(2, 2), padding="VALID")
         return x
 
 
@@ -77,7 +76,7 @@ class VGG(nnx.Module):
         return x
 
 
-@partial(jax.jit, donate_argnums=(1))
+@jax.jit
 def forward(graphdef: nnx.GraphDef, state: nnx.State, x: jax.Array) -> jax.Array:
     model = nnx.merge(graphdef, state)
     return model(x)
