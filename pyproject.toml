@@ -45,6 +45,7 @@ densenet121 = [
 testing = [
   "torch",
   "keras_hub",
+  "tensorflow",
 ]
 
 [project.urls]
