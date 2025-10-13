@@ -4,7 +4,7 @@ JAX Whisper Model - Pure JAX implementation of OpenAI's Whisper speech recogniti
 
 from .audio import load_audio, log_mel_spectrogram, pad_or_trim
 from .modeling import ModelDimensions, Whisper, load_model
-from .params import load_whisper_weights, convert_hf_whisper_to_nnx
+from .params import convert_hf_whisper_to_nnx
 
 # Model configurations
 TINY_CONFIG = ModelDimensions(

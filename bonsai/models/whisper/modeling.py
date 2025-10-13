@@ -49,6 +49,10 @@ class ModelDimensions:
         self.n_text_layer = n_text_layer
 
 
+# Alias for compatibility with params.py
+WhisperConfig = ModelDimensions
+
+
 class MultiHeadAttention(nnx.Module):
     """Multi-head attention"""
     
@@ -260,6 +264,10 @@ class Whisper(nnx.Module):
     @jax.jit
     def __call__(self, mel: jnp.ndarray, tokens: jnp.ndarray) -> Dict[str, jnp.ndarray]:
         return self.decoder(tokens, self.encoder(mel))
+
+
+# Alias for compatibility with params.py
+WhisperModel = Whisper
 
 
 # Compatibility functions to match original interface

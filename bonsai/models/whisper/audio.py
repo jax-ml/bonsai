@@ -7,7 +7,7 @@ import numpy as np
 import jax.numpy as jnp
 import librosa
 
-from utils import exact_div
+from .utils import exact_div
 
 # hard-coded audio hyperparameters
 SAMPLE_RATE = 16000
