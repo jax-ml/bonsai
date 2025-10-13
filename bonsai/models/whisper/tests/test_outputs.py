@@ -13,7 +13,7 @@ from bonsai.models.whisper import audio, modeling
 from transformers import WhisperTokenizer
 
 
-def test_logits():
+def test_outputs():
     """Test logits quality on real audio from Bush Moscow speech."""
     print("=" * 80)
     print("TESTING LOGITS ON REAL AUDIO (Bush Moscow Speech)")
@@ -248,6 +248,6 @@ def greedy_decode_jax(model, audio_features, tokenizer, max_length=200):
 
 
 if __name__ == "__main__":
-    success = test_logits()
+    success = test_outputs()
     sys.exit(0 if success else 1)
 
