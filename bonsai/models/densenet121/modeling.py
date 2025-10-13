@@ -37,10 +37,9 @@ class ModelCfg:
 
 class DenseBlock(nnx.Module):
     def __init__(self, num_layers: int, in_channels: int, growth_rate: int, *, rngs: nnx.Rngs):
-        self.bn_layers = []
-        self.conv_layers = []
+        self.bn_layers, self.conv_layers = nnx.List(), nnx.List()
 
-        for i in range(num_layers):
+        for _ in range(num_layers):
             self.bn_layers.append(nnx.BatchNorm(in_channels, use_running_average=True, rngs=rngs))
             self.bn_layers.append(nnx.BatchNorm(4 * growth_rate, use_running_average=True, rngs=rngs))
 
@@ -50,7 +49,6 @@ class DenseBlock(nnx.Module):
             self.conv_layers.append(
                 nnx.Conv(4 * growth_rate, growth_rate, kernel_size=(3, 3), padding="SAME", use_bias=False, rngs=rngs)
             )
-
             in_channels += growth_rate
 
     def __call__(self, x1):
@@ -122,7 +120,7 @@ class DenseNet(nnx.Module):
         return x
 
 
-@partial(jax.jit, donate_argnums=(1))
+@jax.jit
 def forward(graphdef: nnx.GraphDef, state: nnx.State, x: jax.Array) -> jax.Array:
     model = nnx.merge(graphdef, state)
     return model(x)

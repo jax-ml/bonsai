@@ -120,7 +120,7 @@ def _stoi(s):
 
 
 def create_model_from_safe_tensors(
-    file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh | None = None
+    file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh
 ) -> model_lib.Qwen3:
     """Load tensors from the safetensors file and create a Qwen3 model."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
@@ -140,9 +140,6 @@ def create_model_from_safe_tensors(
         _assign_weights(jax_keys, v, state_dict, k, transform)
     if cfg.tie_word_embeddings:
         state_dict["lm_head"]["w"] = state_dict["embedder"]["input_emb"].T
-    if mesh is not None:
-        sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
-        state_dict = jax.device_put(state_dict, sharding)
-    else:
-        state_dict = jax.device_put(state_dict, jax.devices()[0])
+    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
+    state_dict = jax.device_put(state_dict, sharding)
     return nnx.merge(graph_def, state_dict)
