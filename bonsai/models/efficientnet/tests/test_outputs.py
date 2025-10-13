@@ -32,7 +32,7 @@ class EfficientNetTest(parameterized.TestCase):
         cfg = getattr(modeling.ModelCfg, f"b{version}")(1000)
         jax_model = params.create_model(cfg, rngs=nnx.Rngs(0), mesh=None)
 
-        # Download the pre-trained weights for B0
+        # Download the pre-trained weights
         pretrained_weights = params.get_timm_pretrained_weights(nnx_name)
 
         nnx_model = params.load_pretrained_weights(jax_model, pretrained_weights)

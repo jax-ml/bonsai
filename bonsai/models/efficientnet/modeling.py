@@ -26,7 +26,7 @@ DEFAULT_BLOCK_CONFIGS = [
     BlockConfig(16, 24, 3, 2, 6, 2, 0.25, 1),
     BlockConfig(24, 40, 5, 2, 6, 2, 0.25, 2),
     BlockConfig(40, 80, 3, 3, 6, 2, 0.25, 1),
-    BlockConfig(80, 112, 5, 3, 6, 1, 0.25, 2),  # here
+    BlockConfig(80, 112, 5, 3, 6, 1, 0.25, 2),
     BlockConfig(112, 192, 5, 4, 6, 2, 0.25, 2),
     BlockConfig(192, 320, 3, 1, 6, 1, 0.25, 1),
 ]
@@ -138,7 +138,6 @@ class MBConv(nnx.Module):
             kernel_size=(kernel_size, kernel_size),
             strides=(strides, strides),
             feature_group_count=expanded_channels,
-            # padding="SAME",
             padding=padding,
             use_bias=False,
             rngs=rngs,
@@ -205,7 +204,7 @@ class EfficientNet(nnx.Module):
         self.stem_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
         # Build blocks
-        self.blocks = []
+        self.blocks = nnx.List()
         for bc in block_configs:
             input_filters = round_filters(bc.input_filters, cfg.width_coefficient)
             output_filters = round_filters(bc.output_filters, cfg.width_coefficient)
@@ -242,20 +241,18 @@ class EfficientNet(nnx.Module):
         self.classifier = nnx.Linear(out_channels, cfg.num_classes, rngs=rngs)
 
     def __call__(self, x: jax.Array, training: bool = False) -> jax.Array:
-        is_inference = not training
-
         # Stem
         x = self.stem_conv(x)
-        x = self.stem_bn(x, use_running_average=is_inference)
+        x = self.stem_bn(x, use_running_average=not training)
         x = nnx.silu(x)
 
-        # Blocks - Pass the training flag down to each block
-        for i, block in enumerate(self.blocks):
+        # Blocks
+        for block in self.blocks:
             x = block(x, training=training)
 
         # Head
         x = self.head_conv(x)
-        x = self.head_bn(x, use_running_average=is_inference)
+        x = self.head_bn(x, use_running_average=not training)
         x = nnx.silu(x)
 
         x = self.gap(x)
