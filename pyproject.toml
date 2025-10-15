@@ -5,14 +5,13 @@ authors = [
   { name = "JAX-bonsai developers", email = "jiyounha@google.com" },
 ]
 description = "A collection of lightweight, open-source models built on JAX."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 readme = "README.md"
 license = "Apache-2.0"
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -46,6 +45,7 @@ densenet121 = [
 testing = [
   "torch",
   "keras_hub",
+  "tensorflow",
 ]
 
 [project.urls]
