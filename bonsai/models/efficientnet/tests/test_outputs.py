@@ -22,7 +22,7 @@ from flax import nnx
 from bonsai.models.efficientnet import modeling, params
 
 
-class EfficientNetTest(parameterized.TestCase):
+class TestModuleForwardPasses(parameterized.TestCase):
     def _get_models_and_input_size(version: int):
         nnx_name = f"efficientnet_b{version}"
         if version >= 5:
@@ -43,7 +43,7 @@ class EfficientNetTest(parameterized.TestCase):
 
     @parameterized.parameters([0, 1, 2, 3, 4, 5, 6, 7])
     def test_full(self, version: int):
-        nnx_model, timm_model, img_size = EfficientNetTest._get_models_and_input_size(version)
+        nnx_model, timm_model, img_size = TestModuleForwardPasses._get_models_and_input_size(version)
         b = 32
         tx = torch.rand((b, 3, img_size, img_size), dtype=torch.float32)
         jx = jnp.permute_dims(tx.detach().cpu().numpy(), (0, 2, 3, 1))

@@ -91,7 +91,6 @@ class SqueezeAndExcitation(nnx.Module):
     """Squeeze-and-Excitation block."""
 
     def __init__(self, in_channels: int, se_channels: int, *, rngs: nnx.Rngs):
-        self.gap = partial(jnp.mean, axis=(1, 2), keepdims=True)
         self.conv1 = nnx.Conv(in_channels, se_channels, kernel_size=(1, 1), rngs=rngs)
         self.conv2 = nnx.Conv(se_channels, in_channels, kernel_size=(1, 1), rngs=rngs)
 
@@ -126,10 +125,11 @@ class MBConv(nnx.Module):
 
         # Expansion phase (1x1 Conv) - skipped if expand_ratio is 1
         expanded_channels = in_channels * expand_ratio
-        self.expand_conv = None
         if expand_ratio != 1:
             self.expand_conv = nnx.Conv(in_channels, expanded_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)
             self.bn0 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
+        else:
+            self.expand_conv = None
 
         # Depthwise convolution
         self.depthwise_conv = nnx.Conv(
@@ -145,10 +145,12 @@ class MBConv(nnx.Module):
         self.bn1 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
 
         # Squeeze-and-Excitation layer
-        self.se = None
+
         if 0 < se_ratio and se_ratio <= 1:
             se_channels = max(1, int(in_channels * se_ratio))
             self.se = SqueezeAndExcitation(expanded_channels, se_channels, rngs=rngs)
+        else:
+            self.se = None
 
         # Projection phase (1x1 Conv)
         self.project_conv = nnx.Conv(expanded_channels, out_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)

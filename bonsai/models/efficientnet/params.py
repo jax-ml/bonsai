@@ -66,8 +66,9 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     """
     import timm
 
+    # TODO(#45): Implement model versions 5-7
     if int(model_name[-1]) >= 5:
-        raise ValueError("Weight loading for versions 5-7 still under development.")
+        raise NotImplementedError("Model implementations for versions 5-7 is still under development.")
 
     # Map to correct timm model names. Some larger models use specific checkpoints.
     timm_name_map = {
@@ -84,7 +85,6 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     if not timm_model_name:
         raise ValueError(f"No timm mapping for '{model_name}'. Available models are: {list(timm_name_map.keys())}")
 
-    print(f"Fetching '{timm_model_name}' weights from timm for JAX model '{model_name}'...")
     m = timm.create_model(timm_model_name, pretrained=True)
     m.eval()
 
@@ -160,7 +160,6 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
     """
     Loads pre-trained weights by directly modifying the JAX model's attributes in-place.
     """
-    print("Loading pre-trained weights directly into the model...")
     name_map = create_name_map(model.cfg)
 
     timm_to_jax_map = {}
@@ -200,5 +199,4 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
 
         param_to_update.value = jnp.array(weight_np)
 
-    print("Successfully loaded pre-trained weights into the model.")
     return model
