@@ -3,6 +3,7 @@ from flax import nnx
 
 from bonsai.models.vae import modeling as vae_lib
 
+
 def create_model(
     cfg: vae_lib.ModelCfg,
     rngs: nnx.Rngs,
