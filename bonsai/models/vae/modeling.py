@@ -1,5 +1,6 @@
 import dataclasses
 from functools import partial
+from itertools import pairwise
 from typing import Sequence
 
 import jax
@@ -45,7 +46,7 @@ class Decoder(nnx.Module):
         # Mirrored architecture of the encoder
         dims = [cfg.latent_dim, *list(reversed(cfg.hidden_dims))]
         self.hidden_layers = [
-            nnx.Linear(in_features, out_features, rngs=rngs) for in_features, out_features in zip(dims, dims[1:])
+            nnx.Linear(in_features, out_features, rngs=rngs) for in_features, out_features in pairwise(dims, dims[1:])
         ]
         self.fc_out = nnx.Linear(dims[-1], cfg.input_dim, rngs=rngs)
 

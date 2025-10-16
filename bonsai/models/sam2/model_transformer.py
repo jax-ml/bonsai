@@ -206,7 +206,7 @@ class RoPEAttention(nnx.Module):
         self.rotary_freqs_cis = compute_axial_cis(self.head_dim, H, W, rope_theta)
 
     def _separate_heads(self, x: jnp.ndarray) -> jnp.ndarray:
-        B, T, D = x.shape
+        B, T, _ = x.shape
         return x.reshape(B, T, self.num_heads, self.head_dim)
 
     def _combine_heads(self, x: jnp.ndarray) -> jnp.ndarray:

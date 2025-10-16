@@ -84,14 +84,14 @@ def run_model(MODEL_CP_PATH=None):
     # 5. Profiling
     jax.profiler.start_trace("/tmp/profile-sam2")
     for _ in range(5):
-        masks_all, ious_all, lowres_all = modeling.forward(model, dummy_points, dummy_labels)
+        masks_all, _, _ = modeling.forward(model, dummy_points, dummy_labels)
     jax.block_until_ready(masks_all)
     jax.profiler.stop_trace()
 
     # 6. Timing
     t0 = time.perf_counter()
     for _ in range(10):
-        masks_all, ious_all, lowres_all = modeling.forward(model, dummy_points, dummy_labels)
+        masks_all, _, _ = modeling.forward(model, dummy_points, dummy_labels)
     jax.block_until_ready(masks_all)
     print(f"10 forward passes took {time.perf_counter() - t0:.4f} s")
 

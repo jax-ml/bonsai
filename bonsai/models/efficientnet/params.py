@@ -6,7 +6,6 @@ from flax import nnx
 from bonsai.models.efficientnet import modeling as model_lib
 
 
-
 def create_model(
     cfg: model_lib.ModelCfg,
     rngs: nnx.Rngs,
@@ -54,12 +53,6 @@ def EfficientNetB6(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | N
 def EfficientNetB7(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
     return create_model(model_lib.ModelCfg.b7(num_classes), rngs, mesh)
 
-<<<<<<< HEAD
-=======
-
-# --- Pre-trained Weight Loading ---
-
->>>>>>> 759a0a9 ([qwen3] Update run_model script and rms param.)
 
 def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     """
