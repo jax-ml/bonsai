@@ -79,12 +79,12 @@ def _get_key_and_transform_mapping():
         r"^layers/vgg_backbone/layers/conv2d_15/vars/0$": ("conv_block4.conv_layers.3.kernel", None),
         r"^layers/vgg_backbone/layers/conv2d_15/vars/1$": ("conv_block4.conv_layers.3.bias", None),
         # Classifier
-        r"^layers/sequential/layers/conv2d/vars/0$": ("classifier.layers.0.kernel", (None, (-1, 4096))),
+        r"^layers/sequential/layers/conv2d/vars/0$": ("classifier.layers.0.kernel", None),
         r"^layers/sequential/layers/conv2d/vars/1$": ("classifier.layers.0.bias", None),
-        r"^layers/sequential/layers/conv2d_1/vars/0$": ("classifier.layers.2.kernel", (None, (4096, 4096))),
-        r"^layers/sequential/layers/conv2d_1/vars/1$": ("classifier.layers.2.bias", None),
-        r"^layers/sequential/layers/dense/vars/0$": ("classifier.layers.4.kernel", None),
-        r"^layers/sequential/layers/dense/vars/1$": ("classifier.layers.4.bias", None),
+        r"^layers/sequential/layers/conv2d_1/vars/0$": ("classifier.layers.1.kernel", None),
+        r"^layers/sequential/layers/conv2d_1/vars/1$": ("classifier.layers.1.bias", None),
+        r"^layers/sequential/layers/dense/vars/0$": ("classifier.layers.3.kernel", None),
+        r"^layers/sequential/layers/dense/vars/1$": ("classifier.layers.3.bias", None),
     }
 
 
@@ -141,7 +141,7 @@ def create_model_from_h5(
     """
     file = epath.Path(file_dir).expanduser() / "task.weights.h5"
     if not file:
-        raise ValueError(f"No safetensors found in {file_dir}")
+        raise ValueError(f"No h5 found in {file_dir}")
 
     tensor_dict = _load_h5_file(file)
 
