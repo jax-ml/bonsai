@@ -23,7 +23,9 @@ class TestModuleForwardPasses(absltest.TestCase):
         self.torch_model = Qwen3ForCausalLM.from_pretrained(model_name, dtype="auto").eval()
         self.bonsai_config = modeling.ModelCfg.qwen3_0_6b()
         model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
-        self.nnx_model = params.create_model_from_safe_tensors(model_ckpt_path, self.bonsai_config)
+        self.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"))
+        with self.mesh:
+            self.nnx_model = params.create_model_from_safe_tensors(model_ckpt_path, self.bonsai_config, self.mesh)
 
         self.batch_size = 32
         self.num_input_tokens = 5
@@ -68,7 +70,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         # create position embeddings to be shared across the decoder layers
         position_embeddings = self.torch_model.model.rotary_emb(input_embeddings, position_ids)
         out = dict(
-            hidden_states=input_embeddings,
+            hidden_states=input_embeddings.to(torch.float32),
             attention_mask=causal_mask_mapping[self.torch_model.model.layers[0].attention_type],
             position_ids=position_ids,
             past_key_values=past_key_values,
@@ -76,7 +78,7 @@ class TestModuleForwardPasses(absltest.TestCase):
             cache_position=cache_position,
             position_embeddings=position_embeddings,
         )
-        return {k: v.to(torch.float32) if isinstance(v, torch.Tensor) else v for k, v in out.items()}
+        return out
 
     def _nnx_forward_logits(self, cache: modeling.Cache, tokens: jax.Array, dtype: DTypeLike = jnp.float32):
         """Forward pass for the nnx model"""
@@ -107,14 +109,15 @@ class TestModuleForwardPasses(absltest.TestCase):
         return model_inputs
 
     def _init_nnx_cache(self, batch_size: int):
-        return modeling.init_cache(
-            num_layers=self.bonsai_config.num_layers,
-            batch_size=batch_size,
-            cache_size=self.cache_size,
-            num_kv_heads=self.bonsai_config.num_kv_heads,
-            head_dim=self.bonsai_config.head_dim,
-            dtype=jnp.float32,
-        )
+        with self.mesh:
+            return modeling.init_cache(
+                num_layers=self.bonsai_config.num_layers,
+                batch_size=batch_size,
+                cache_size=self.cache_size,
+                num_kv_heads=self.bonsai_config.num_kv_heads,
+                head_dim=self.bonsai_config.head_dim,
+                dtype=jnp.float32,
+            )
 
     def test_embedder(self):
         nm = self.nnx_model.embedder

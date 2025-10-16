@@ -123,9 +123,7 @@ def _stoi(s):
         return s
 
 
-def create_model_from_safe_tensors(
-    file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh
-) -> model_lib.Qwen3:
+def create_model_from_safe_tensors(file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh) -> model_lib.Qwen3:
     """Load tensors from the safetensors file and create a Qwen3 model."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:
