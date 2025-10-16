@@ -41,6 +41,7 @@ class TestModuleForwardPasses(parameterized.TestCase):
         timm_model.eval()
         return nnx_model, timm_model, cfg.resolution
 
+    # TODO (#45): EfficientNet tests failing for b5, b6, b7. Update implementation.
     @parameterized.parameters([0, 1, 2, 3, 4, 5, 6, 7])
     def test_full(self, version: int):
         nnx_model, timm_model, img_size = TestModuleForwardPasses._get_models_and_input_size(version)
