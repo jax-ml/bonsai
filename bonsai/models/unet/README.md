@@ -1,6 +1,6 @@
 # U-Net in JAX
 
-This directory contains a pure JAX implementation of the [U-Net](https://arxiv.org/abs/1505.04597), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
+This directory contains a pure JAX implementation of the [U-Net](https://arxiv.org/abs/1505.04597) with padded convolutions in its DoubleConv module, using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
 
 
 ## Tested on:  
