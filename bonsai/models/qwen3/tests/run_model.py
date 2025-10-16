@@ -45,7 +45,7 @@ def run_model():
 
     tokenizer = AutoTokenizer.from_pretrained(model_ckpt_path)
     tokens, max_len = tokenize(tokenizer, query)
-    batch_size, token_len = tokens.shape
+    batch_size, _ = tokens.shape
 
     cache_size, gen_steps = 128, 11
     assert cache_size >= max_len + gen_steps, f"Cache size ({cache_size}) must be >= {max_len} + {gen_steps}"
@@ -88,7 +88,7 @@ def run_model():
         next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
         tokens_list.append(next_tokens)
     jax.block_until_ready(tokens_list)
-    print(f"Time: {(time.perf_counter() - t)/decode_steps:.4f} s per step")
+    print(f"Time: {(time.perf_counter() - t) / decode_steps:.4f} s per step")
 
     tokens_list = jnp.concatenate(tokens_list, axis=-1)
     for i, q in enumerate(query):

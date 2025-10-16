@@ -18,11 +18,12 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-  "jax",  # "jax[tpu]" for TPU, "jax[cuda12]" for GPU.
+  "jax[tpu]",
   "jaxlib",
   "jaxtyping",
   "flax >= 0.12.0",
   "jinja2",
+  "pre-commit",
   "setuptools",
   "huggingface-hub",
   "transformers",  # for the tokenizer and checkpoint
@@ -62,8 +63,9 @@ include = ["bonsai*"]
 version = {attr = "bonsai.__version__"}
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py311"
 line-length = 120
+extend-include = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = [
@@ -75,7 +77,7 @@ select = [
 ]
 ignore = [
   "E731",  # lambdas are allowed
-  "E501",  # don't check l gne lengths
+  "E501",  # don't check line lengths
   "F401",  # allow unused imports
   "E402",  # allow modules not at top of file
   "E741",  # allow "l" as a variable name
