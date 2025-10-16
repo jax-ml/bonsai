@@ -257,14 +257,14 @@ class RMSNorm(nnx.Module):
     def __init__(
         self, dim: int, *, norm_eps: float = 1e-06, shd_cfg: ShardingCfg = ShardingCfg.default(), rngs: nnx.Rngs
     ):
-        self.w = nnx.Param(nnx.initializers.ones_init()(rngs.params(), dim), shd=shd_cfg.rms_norm_weight)
+        self.scale = nnx.Param(nnx.initializers.ones_init()(rngs.params(), dim), shd=shd_cfg.rms_norm_weight)
         self.norm_eps = norm_eps
 
     @jax.named_scope("rms_norm")
     def __call__(self, x: Array) -> Array:
         dtype = x.dtype
         rms = jnp.sqrt(jnp.mean(jnp.astype(x, jnp.float32) ** 2, axis=-1, keepdims=True) + self.norm_eps)
-        return jnp.astype(self.w * x / rms, dtype)
+        return jnp.astype(self.scale.value * x / rms, dtype)
 
 
 def num_left_pad(x: jax.Array):

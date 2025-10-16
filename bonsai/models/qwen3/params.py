@@ -55,23 +55,23 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
             r"layers.\1.mlp.down_proj.kernel",
             ((1, 0), None),
         ),
-        r"model\.norm\.weight": ("final_norm.w", None),
+        r"model\.norm\.weight": ("final_norm.scale", None),
         # norms
         r"model\.layers\.([0-9]+)\.self_attn\.q_norm\.weight": (
-            r"layers.\1.attn.q_norm.w",
+            r"layers.\1.attn.q_norm.scale",
             None,
         ),
         r"model\.layers\.([0-9]+)\.self_attn\.k_norm\.weight": (
-            r"layers.\1.attn.k_norm.w",
+            r"layers.\1.attn.k_norm.scale",
             None,
         ),
         # layer norms (pre/post attention)
         r"model\.layers\.([0-9]+)\.input_layernorm\.weight": (
-            r"layers.\1.input_layernorm.w",
+            r"layers.\1.input_layernorm.scale",
             None,
         ),
         r"model\.layers\.([0-9]+)\.post_attention_layernorm\.weight": (
-            r"layers.\1.post_attention_layernorm.w",
+            r"layers.\1.post_attention_layernorm.scale",
             None,
         ),
         r"lm_head\.weight": ("lm_head.w", ((1, 0), None)),

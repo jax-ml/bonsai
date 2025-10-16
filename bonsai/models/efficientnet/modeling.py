@@ -8,6 +8,10 @@ import jax.numpy as jnp
 from flax import nnx
 
 
+<<<<<<< HEAD
+=======
+# --- Configuration Classes ---
+>>>>>>> 759a0a9 ([qwen3] Update run_model script and rms param.)
 @dataclasses.dataclass(frozen=True)
 class BlockConfig:
     input_filters: int
@@ -126,10 +130,21 @@ class MBConv(nnx.Module):
         # Expansion phase (1x1 Conv) - skipped if expand_ratio is 1
         expanded_channels = in_channels * expand_ratio
         if expand_ratio != 1:
+<<<<<<< HEAD
             self.expand_conv = nnx.Conv(in_channels, expanded_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)
             self.bn0 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
         else:
             self.expand_conv = None
+=======
+            self.expand_conv = nnx.Conv(
+                in_channels,
+                expanded_channels,
+                kernel_size=(1, 1),
+                use_bias=False,
+                rngs=rngs,
+            )
+            self.bn0 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
+>>>>>>> 759a0a9 ([qwen3] Update run_model script and rms param.)
 
         # Depthwise convolution
         self.depthwise_conv = nnx.Conv(
@@ -201,7 +216,17 @@ class EfficientNet(nnx.Module):
 
         out_channels = round_filters(32, cfg.width_coefficient)
         self.stem_conv = nnx.Conv(
+<<<<<<< HEAD
             3, out_channels, kernel_size=(3, 3), strides=(2, 2), padding=1, use_bias=False, rngs=rngs
+=======
+            3,
+            out_channels,
+            kernel_size=(3, 3),
+            strides=(2, 2),
+            padding="SAME",
+            use_bias=False,
+            rngs=rngs,
+>>>>>>> 759a0a9 ([qwen3] Update run_model script and rms param.)
         )
         self.stem_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
