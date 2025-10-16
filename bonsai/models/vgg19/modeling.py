@@ -16,6 +16,7 @@ import dataclasses
 from functools import partial
 
 import jax
+import jax.numpy as jnp
 from flax import nnx
 from flax.linen.pooling import max_pool
 
@@ -35,19 +36,18 @@ class ModelCfg:
 
 class ConvBlock(nnx.Module):
     def __init__(self, num_conv: int, in_channels: int, out_channels: int, *, rngs: nnx.Rngs):
-        self.conv_layers = []
+        self.conv_layers = nnx.List()
         for i in range(num_conv):
             in_ch = in_channels if i == 0 else out_channels
             self.conv_layers.append(
                 nnx.Conv(in_ch, out_channels, kernel_size=(3, 3), padding="SAME", use_bias=True, rngs=rngs)
             )
-        self.max_pool = partial(max_pool, window_shape=(2, 2), strides=(2, 2), padding="VALID")
 
     def __call__(self, x):
         for conv in self.conv_layers:
             x = conv(x)
             x = nnx.relu(x)
-        x = self.max_pool(x)
+        x = nnx.max_pool(x, window_shape=(2, 2), strides=(2, 2), padding="VALID")
         return x
 
 
@@ -58,13 +58,11 @@ class VGG(nnx.Module):
         self.conv_block2 = ConvBlock(cfg.conv_sizes[2], in_channels=128, out_channels=256, rngs=rngs)
         self.conv_block3 = ConvBlock(cfg.conv_sizes[3], in_channels=256, out_channels=512, rngs=rngs)
         self.conv_block4 = ConvBlock(cfg.conv_sizes[4], in_channels=512, out_channels=512, rngs=rngs)
-
-        self.flatten = partial(lambda x: x.reshape(x.shape[0], -1))
+        self.global_mean_pool = lambda x: jnp.mean(x, axis=(1, 2))
         self.classifier = nnx.Sequential(
-            nnx.Linear(512 * 7 * 7, 4096, rngs=rngs),
-            nnx.relu,
-            nnx.Linear(4096, 4096, rngs=rngs),
-            nnx.relu,
+            nnx.Conv(512, 4096, (7, 7), rngs=rngs),
+            nnx.Conv(4096, 4096, (1, 1), rngs=rngs),
+            self.global_mean_pool,
             nnx.Linear(4096, cfg.num_classes, rngs=rngs),
         )
 
@@ -74,14 +72,11 @@ class VGG(nnx.Module):
         x = self.conv_block2(x)
         x = self.conv_block3(x)
         x = self.conv_block4(x)
-
-        x = self.flatten(x)
         x = self.classifier(x)
-
         return x
 
 
-@partial(jax.jit, donate_argnums=(1))
+@jax.jit
 def forward(graphdef: nnx.GraphDef, state: nnx.State, x: jax.Array) -> jax.Array:
     model = nnx.merge(graphdef, state)
     return model(x)

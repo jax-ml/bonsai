@@ -163,7 +163,8 @@ We welcome contribution of new models that may be beneficial for the JAX communi
     │       ├── tests
     │       │   ├── __init__.py
     │       │   ├── model_validation_colab.ipynb
-    │       │   └── run_model.py
+    │       │   ├── run_model.py
+    │       │   └── test_outputs.py
     │       ├── README.md
     │       ├── modeling.py
     │       └── params.py
@@ -179,5 +180,6 @@ We welcome contribution of new models that may be beneficial for the JAX communi
     * `tests/`: Make sure the contributed model has reasonable performance and correct quality.
       * Run [JAX profiling](https://docs.jax.dev/en/latest/profiling.html#viewing-the-trace) (i.e. `xprof --port 8791 /tmp/profile-data`) to make sure the model code fully utilizes benefits of JAX's [jit capabilities](https://docs.jax.dev/en/latest/jit-compilation.html).
       * Add a validation colab ([SAM2 example](bonsai/models/sam2/tests/SAM2_image_predictor_example.ipynb)) to make sure the model functions properly.
+      * Add a few tests to `test_outputs.py` to confirm that model forward passes are consistent with a reference implementation. 
    
    See an example model directory in [Qwen3](bonsai/models/qwen3).
