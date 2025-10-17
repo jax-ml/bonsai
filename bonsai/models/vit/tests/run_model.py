@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import time
 
 import jax
@@ -19,42 +20,40 @@ import jax.numpy as jnp
 from flax import nnx
 from huggingface_hub import snapshot_download
 
-from bonsai.models.densenet121 import modeling, params
+from bonsai.models.vit import modeling as model_lib
+from bonsai.models.vit import params
 
 
 def run_model():
-    # 1. Download h5 file
-    model_ckpt_path = snapshot_download("keras/densenet_121_imagenet")
+    # 1. Download safetensors file
+    model_name = "google/vit-base-patch16-224"
+    model_ckpt_path = snapshot_download(model_name)
 
     # 2. Load pretrained model
-    config = modeling.ModelCfg.densenet_121()
-    model = params.create_model_from_h5(model_ckpt_path, config)
+    model = params.create_vit_from_pretrained(model_ckpt_path)
     graphdef, state = nnx.split(model)
-    state = jax.tree.leaves(state)
+    flat_state = jax.tree.leaves(state)
 
     # 3. Prepare dummy input
-    batch_size = 8
-    image_size = 224
-    dummy_input = jnp.ones((batch_size, image_size, image_size, 3), dtype=jnp.float32)
+    batch_size, channels, image_size = 8, 3, 224
+    dummy_input = jnp.ones((batch_size, image_size, image_size, channels), dtype=jnp.float32)
 
-    # 4. Warmup + profiling
+    # 4. Warmup
     # Warmup (triggers compilation)
-    _ = modeling.forward(graphdef, state, dummy_input)
-    jax.block_until_ready(_)
+    _ = model_lib.forward(graphdef, flat_state, dummy_input).block_until_ready()
 
     # Profile a few steps
-    jax.profiler.start_trace("/tmp/profile-densenet121")
+    jax.profiler.start_trace("/tmp/profile-vit")
     for _ in range(5):
-        logits = modeling.forward(graphdef, state, dummy_input)
+        logits = model_lib.forward(graphdef, flat_state, dummy_input)
         jax.block_until_ready(logits)
     jax.profiler.stop_trace()
 
     # 5. Timed execution
     t0 = time.perf_counter()
     for _ in range(10):
-        logits = modeling.forward(graphdef, state, dummy_input)
-        jax.block_until_ready(logits)
-    print(f"10 runs took {time.perf_counter() - t0:.4f} s")
+        logits = model_lib.forward(graphdef, state, dummy_input)
+    print(f"Step time: {(time.perf_counter() - t0) / 10:.4f} s")
 
     # 6. Show top-1 predicted class
     pred = jnp.argmax(logits, axis=-1)
@@ -63,6 +62,5 @@ def run_model():
 
 if __name__ == "__main__":
     run_model()
-
 
 __all__ = ["run_model"]
