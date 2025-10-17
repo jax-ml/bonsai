@@ -30,6 +30,7 @@ def run_model():
     config = modeling.ModelCfg.densenet_121()
     model = params.create_model_from_h5(model_ckpt_path, config)
     graphdef, state = nnx.split(model)
+    state = jax.tree.leaves(state)
 
     # 3. Prepare dummy input
     batch_size = 8
