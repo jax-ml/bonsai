@@ -2,9 +2,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from flax import nnx
+
 from bonsai.models.efficientnet import modeling as model_lib
 
-# --- Model Factory Functions ---
 
 def create_model(
     cfg: model_lib.ModelCfg,
@@ -12,9 +12,7 @@ def create_model(
     mesh: jax.sharding.Mesh | None = None,
 ) -> model_lib.EfficientNet:
     """Generic EfficientNet creator."""
-    model = model_lib.EfficientNet(
-        cfg, block_configs=model_lib.DEFAULT_BLOCK_CONFIGS, rngs=rngs
-    )
+    model = model_lib.EfficientNet(cfg, block_configs=model_lib.DEFAULT_BLOCK_CONFIGS, rngs=rngs)
     if mesh is not None:
         graph_def, state = nnx.split(model)
         sharding = nnx.get_named_sharding(model, mesh)
@@ -55,8 +53,6 @@ def EfficientNetB6(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | N
 def EfficientNetB7(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
     return create_model(model_lib.ModelCfg.b7(num_classes), rngs, mesh)
 
-# --- Pre-trained Weight Loading ---
-
 
 def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     """
@@ -68,8 +64,11 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     Returns:
       A dictionary mapping pre-trained layer names to NumPy arrays.
     """
-    import torch
     import timm
+
+    # TODO(#45): Implement model versions 5-7
+    if int(model_name[-1]) >= 5:
+        raise NotImplementedError("Model implementations for versions 5-7 is still under development.")
 
     # Map to correct timm model names. Some larger models use specific checkpoints.
     timm_name_map = {
@@ -84,12 +83,8 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     }
     timm_model_name = timm_name_map.get(model_name)
     if not timm_model_name:
-        raise ValueError(
-            f"No timm mapping for '{model_name}'. Available models are: "
-            f"{list(timm_name_map.keys())}"
-        )
+        raise ValueError(f"No timm mapping for '{model_name}'. Available models are: {list(timm_name_map.keys())}")
 
-    print(f"Fetching '{timm_model_name}' weights from timm for JAX model '{model_name}'...")
     m = timm.create_model(timm_model_name, pretrained=True)
     m.eval()
 
@@ -112,9 +107,7 @@ def create_name_map(cfg: model_lib.ModelCfg):
 
     # 1. Stem
     name_map["stem_conv"] = {"kernel": "conv_stem.weight"}
-    name_map["stem_bn"] = {
-        jax_n: f"bn1.{timm_n}" for jax_n, timm_n in bn_map.items()
-    }
+    name_map["stem_bn"] = {jax_n: f"bn1.{timm_n}" for jax_n, timm_n in bn_map.items()}
 
     # 2. Blocks
     block_configs = model_lib.DEFAULT_BLOCK_CONFIGS
@@ -126,49 +119,26 @@ def create_name_map(cfg: model_lib.ModelCfg):
             timm_base = f"blocks.{i}.{j}"
 
             if bc.expand_ratio != 1:
-                name_map[f"{jax_base}.expand_conv"] = {
-                    "kernel": f"{timm_base}.conv_pw.weight"
-                }
-                name_map[f"{jax_base}.bn0"] = {
-                    jax_n: f"{timm_base}.bn1.{timm_n}"
-                    for jax_n, timm_n in bn_map.items()
-                }
-                name_map[f"{jax_base}.depthwise_conv"] = {
-                    "kernel": f"{timm_base}.conv_dw.weight"
-                }
-                name_map[f"{jax_base}.bn1"] = {
-                    jax_n: f"{timm_base}.bn2.{timm_n}"
-                    for jax_n, timm_n in bn_map.items()
-                }
-                name_map[f"{jax_base}.project_conv"] = {
-                    "kernel": f"{timm_base}.conv_pwl.weight"
-                }
-                name_map[f"{jax_base}.bn2"] = {
-                    jax_n: f"{timm_base}.bn3.{timm_n}"
-                    for jax_n, timm_n in bn_map.items()
-                }
-            else: # This block handles the first MBConv layer where expand_ratio = 1
-                name_map[f"{jax_base}.depthwise_conv"] = {
-                    "kernel": f"{timm_base}.conv_dw.weight"
-                }
-                name_map[f"{jax_base}.bn1"] = {
-                    jax_n: f"{timm_base}.bn1.{timm_n}"
-                    for jax_n, timm_n in bn_map.items()
-                }
+                name_map[f"{jax_base}.expand_conv"] = {"kernel": f"{timm_base}.conv_pw.weight"}
+                name_map[f"{jax_base}.bn0"] = {jax_n: f"{timm_base}.bn1.{timm_n}" for jax_n, timm_n in bn_map.items()}
+                name_map[f"{jax_base}.depthwise_conv"] = {"kernel": f"{timm_base}.conv_dw.weight"}
+                name_map[f"{jax_base}.bn1"] = {jax_n: f"{timm_base}.bn2.{timm_n}" for jax_n, timm_n in bn_map.items()}
+                name_map[f"{jax_base}.project_conv"] = {"kernel": f"{timm_base}.conv_pwl.weight"}
+                name_map[f"{jax_base}.bn2"] = {jax_n: f"{timm_base}.bn3.{timm_n}" for jax_n, timm_n in bn_map.items()}
+            else:  # This block handles the first MBConv layer where expand_ratio = 1
+                name_map[f"{jax_base}.depthwise_conv"] = {"kernel": f"{timm_base}.conv_dw.weight"}
+                name_map[f"{jax_base}.bn1"] = {jax_n: f"{timm_base}.bn1.{timm_n}" for jax_n, timm_n in bn_map.items()}
                 name_map[f"{jax_base}.project_conv"] = {
                     "kernel": f"{timm_base}.conv_pw.weight"  # <--- THIS IS THE CORRECTED LINE
                 }
-                name_map[f"{jax_base}.bn2"] = {
-                    jax_n: f"{timm_base}.bn2.{timm_n}"
-                    for jax_n, timm_n in bn_map.items()
-                }
+                name_map[f"{jax_base}.bn2"] = {jax_n: f"{timm_base}.bn2.{timm_n}" for jax_n, timm_n in bn_map.items()}
 
             # Squeeze-and-Excitation is the same for both block types
-            name_map[f"{jax_base}.se.fc1"] = {
+            name_map[f"{jax_base}.se.conv1"] = {
                 "kernel": f"{timm_base}.se.conv_reduce.weight",
                 "bias": f"{timm_base}.se.conv_reduce.bias",
             }
-            name_map[f"{jax_base}.se.fc2"] = {
+            name_map[f"{jax_base}.se.conv2"] = {
                 "kernel": f"{timm_base}.se.conv_expand.weight",
                 "bias": f"{timm_base}.se.conv_expand.bias",
             }
@@ -177,9 +147,7 @@ def create_name_map(cfg: model_lib.ModelCfg):
 
     # 3. Head
     name_map["head_conv"] = {"kernel": "conv_head.weight"}
-    name_map["head_bn"] = {
-        jax_n: f"bn2.{timm_n}" for jax_n, timm_n in bn_map.items()
-    }
+    name_map["head_bn"] = {jax_n: f"bn2.{timm_n}" for jax_n, timm_n in bn_map.items()}
     name_map["classifier"] = {
         "kernel": "classifier.weight",
         "bias": "classifier.bias",
@@ -192,7 +160,6 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
     """
     Loads pre-trained weights by directly modifying the JAX model's attributes in-place.
     """
-    print("Loading pre-trained weights directly into the model...")
     name_map = create_name_map(model.cfg)
 
     timm_to_jax_map = {}
@@ -230,8 +197,6 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
                 f"pre-trained weight has {weight_np.shape}."
             )
 
-        param_to_update.value = jnp.asarray(weight_np)
+        param_to_update.value = jnp.array(weight_np)
 
-    print("Successfully loaded pre-trained weights into the model.")
     return model
-
