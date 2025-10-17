@@ -1,5 +1,3 @@
-from functools import partial
-
 import jax
 import jax.numpy as jnp
 from flax import nnx
@@ -23,18 +21,17 @@ class Embeddings(nnx.Module):
         self.pos_embeddings = nnx.Variable(jax.random.normal(rngs.params(), (1, num_patches + 1, hidden_dim)))
         self.dropout = nnx.Dropout(dropout_prob, rngs=rngs)
 
-    def __call__(self, pixel_values: jnp.ndarray, deterministic: bool = False) -> jnp.ndarray:
+    def __call__(self, pixel_values: jnp.ndarray) -> jnp.ndarray:
         embeddings = self.projection(pixel_values)
         b, h, w, c = embeddings.shape
         embeddings = embeddings.reshape(b, h * w, c)
         cls_tokens = jnp.tile(self.cls_token.value, (b, 1, 1))
         embeddings = jnp.concatenate((cls_tokens, embeddings), axis=1)
         embeddings = embeddings + self.pos_embeddings.value
-        embeddings = self.dropout(embeddings, deterministic=deterministic)
+        embeddings = self.dropout(embeddings)
         return embeddings
 
 
-## ENCODINGS
 class TransformerEncoder(nnx.Module):
     def __init__(self, num_heads: int, attn_dim: int, mlp_dim: int, dropout_prob: float, eps: float, *, rngs: nnx.Rngs):
         self.attention = nnx.MultiHeadAttention(num_heads=num_heads, in_features=attn_dim, decode=False, rngs=rngs)
@@ -44,14 +41,14 @@ class TransformerEncoder(nnx.Module):
         self.layernorm_before = nnx.LayerNorm(attn_dim, epsilon=eps, rngs=rngs)
         self.layernorm_after = nnx.LayerNorm(attn_dim, epsilon=eps, rngs=rngs)
 
-    def __call__(self, hidden_states, head_mask=None, deterministic: bool = False):
+    def __call__(self, hidden_states, head_mask=None):
         hidden_states_norm = self.layernorm_before(hidden_states)
-        attention_output = self.attention(hidden_states_norm, head_mask, deterministic=deterministic)
+        attention_output = self.attention(hidden_states_norm, head_mask)
         hidden_states = attention_output + hidden_states
         layer_output = self.layernorm_after(hidden_states)
         layer_output = jax.nn.gelu(self.linear1(layer_output))
         layer_output = self.linear2(layer_output)
-        layer_output = self.dropout(layer_output, deterministic=deterministic)
+        layer_output = self.dropout(layer_output)
         layer_output += hidden_states
         return layer_output
 
@@ -90,10 +87,11 @@ class ViTClassificationModel(nnx.Module):
         return x
 
 
-def ViT(*, rngs: nnx.Rngs):
-    return ViTClassificationModel((224, 224), (16, 16), 3, 768, 0.0, 12, 3072, 1e-12, 12, 1000, rngs=rngs)
+def ViT(num_classes: int, *, rngs: nnx.Rngs):
+    return ViTClassificationModel((224, 224), (16, 16), 3, 768, 0.0, 12, 3072, 1e-12, 12, num_classes, rngs=rngs)
 
 
-@partial(jax.jit, static_argnames=["model"])
-def forward(model, x):
+@jax.jit
+def forward(graphdef: nnx.GraphDef[nnx.Module], state: nnx.State, x: jax.Array) -> jax.Array:
+    model = nnx.merge(graphdef, state)
     return model(x)
