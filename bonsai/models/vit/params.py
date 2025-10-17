@@ -17,6 +17,7 @@ import re
 
 import jax
 import safetensors.flax as safetensors
+from etils import epath
 from flax import nnx
 
 from bonsai.models.vit import modeling as model_lib
@@ -26,10 +27,8 @@ def _get_key_and_transform_mapping():
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     embed_dim, num_heads, head_dim = 768, 12, 64
     return {
-        # classifier
         r"^classifier.bias$": (r"classifier.bias", None),
         r"^classifier.weight$": (r"classifier.kernel", ((1, 0), None)),
-        # embeddings
         r"^vit.embeddings.cls_token$": (r"pos_embeddings.cls_token", None),
         r"^vit.embeddings.patch_embeddings.projection.bias$": (r"pos_embeddings.projection.bias", None),
         r"^vit.embeddings.patch_embeddings.projection.weight$": (
@@ -37,7 +36,6 @@ def _get_key_and_transform_mapping():
             ((2, 3, 1, 0), None),
         ),
         r"^vit.embeddings.position_embeddings$": (r"pos_embeddings.pos_embeddings", None),
-        # layers
         r"^vit.encoder.layer.([0-9]+).attention.attention.key.bias$": (
             r"layers.layers.\1.attention.key.bias",
             (None, (num_heads, head_dim)),
@@ -75,7 +73,6 @@ def _get_key_and_transform_mapping():
         r"^vit.encoder.layer.([0-9]+).layernorm_before.weight$": (r"layers.layers.\1.layernorm_before.scale", None),
         r"^vit.encoder.layer.([0-9]+).output.dense.bias$": (r"layers.layers.\1.linear2.bias", None),
         r"^vit.encoder.layer.([0-9]+).output.dense.weight$": (r"layers.layers.\1.linear2.kernel", ((1, 0), None)),
-        # layernorm
         r"^vit.layernorm.bias$": (r"ln.bias", None),
         r"^vit.layernorm.weight$": (r"ln.scale", None),
     }
@@ -122,7 +119,7 @@ def _stoi(s):
 
 
 def create_vit_from_pretrained(
-    file_path: str,
+    file_dir: str,
     num_classes: int = 1000,
     *,
     mesh: jax.sharding.Mesh | None = None,
@@ -133,24 +130,25 @@ def create_vit_from_pretrained(
     Returns:
       A flax.nnx.Model instance with loaded parameters.
     """
-    state_dict = safetensors.load_file(file_path)
+    files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
+    if not files:
+        raise ValueError(f"No safetensors found in {file_dir}")
 
-    vit = nnx.eval_shape(lambda: model_lib.ViT(rngs=nnx.Rngs(0)))
+    tensor_dict = {}
+    for f in files:
+        tensor_dict |= safetensors.load_file(f)
+
+    # vit = nnx.eval_shape(lambda: model_lib.ViT(num_classes=num_classes, rngs=nnx.Rngs(0)))
+    vit = model_lib.ViT(num_classes=num_classes, rngs=nnx.Rngs(0))
     graph_def, abs_state = nnx.split(vit)
     jax_state = abs_state.to_pure_dict()
 
     mapping = _get_key_and_transform_mapping()
-    for st_key, tensor in state_dict.items():
+    for st_key, tensor in tensor_dict.items():
         jax_key, transform = _st_key_to_jax_key(mapping, st_key)
         if jax_key is None:
             continue
         keys = [_stoi(k) for k in jax_key.split(".")]
         _assign_weights(keys, tensor, jax_state, st_key, transform)
-
-    # if mesh is not None:
-    #     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
-    #     jax_state = jax.device_put(jax_state, sharding)
-    # else:
-    #     jax_state = jax.device_put(jax_state, jax.devices()[0])
 
     return nnx.merge(graph_def, jax_state)
