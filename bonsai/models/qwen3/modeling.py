@@ -40,8 +40,10 @@ class LayerCache(nnx.Module):
 Cache: TypeAlias = list[LayerCache]
 
 
-def init_cache(num_layers: int, batch_size: int, cache_size: int, num_kv_heads: int, head_dim: int) -> Cache:
-    return [LayerCache(batch_size, cache_size, num_kv_heads, head_dim, jnp.bfloat16) for x in range(num_layers)]
+def init_cache(
+    num_layers: int, batch_size: int, cache_size: int, num_kv_heads: int, head_dim: int, dtype: jnp.dtype = jnp.bfloat16
+) -> Cache:
+    return [LayerCache(batch_size, cache_size, num_kv_heads, head_dim, dtype) for _ in range(num_layers)]
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
@@ -229,18 +231,26 @@ class Embedder(nnx.Module):
         return jnp.dot(x, self.input_emb.value.T)
 
 
-def apply_rope(inputs: Array, position_ids: Array, head_dim: int, rope_theta: int = 1_000_000) -> Array:
-    fraction = 2 * jnp.arange(0, head_dim // 2, dtype=jnp.float32) / head_dim
+def _generate_pos_embeddings(
+    positions: jax.Array,
+    head_dim: int,
+    rope_theta: int = 1_000_000,
+) -> tuple[jax.Array, jax.Array]:
+    # Forked from: jax-llm-examples/qwen3/qwen3_jax/model.py;l=571
+    fraction = jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim
     timescale = rope_theta**fraction
+    rotational_frequency = 1.0 / timescale
+    # Use high-precision einsum to prevent catastrophic bfloat16 rounding (ex: 257→256), as sin(257) differs from sin(256).
+    sinusoid_inp = jnp.einsum("BT,k->BTk", positions, rotational_frequency, precision=jax.lax.Precision.HIGHEST)
+    return jnp.sin(sinusoid_inp), jnp.cos(sinusoid_inp)
 
-    sinusoid_inp = (position_ids[..., None] / timescale[None, None, :])[..., None, :]
-    sin = jnp.sin(sinusoid_inp)
-    cos = jnp.cos(sinusoid_inp)
 
-    first_half, second_half = jnp.split(inputs, 2, axis=-1)
-    first_part = first_half * cos - second_half * sin
-    second_part = second_half * cos + first_half * sin
-    return jnp.concatenate([first_part, second_part], axis=-1).astype(inputs.dtype)
+def apply_rope(x: jax.Array, sin: jax.Array, cos: jax.Array) -> jax.Array:
+    assert x.ndim == 4 and sin.ndim == 3 and cos.ndim == 3
+    x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
+    # [B, T, head_dim] -> [B, h, T, head_dim]
+    sin, cos = sin[:, :, None, :], cos[:, :, None, :]
+    return jnp.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1).astype(x.dtype)
 
 
 class RMSNorm(nnx.Module):
@@ -309,8 +319,9 @@ class Attention(nnx.Module):
 
         cache.start_ind.value = jnp.where(cache.start_ind.value < 0, num_left_pad(segment_ids), cache.start_ind.value)
         position_ids = compute_positions_from_segment_ids(segment_ids) + cache.cur_ind.value
-        query_proj = apply_rope(query_proj, position_ids, head_dim=self.head_dim)
-        key_proj = apply_rope(key_proj, position_ids, head_dim=self.head_dim)
+        sin, cos = _generate_pos_embeddings(position_ids, self.head_dim)
+        query_proj = apply_rope(query_proj, sin, cos)
+        key_proj = apply_rope(key_proj, sin, cos)
 
         slice_indices = (0, cache.cur_ind.value, 0, 0)
         cache.v_cache.value = jax.lax.dynamic_update_slice(cache.v_cache.value, value_proj, slice_indices)
@@ -399,11 +410,18 @@ class DecoderLayer(nnx.Module):
 class Qwen3(nnx.Module):
     def __init__(self, cfg: ModelCfg, *, shd_cfg: ShardingCfg = ShardingCfg.default(), rngs: nnx.Rngs):
         self.embedder = Embedder(vocab_size=cfg.vocab_size, emb_dim=cfg.emb_dim, rngs=rngs, shd_cfg=shd_cfg)
-        self.layers = [DecoderLayer(cfg=cfg, shd_cfg=shd_cfg, rngs=rngs) for _ in range(cfg.num_layers)]
+        self.layers = nnx.List([DecoderLayer(cfg=cfg, shd_cfg=shd_cfg, rngs=rngs) for _ in range(cfg.num_layers)])
         self.final_norm = RMSNorm(cfg.emb_dim, norm_eps=cfg.norm_eps, shd_cfg=shd_cfg, rngs=rngs)
         self.lm_head = Einsum(
             einsum_str="BTD,DV->BTV", shape=(cfg.emb_dim, cfg.vocab_size), shd=shd_cfg.emb_dv, rngs=rngs
         )
+
+    def __call__(self, tokens, segment_ids, right_pads, cache):
+        x = self.embedder.encode(tokens)
+        for i, layer in enumerate(self.layers):
+            x = layer(x, cache[i], segment_ids, right_pads)
+        logits = self.lm_head(self.final_norm(x))
+        return logits
 
 
 @partial(jax.jit, donate_argnums=(1))
@@ -412,11 +430,8 @@ def forward(
 ) -> tuple[Array, nnx.State]:
     model, cache = nnx.merge(graphdef, state)
     segment_ids = 1 * (tokens != pad_id)
-    x = model.embedder.encode(tokens)
     right_pads = num_right_pad(segment_ids[0])
-    for i, layer in enumerate(model.layers):
-        x = layer(x, cache[i], segment_ids, right_pads)
-    logits = model.lm_head(model.final_norm(x))
+    logits = model(tokens, segment_ids, right_pads, cache)
     next_tokens = jnp.argmax(logits[:, -right_pads - 1], axis=-1, keepdims=True)
     state = jax.tree.leaves(nnx.state((model, cache)))
     return next_tokens, state
