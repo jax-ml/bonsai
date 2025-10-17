@@ -138,7 +138,6 @@ def create_vit_from_pretrained(
     for f in files:
         tensor_dict |= safetensors.load_file(f)
 
-    # vit = nnx.eval_shape(lambda: model_lib.ViT(num_classes=num_classes, rngs=nnx.Rngs(0)))
     vit = model_lib.ViT(num_classes=num_classes, rngs=nnx.Rngs(0))
     graph_def, abs_state = nnx.split(vit)
     jax_state = abs_state.to_pure_dict()
