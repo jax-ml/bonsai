@@ -25,20 +25,19 @@ from bonsai.models.vit import params
 
 
 def run_model():
-    # 1. Download safetensors file
+    # Download safetensors file
     model_name = "google/vit-base-patch16-224"
     model_ckpt_path = snapshot_download(model_name)
 
-    # 2. Load pretrained model
+    # Load pretrained model
     model = params.create_vit_from_pretrained(model_ckpt_path)
     graphdef, state = nnx.split(model)
     flat_state = jax.tree.leaves(state)
 
-    # 3. Prepare dummy input
+    # Prepare dummy input
     batch_size, channels, image_size = 8, 3, 224
     dummy_input = jnp.ones((batch_size, image_size, image_size, channels), dtype=jnp.float32)
 
-    # 4. Warmup
     # Warmup (triggers compilation)
     _ = model_lib.forward(graphdef, flat_state, dummy_input).block_until_ready()
 
@@ -49,13 +48,13 @@ def run_model():
         jax.block_until_ready(logits)
     jax.profiler.stop_trace()
 
-    # 5. Timed execution
+    # Timed execution
     t0 = time.perf_counter()
     for _ in range(10):
-        logits = model_lib.forward(graphdef, state, dummy_input)
+        logits = model_lib.forward(graphdef, flat_state, dummy_input).block_until_ready()
     print(f"Step time: {(time.perf_counter() - t0) / 10:.4f} s")
 
-    # 6. Show top-1 predicted class
+    # Show top-1 predicted class
     pred = jnp.argmax(logits, axis=-1)
     print("Predicted classes:", pred)
 
