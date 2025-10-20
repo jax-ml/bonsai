@@ -45,14 +45,14 @@ def run_model():
 
     tokenizer = AutoTokenizer.from_pretrained(model_ckpt_path)
     tokens, max_len = tokenize(tokenizer, query)
-    batch_size, token_len = tokens.shape
+    batch_size, _ = tokens.shape
 
     cache_size, gen_steps = 128, 11
     assert cache_size >= max_len + gen_steps, f"Cache size ({cache_size}) must be >= {max_len} + {gen_steps}"
 
     config = modeling.ModelCfg.qwen3_0_6b()
     fsdp, tp = 1, jax.device_count()  # change this to meet your sharding setup.
-    mesh = jax.make_mesh(((fsdp, tp)), ("fsdp", "tp"))
+    mesh = jax.make_mesh((fsdp, tp), ("fsdp", "tp"))
     with mesh:
         model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh)
         cache = modeling.init_cache(
@@ -68,19 +68,28 @@ def run_model():
     # prefill
     next_tokens, state = modeling.forward(graphdef, state, tokens, tokenizer.pad_token_id)
 
-    # decode
+    # decode - warmup
     tokens_list = [next_tokens]
-    for i in range(gen_steps):  # Run `xprof --port 8791 /tmp/profile-data` to see the program traces.
-        if i == 1:  # Avoid XLA warmup time when profiling trace.
-            jax.profiler.start_trace("/tmp/profile-data")  # profile steps 1-5
+    next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
+    tokens_list.append(next_tokens)
+
+    # profile
+    jax.profiler.start_trace("/tmp/profile-data")
+    for i in range(5):
         next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
         tokens_list.append(next_tokens)
-        if i == 5:
-            jax.block_until_ready(tokens_list)
-            jax.profiler.stop_trace()
-            t = time.perf_counter()  # measure steps 6-10
     jax.block_until_ready(tokens_list)
-    print(f"{time.perf_counter() - t:.4f} s")
+    jax.profiler.stop_trace()
+
+    # measure time:
+    t = time.perf_counter()
+    decode_steps = 128
+    for i in range(decode_steps):
+        next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
+        tokens_list.append(next_tokens)
+    jax.block_until_ready(tokens_list)
+    print(f"Time: {(time.perf_counter() - t) / decode_steps:.4f} s per step")
+
     tokens_list = jnp.concatenate(tokens_list, axis=-1)
     for i, q in enumerate(query):
         print(f"User:\n {q}")

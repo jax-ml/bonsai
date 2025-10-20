@@ -1030,7 +1030,7 @@ class SAM2Base(nnx.Module):
     ):
         """Encode the current image and its prediction into a memory feature."""
         # batch and dims
-        seq, B, C = current_vision_feats[-1].shape
+        _, B, C = current_vision_feats[-1].shape
         H, W = feat_sizes[-1]
         # reshape to BCHW
         pix_feat = current_vision_feats[-1].transpose((1, 0, 2)).reshape((B, H, W, C))
@@ -1468,9 +1468,9 @@ class SAM2ImagePredictor(nnx.Module):
         img_batch = self._transforms.forward_batch(image_list)  # Shape: (B, H, W, 3)
 
         batch_size = img_batch.shape[0]
-        assert (
-            img_batch.ndim == 4 and img_batch.shape[-1] == 3
-        ), f"img_batch must be (B, H, W, 3), got {img_batch.shape}"
+        assert img_batch.ndim == 4 and img_batch.shape[-1] == 3, (
+            f"img_batch must be (B, H, W, 3), got {img_batch.shape}"
+        )
 
         # Forward pass
         backbone_out = self.model.forward_image(img_batch)

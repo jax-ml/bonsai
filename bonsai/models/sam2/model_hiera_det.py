@@ -130,7 +130,7 @@ class MultiScaleAttention(nnx.Module):
         self.proj = nnx.Linear(dim_out, dim_out, rngs=rngs)
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
-        B, H, W, C = x.shape
+        B, H, W, _ = x.shape
         # linear to qkv and reshape
         qkv = self.qkv(x).reshape(B, H * W, 3, self.num_heads, -1)
         q, k, v = jnp.split(qkv, 3, axis=2)

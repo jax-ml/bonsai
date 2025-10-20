@@ -284,7 +284,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     def test_full_batched(self):
         query = ["Why is the sky blue instead of any other color like purple?", "Who am I?"]
-        tokens, max_len = tokenize(self.tokenizer, query)
+        tokens, _ = tokenize(self.tokenizer, query)
         self.torch_model = self.torch_model.to(torch.float32)
         nnx_cache = self._init_nnx_cache(len(query))
 
