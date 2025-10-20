@@ -29,25 +29,17 @@ from bonsai.models.llada_8b import params as params_lib
 HF_REPO = "GSAI-ML/LLaDA-8B-Instruct"
 
 
-def _tokenize_chat_batch(tokenizer, prompts):
-    """Chat-template tokenize then right-pad to next power-of-two length (matches your helper)."""
+def tokenize(tokenizer, inputs: list[str]):
     pad_id = 126336  # Mask Token
     lines = [
-        tokenizer.apply_chat_template(
-            [{"role": "user", "content": p}],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-        for p in prompts
+        tokenizer.apply_chat_template([{"role": "user", "content": l}], tokenize=False, add_generation_prompt=True)
+        for l in inputs
     ]
     encoded = [tokenizer(s)["input_ids"] for s in lines]
     max_l = max(len(e) for e in encoded) if encoded else 1
-    buf_len = 2 ** math.ceil(math.log2(max(1, max_l)))
-    batch = np.stack(
-        [np.pad(e, (0, buf_len - len(e)), constant_values=pad_id) for e in encoded],
-        axis=0,
-    )
-    return jnp.array(batch, dtype=jnp.int32), pad_id, max_l, buf_len
+    buffer_len = 2 ** math.ceil(math.log2(max(max_l, 1)))
+    batch = np.stack([np.pad(e, (0, buffer_len - len(e)), constant_values=pad_id) for e in encoded], axis=0)
+    return jnp.array(batch), pad_id, max_l, buffer_len
 
 
 class TestLLaDAForwardPasses(absltest.TestCase):
@@ -66,7 +58,7 @@ class TestLLaDAForwardPasses(absltest.TestCase):
             "Lily can run 12 kilometers per hour for 4 hours. After that, she runs 6 kilometers per hour. How many kilometers can she run in 8 hours?",
             "Johnny picked 8 apples this morning and put them on his desk. Bonnie eats 3 of them. How many apples does Johnny have left?",
         ]
-        cls.tokens_jax, cls.pad_id, cls.max_len, cls.buf_len = _tokenize_chat_batch(cls.tokenizer, cls.prompts)
+        cls.tokens_jax, cls.pad_id, cls.max_len, cls.buf_len = tokenize(cls.tokenizer, cls.prompts)
         cls.B, cls.T = cls.tokens_jax.shape
         cls.tokens_torch = torch.tensor(np.array(cls.tokens_jax), dtype=torch.long, device="cpu")
 
