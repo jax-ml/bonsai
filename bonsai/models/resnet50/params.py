@@ -17,6 +17,7 @@ import re
 
 import jax
 import safetensors.flax as safetensors
+from etils import epath
 from flax import nnx
 
 from bonsai.models.resnet50 import modeling as model_lib
@@ -137,7 +138,7 @@ def _stoi(s):
 
 
 def create_resnet50_from_pretrained(
-    file_path: str,
+    file_dir: str,
     num_classes: int = 1000,
     *,
     mesh: jax.sharding.Mesh | None = None,
@@ -148,7 +149,13 @@ def create_resnet50_from_pretrained(
     Returns:
       A flax.nnx.Model instance with loaded parameters.
     """
-    state_dict = safetensors.load_file(file_path)
+    files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
+    if not files:
+        raise ValueError(f"No safetensors found in {file_dir}")
+
+    state_dict = {}
+    for f in files:
+        state_dict |= safetensors.load_file(f)
 
     res50 = nnx.eval_shape(lambda: model_lib.ResNet50(num_classes=num_classes, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(res50)
