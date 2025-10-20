@@ -22,6 +22,7 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import lax
+from jax.scipy.special import logsumexp
 
 
 class ActivationType(Enum):
@@ -129,7 +130,6 @@ class ModelConfig:
     include_qkv_bias: bool = False
     weight_tying: bool = True
     scale_logits: bool = False
-    use_cache: bool = False  # can be wired in later
 
     # helpers
     @property
@@ -276,40 +276,55 @@ class GemmaRMSNorm(LayerNormBase):
 class RotaryEmbedding(nnx.Module):
     def __init__(self, cfg: ModelConfig):
         self.cfg = cfg
-        dim = cfg.d_model // cfg.n_heads
-        sin, cos = self._make_table(cfg.max_sequence_length, dim, cfg.rope_theta)
-        self.pos_sin = nnx.Cache(sin)  # (1,L,1,dim)
-        self.pos_cos = nnx.Cache(cos)
+        self.pos_sin = None
+        self.pos_cos = None
+        self.dh = cfg.d_model // cfg.n_heads
 
     def __call__(self, q: jax.Array, k: jax.Array) -> tuple[jax.Array, jax.Array]:
         """
-        Args:
-            q, k : (B, T, H, Dh)   - query / key after head reshape
-        Returns:
-            q_rot, k_rot : same shapes, after RoPE applied
+        q, k: (B, T, H, Dh)
+        returns rotated q, k in the original dtypes
         """
-        T_q, T_k = q.shape[-3], k.shape[-3]
+        if self.cfg.rope_full_precision:
+            q_ = q.astype(jnp.float32)
+            k_ = k.astype(jnp.float32)
+        else:
+            q_, k_ = q, k
 
-        # Slice from full tables
-        sin, cos = self.pos_sin.value, self.pos_cos.value
-        sin = sin[:, :T_k, :, :]
-        cos = cos[:, :T_k, :, :]
-
+        # Slice fp32 sin/cos tables to the current length
+        T_q, T_k = q_.shape[-3], k_.shape[-3]
+        self._ensure_table()
+        sin = self.pos_sin[:, :T_k, :, :]
+        cos = self.pos_cos[:, :T_k, :, :]
         sin_q, cos_q = sin[:, T_k - T_q : T_k, :, :], cos[:, T_k - T_q : T_k, :, :]
 
-        q_out = self._apply_rotary(q, sin_q, cos_q)
-        k_out = self._apply_rotary(k, sin, cos)
+        sin = sin.astype(q_.dtype)
+        cos = cos.astype(q_.dtype)
+        sin_q = sin_q.astype(q_.dtype)
+        cos_q = cos_q.astype(q_.dtype)
+
+        # Apply rotation in the promoted dtype
+        q_out = self._apply_rotary(q_, sin_q, cos_q)
+        k_out = self._apply_rotary(k_, sin, cos)
 
         return q_out.astype(q.dtype), k_out.astype(k.dtype)
 
     @staticmethod
-    def _make_table(L: int, dim: int, theta: float, dtype=jnp.float32):
-        inv_freq = 1.0 / (theta ** (jnp.arange(0, dim, 2, dtype=dtype) / dim))
+    def _make_table(L: int, dh: int, theta: float, dtype=jnp.float32):
+        # Compute in fp32
+        inv_freq = 1.0 / (theta ** (jnp.arange(0, dh, 2, dtype=dtype) / dh))
         t = jnp.arange(L, dtype=dtype)
-        freqs = jnp.einsum("i,j->ij", t, inv_freq)
-        emb = jnp.concatenate([freqs, freqs], axis=-1)  # (L,dim)
-        sin, cos = jnp.sin(emb)[None, :, None, :], jnp.cos(emb)[None, :, None, :]
-        return sin, cos  # (1,L,1,dim)
+        freqs = jnp.einsum("i,j->ij", t, inv_freq)  # (L, dh/2)
+        emb = jnp.concatenate([freqs, freqs], axis=-1)  # (L, dh)
+        sin = jnp.sin(emb)[None, :, None, :]  # (1, L, 1, dh)
+        cos = jnp.cos(emb)[None, :, None, :]
+        return sin, cos
+
+    def _ensure_table(self):
+        if self.pos_sin is not None:
+            return
+        self.pos_sin, self.pos_cos = self._make_table(self.cfg.max_sequence_length, self.dh, self.cfg.rope_theta)
+        return
 
     @staticmethod
     def _rotate_half(x):
