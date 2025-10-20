@@ -332,70 +332,7 @@ class RotaryEmbedding(nnx.Module):
         return jnp.concatenate([-x2, x1], axis=-1)
 
     def _apply_rotary(self, t, sin, cos):
-        # sin/cos broadcast on (B,T,H,Dh)
         return (t * cos) + (self._rotate_half(t) * sin)
-
-
-@dataclass
-class KVCache(nnx.Module):
-    def __init__(self, batch_size, num_layers, kv_len, num_kv_heads, head_dim, dtype):
-        self.buf = nnx.Variable(jnp.zeros((batch_size, num_layers, kv_len, 2, num_kv_heads, head_dim), dtype=dtype))
-        self.idx = nnx.Variable(jnp.array(0, dtype=jnp.int32))
-        self.kv_len = kv_len
-
-    def view(self, layer: int):
-        """Past KV up to the current index for this layer."""
-        t = self.idx.value
-        k = self.buf.value[:, layer, :t, 0, :, :]  # (B, t, Kh, Dh)
-        v = self.buf.value[:, layer, :t, 1, :, :]
-        return k, v
-
-    def latest(self, layer: int):
-        """Most recent single step (or zeros if none)."""
-        t = self.idx.value
-        B, _, _, _, Kh, Dh = self.buf.value.shape
-
-        def _zero():
-            z = jnp.zeros((B, 1, Kh, Dh), self.buf.value.dtype)
-            return z, z
-
-        def _last():
-            k = self.buf.value[:, layer, t - 1 : t, 0, :, :]
-            v = self.buf.value[:, layer, t - 1 : t, 1, :, :]
-            return k, v
-
-        return lax.cond(t > 0, lambda _: _last(), lambda _: _zero(), operand=None)
-
-    # Enable tuple-style access: cache[layer] -> (k_past, v_past)
-    def __getitem__(self, layer: int):
-        return self.view(layer)
-
-    def append(self, layer: int, k_step, v_step):
-        """
-        Append new steps for a layer.
-        k_step, v_step: (B, T_step, Kh, Dh)
-        """
-        t = self.idx.value
-        B, T_step, Kh, Dh = k_step.shape
-
-        assert_msg = "KV cache capacity exceeded; increase kv_len."
-        assert (t + T_step) <= self.kv_len, assert_msg
-
-        # updates
-        self.buf.value = self.buf.value.at[:, layer, t, 0, :, :].set(k_step[:, t, :, :])
-        self.buf.value = self.buf.value.at[:, layer, t, 1, :, :].set(v_step[:, t, :, :])
-
-
-def init_cache(cfg, batch_size: int, kv_len: int | None = None, dtype=jnp.float16) -> KVCache:
-    """
-    Create a per-layer KV cache:
-      cache[layer] -> (k_past, v_past) with shapes (B, t, Kh, Dh).
-    """
-    L = cfg.n_layers
-    Kh = cfg.effective_n_kv_heads
-    Dh = cfg.d_model // cfg.n_heads
-    T = kv_len if kv_len is not None else cfg.max_sequence_length
-    return KVCache(batch_size, L, T, Kh, Dh, dtype)
 
 
 class LLaDABlock(nnx.Module):
@@ -489,9 +426,7 @@ class LLaDABlock(nnx.Module):
         k: jax.Array,  # (B,T,Dk)
         v: jax.Array,  # (B,T,Dk)
         attention_bias: jax.Array | None = None,
-        layer_past: tuple[jax.Array, jax.Array] | None = None,
-        use_cache: bool = False,
-    ) -> tuple[jax.Array, tuple[jax.Array, jax.Array] | None]:
+    ) -> jax.Array:
         B, T, C = q.shape
         H, Kh, Dh = self.cfg.n_heads, self.cfg.effective_n_kv_heads, C // self.cfg.n_heads
 
@@ -504,13 +439,6 @@ class LLaDABlock(nnx.Module):
         q = q.reshape(B, T, H, Dh)
         k = k.reshape(B, T, Kh, Dh)
         v = v.reshape(B, T, Kh, Dh)
-
-        # append past KV if supplied
-        if layer_past is not None:
-            past_k, past_v = layer_past
-            k = jnp.concatenate([past_k, k], axis=1)
-            v = jnp.concatenate([past_v, v], axis=1)
-        present_kv = (k, v) if use_cache else None
 
         # rotary
         if self.cfg.rope:
@@ -530,7 +458,7 @@ class LLaDABlock(nnx.Module):
 
         # scaled dot-product
         # QUESTION: Why does original use no bias or mask here?
-        attn_out = nnx.dot_product_attention(
+        attn = nnx.dot_product_attention(
             q,
             k,
             v,
@@ -540,16 +468,13 @@ class LLaDABlock(nnx.Module):
         )  # (B,T,H,Dh)
 
         # Merge heads (B,T,H,Dh) -> (B,T,C)
-        attn_out = attn_out.reshape(B, T, C)
-        attn_out = self.attn_out(attn_out)
-        return attn_out, present_kv
+        attn = attn.reshape(B, T, C)
+        return self.attn_out(attn)
 
     def __call__(
         self,
         x: jax.Array,  # (B,T,D)
         attention_bias=None,
-        layer_past: KVCache | None = None,
-        use_cache: bool = False,  # KV-cache tuple or None
     ):
         Kh, Dh = self.cfg.effective_n_kv_heads, self.cfg.d_model // self.cfg.n_heads
 
@@ -567,13 +492,11 @@ class LLaDABlock(nnx.Module):
             k = self.k_proj(h)
             v = self.v_proj(h)
 
-        att, cache = self.attention(
+        att = self.attention(
             q,
             k,
             v,
             attention_bias=attention_bias,
-            layer_past=layer_past,
-            use_cache=use_cache,
         )
         x = x + self.dropout(att)
 
@@ -589,7 +512,7 @@ class LLaDABlock(nnx.Module):
             x = self.act(x)
         x = self.ff_out(x)
         x = og_x + self.dropout(x)
-        return x, cache
+        return x
 
 
 _NEG_INF_F32 = jnp.finfo(jnp.bfloat16).min
@@ -683,7 +606,6 @@ def get_alibi_attention_bias(cache: dict[str, jax.Array], seq_len: int, cfg, dty
 
 class LLaDAOutput(NamedTuple):
     logits: jax.Array
-    attn_key_values: list[tuple[jax.Array, jax.Array]] | None
     hidden_states: tuple[jax.Array, ...] | None
 
 
@@ -721,25 +643,18 @@ class LLaDAModel(nnx.Module):
         input_embeddings: jax.Array | None = None,
         attention_mask: jax.Array | None = None,
         attention_bias: jax.Array | None = None,
-        past_key_values: KVCache | None = None,
-        use_cache: bool = False,
         output_hidden_states: bool | None = None,
         last_logits_only: bool = False,
     ) -> LLaDAOutput:  # returns logits  (B, T or 1, V)
         batch_size, seq_len = input_ids.shape if input_embeddings is None else input_embeddings.shape[:2]
-        if past_key_values is None:
-            past_length = 0
-        else:
-            past_length = past_key_values.idx
-        # (B, T, D)
-        x = self.wte(input_ids) if input_embeddings is None else input_embeddings
+        x = self.wte(input_ids) if input_embeddings is None else input_embeddings  # (B, T, D)
 
         if self.cfg.input_emb_norm:
             x = x * math.sqrt(self.cfg.d_model)
 
         if not (self.cfg.alibi or self.cfg.rope):
             # Get positional embeddings.
-            pos = jnp.arange(past_length, past_length + seq_len)[None, :]
+            pos = jnp.arange(0, seq_len)[None, :]
             pos_emb = self.wpe(pos)
             x = x + pos_emb
 
@@ -754,20 +669,18 @@ class LLaDAModel(nnx.Module):
             attention_mask = None
 
         # Merge attention mask with attention bias
-        if attention_bias is not None or attention_mask is not None or self.cfg.alibi or past_key_values is not None:
+        if attention_bias is not None or attention_mask is not None or self.cfg.alibi:
             if attention_bias is None and self.cfg.alibi:
-                attention_bias = get_causal_attention_bias(
-                    self.__cache, past_length + seq_len
-                ) + get_alibi_attention_bias(self.__cache, past_length + seq_len, self.cfg)
+                attention_bias = get_causal_attention_bias(self.__cache, seq_len) + get_alibi_attention_bias(
+                    self.__cache, seq_len, self.cfg
+                )
             elif attention_bias is None:
-                attention_bias = get_causal_attention_bias(self.__cache, past_length + seq_len)
+                attention_bias = get_causal_attention_bias(self.__cache, seq_len)
 
             # Transform to the right shape and data type.
             mask_len = seq_len
             if attention_mask is not None:
                 mask_len = attention_mask.shape[-1]
-            elif past_key_values is not None:
-                mask_len = past_key_values[0][0].shape[-2] + seq_len
             attention_bias = attention_bias[:, :, :mask_len, :mask_len]
 
             # Add in the masking bias.
@@ -776,8 +689,6 @@ class LLaDAModel(nnx.Module):
                 # Might get -infs after adding attention mask, since dtype.min + dtype.min = -inf.
                 ensure_finite(attention_bias, check_neg_inf=True, check_pos_inf=False)
 
-        attn_key_values = past_key_values if use_cache else None
-
         # Decoder layers
         all_hidden_states = []
 
@@ -785,21 +696,12 @@ class LLaDAModel(nnx.Module):
         for blk_idx, blk in enumerate(self.blocks):
             if output_hidden_states:
                 all_hidden_states.append(x)
-            layer_past = None if past_key_values is None else past_key_values[blk_idx]
-            x, cache = blk(
+            x = blk(
                 x,
                 attention_bias=attention_bias,
-                layer_past=layer_past,
-                use_cache=use_cache,
-            )  # (B, T, D)
-            if attn_key_values is not None and use_cache:
-                assert cache is not None
-                attn_key_values.append(blk_idx, cache[0], cache[1])
+            )  # (B,T,D)
 
-        if attn_key_values is not None and use_cache:
-            attn_key_values.idx.value = attn_key_values.idx.value + 1
-
-        # Prepare logits (B, T | 1, V)
+        # Prepare logits (B,T|1,V)
         if last_logits_only:
             x = x[:, -1:, :]  # keep dims for broadcasting
 
@@ -818,7 +720,6 @@ class LLaDAModel(nnx.Module):
 
         return LLaDAOutput(
             logits=logits,
-            attn_key_values=attn_key_values,
             hidden_states=tuple(all_hidden_states) if output_hidden_states else None,
         )
 
@@ -902,8 +803,11 @@ def generate_step(
 
     # Confidence
     if remasking == "low_confidence":
-        p = jax.nn.softmax(logits, axis=-1)
-        x0_p = jnp.squeeze(jnp.take_along_axis(p, x0[..., None], axis=-1), axis=-1)
+        # p = jax.nn.softmax(logits, axis=-1)
+        # x0_p = jnp.squeeze(jnp.take_along_axis(p, x0[..., None], axis=-1), axis=-1)
+        lse = logsumexp(logits, axis=-1)
+        x0_logit = jnp.take_along_axis(logits, x0[..., None], axis=-1)[..., 0]
+        x0_p = jnp.exp(x0_logit - lse)
     elif remasking == "random":
         rng, sub = jax.random.split(rng)
         x0_p = jax.random.uniform(sub, shape=x0.shape, dtype=logits.dtype)
