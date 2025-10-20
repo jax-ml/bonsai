@@ -16,7 +16,6 @@ import math
 from abc import abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
-from functools import partial
 from typing import Callable, NamedTuple
 
 import jax
@@ -268,9 +267,9 @@ class GemmaRMSNorm(LayerNormBase):
         y = x * jax.lax.rsqrt(var + self.eps)
         if self.scale is not None:
             if self.bias is not None:
-                y = y * (1.0 + self.scale) + self.bias
+                y = y * (1.0 + self.scale.value) + self.bias.value
             else:
-                y = y * (1.0 + self.scale)
+                y = y * (1.0 + self.scale.value)
         return y.astype(og_dtype)
 
 
