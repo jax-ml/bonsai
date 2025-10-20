@@ -150,7 +150,7 @@ def run_model():
         tokens,
         steps=128,
         gen_length=128,
-        block_length=16,
+        block_length=32,
         temperature=0.0,
         cfg_scale=0.0,
         remasking="low_confidence",
