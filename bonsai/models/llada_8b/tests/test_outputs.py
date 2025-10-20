@@ -31,7 +31,7 @@ HF_REPO = "GSAI-ML/LLaDA-8B-Instruct"
 
 def _tokenize_chat_batch(tokenizer, prompts):
     """Chat-template tokenize then right-pad to next power-of-two length (matches your helper)."""
-    pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id
+    pad_id = 126336  # Mask Token
     lines = [
         tokenizer.apply_chat_template(
             [{"role": "user", "content": p}],
