@@ -32,11 +32,7 @@ class PositionEmbeddingSine(nnx.Module):
     """
 
     def __init__(
-        self,
-        num_pos_feats: int,
-        temperature: float = 10000.0,
-        normalize: bool = True,
-        scale: float | None = None,
+        self, num_pos_feats: int, temperature: float = 10000.0, normalize: bool = True, scale: float | None = None
     ):
         super().__init__()
         assert num_pos_feats % 2 == 0, "num_pos_feats must be even"
@@ -77,12 +73,7 @@ class PositionEmbeddingSine(nnx.Module):
         # concatenate [pos_y, pos_x, h, w]
         return jnp.concatenate([pos_y, pos_x, h[:, None], w[:, None]], axis=-1)
 
-    def encode_points(
-        self,
-        x: jnp.ndarray,
-        y: jnp.ndarray,
-        labels: jnp.ndarray,
-    ) -> jnp.ndarray:
+    def encode_points(self, x: jnp.ndarray, y: jnp.ndarray, labels: jnp.ndarray) -> jnp.ndarray:
         """
         Encode point prompts with labels:
           x, y, labels shapes: [B, N]
@@ -242,12 +233,7 @@ def reshape_for_broadcast(freqs_cis: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray
     return freqs_cis[None, None, :, :]  # [1, 1, T, C]
 
 
-def apply_rotary_enc(
-    q: jnp.ndarray,
-    k: jnp.ndarray,
-    freqs_cis: jnp.ndarray,
-    repeat_freqs_k: bool = False,
-):
+def apply_rotary_enc(q: jnp.ndarray, k: jnp.ndarray, freqs_cis: jnp.ndarray, repeat_freqs_k: bool = False):
     """
     Applies rotary position encoding to queries and keys.
 

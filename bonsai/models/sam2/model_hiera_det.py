@@ -95,14 +95,7 @@ class PatchEmbed(nnx.Module):
         *,
         rngs: nnx.Rngs,
     ):
-        self.proj = nnx.Conv(
-            in_chans,
-            embed_dim,
-            kernel_size=kernel_size,
-            strides=stride,
-            padding=padding,
-            rngs=rngs,
-        )
+        self.proj = nnx.Conv(in_chans, embed_dim, kernel_size=kernel_size, strides=stride, padding=padding, rngs=rngs)
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
         x = self.proj(x)
@@ -137,7 +130,7 @@ class MultiScaleAttention(nnx.Module):
         self.proj = nnx.Linear(dim_out, dim_out, rngs=rngs)
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
-        B, H, W, C = x.shape
+        B, H, W, _ = x.shape
         # linear to qkv and reshape
         qkv = self.qkv(x).reshape(B, H * W, 3, self.num_heads, -1)
         q, k, v = jnp.split(qkv, 3, axis=2)
@@ -186,24 +179,11 @@ class MultiScaleBlock(nnx.Module):
         if q_stride is not None:
             self.pool = partial(nnx.max_pool, window_shape=q_stride, strides=q_stride)
 
-        self.attn = MultiScaleAttention(
-            dim=dim,
-            dim_out=dim_out,
-            num_heads=num_heads,
-            q_pool=self.pool,
-            rngs=rngs,
-        )
+        self.attn = MultiScaleAttention(dim=dim, dim_out=dim_out, num_heads=num_heads, q_pool=self.pool, rngs=rngs)
 
         self.drop_path = DropPath(drop_prob=drop_path, rngs=rngs) if drop_path > 0.0 else Identity()
 
-        self.mlp = MLP(
-            dim_out,
-            int(dim_out * mlp_ratio),
-            dim_out,
-            num_layers=2,
-            activation=act_layer,
-            rngs=rngs,
-        )
+        self.mlp = MLP(dim_out, int(dim_out * mlp_ratio), dim_out, num_layers=2, activation=act_layer, rngs=rngs)
 
         self.proj = nnx.Linear(dim, dim_out, rngs=rngs) if dim != dim_out else Identity()
 
@@ -266,10 +246,7 @@ class Hiera(nnx.Module):
         self.q_pool_blocks = [x + 1 for x in self.stage_ends[:-1]][:q_pool]
         self.return_interm_layers = return_interm_layers
 
-        self.patch_embed = PatchEmbed(
-            embed_dim=embed_dim,
-            rngs=rngs,
-        )
+        self.patch_embed = PatchEmbed(embed_dim=embed_dim, rngs=rngs)
 
         self.global_att_blocks = global_att_blocks
 
@@ -317,16 +294,10 @@ class Hiera(nnx.Module):
     def _get_pos_embed(self, hw: tuple[int, int]) -> jnp.ndarray:
         h, w = hw
         pos_embed = jax.image.resize(
-            self.pos_embed.value,
-            shape=(1, self.pos_embed.value.shape[1], h, w),
-            method="bicubic",
+            self.pos_embed.value, shape=(1, self.pos_embed.value.shape[1], h, w), method="bicubic"
         )
 
-        tile_factors = [
-            1,
-            h // self.pos_embed_window.value.shape[2],
-            w // self.pos_embed_window.value.shape[3],
-        ]
+        tile_factors = [1, h // self.pos_embed_window.value.shape[2], w // self.pos_embed_window.value.shape[3]]
         window_embed = jnp.tile(self.pos_embed_window.value, tile_factors)
         pos_embed = pos_embed + window_embed
         return jnp.transpose(pos_embed, (0, 2, 3, 1))  # BCHW -> BHWC

@@ -28,15 +28,15 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
         r"model\.embed_tokens\.weight": ("embedder.input_emb", None),
         r"model\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (
             r"layers.\1.attn.q_proj.w",
-            ((1, 0), (cfg.emb_dim, cfg.num_heads, cfg.head_dim)),
+            ((2, 0, 1), (cfg.num_heads, cfg.head_dim, cfg.emb_dim)),
         ),
         r"model\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (
             r"layers.\1.attn.k_proj.w",
-            ((1, 0), (cfg.emb_dim, cfg.num_kv_heads, cfg.head_dim)),
+            ((2, 0, 1), (cfg.num_kv_heads, cfg.head_dim, cfg.emb_dim)),
         ),
         r"model\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (
             r"layers.\1.attn.v_proj.w",
-            ((1, 0), (cfg.emb_dim, cfg.num_kv_heads, cfg.head_dim)),
+            ((2, 0, 1), (cfg.num_kv_heads, cfg.head_dim, cfg.emb_dim)),
         ),
         r"model\.layers\.([0-9]+)\.self_attn\.o_proj\.weight": (
             r"layers.\1.attn.o_proj.w",
@@ -55,23 +55,23 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
             r"layers.\1.mlp.down_proj.kernel",
             ((1, 0), None),
         ),
-        r"model\.norm\.weight": ("final_norm.w", None),
+        r"model\.norm\.weight": ("final_norm.scale", None),
         # norms
         r"model\.layers\.([0-9]+)\.self_attn\.q_norm\.weight": (
-            r"layers.\1.attn.q_norm.w",
+            r"layers.\1.attn.q_norm.scale",
             None,
         ),
         r"model\.layers\.([0-9]+)\.self_attn\.k_norm\.weight": (
-            r"layers.\1.attn.k_norm.w",
+            r"layers.\1.attn.k_norm.scale",
             None,
         ),
         # layer norms (pre/post attention)
         r"model\.layers\.([0-9]+)\.input_layernorm\.weight": (
-            r"layers.\1.input_layernorm.w",
+            r"layers.\1.input_layernorm.scale",
             None,
         ),
         r"model\.layers\.([0-9]+)\.post_attention_layernorm\.weight": (
-            r"layers.\1.post_attention_layernorm.w",
+            r"layers.\1.post_attention_layernorm.scale",
             None,
         ),
         r"lm_head\.weight": ("lm_head.w", ((1, 0), None)),
@@ -89,15 +89,18 @@ def _torch_key_to_jax_key(mapping, source_key):
     return subs[0]
 
 
-def _assign_weights(keys, tensor, state_dict, torch_key, transform):
+def _assign_weights(keys, tensor, state_dict, torch_key, transform, transpose_first: bool = True):
     """Convert weights and assign to nnx state_dict."""
     key = keys[0]
     if len(keys) == 1:
         try:
             if transform is not None:
                 permute, reshape = transform
-                tensor = tensor.transpose(permute) if permute else tensor
+                if transpose_first:
+                    tensor = tensor.transpose(permute) if permute else tensor
                 tensor = tensor.reshape(reshape) if reshape else tensor
+                if not transpose_first:
+                    tensor = tensor.transpose(permute) if permute else tensor
         except Exception as e:
             raise RuntimeError(f"Failed to transform tensor {torch_key} with shape {tensor.shape}: {e}") from e
 
@@ -108,7 +111,8 @@ def _assign_weights(keys, tensor, state_dict, torch_key, transform):
     else:
         if key not in state_dict:
             raise ValueError(f"Unfound key {key} in {state_dict}")
-        _assign_weights(keys[1:], tensor, state_dict[key], torch_key, transform)
+        next_transpose_first = keys[0] not in ["q_proj", "k_proj", "v_proj"]
+        _assign_weights(keys[1:], tensor, state_dict[key], torch_key, transform, next_transpose_first)
         return state_dict
 
 
@@ -119,9 +123,7 @@ def _stoi(s):
         return s
 
 
-def create_model_from_safe_tensors(
-    file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh | None = None
-) -> model_lib.Qwen3:
+def create_model_from_safe_tensors(file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh) -> model_lib.Qwen3:
     """Load tensors from the safetensors file and create a Qwen3 model."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:
@@ -138,9 +140,8 @@ def create_model_from_safe_tensors(
         jax_key, transform = _torch_key_to_jax_key(_get_key_and_transform_mapping(cfg), k)
         jax_keys = [_stoi(s) for s in jax_key.split(".")]
         _assign_weights(jax_keys, v, state_dict, k, transform)
-    if mesh is not None:
-        sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
-        state_dict = jax.device_put(state_dict, sharding)
-    else:
-        state_dict = jax.device_put(state_dict, jax.devices()[0])
+    if cfg.tie_word_embeddings:
+        state_dict["lm_head"]["w"] = state_dict["embedder"]["input_emb"].T
+    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
+    state_dict = jax.device_put(state_dict, sharding)
     return nnx.merge(graph_def, state_dict)

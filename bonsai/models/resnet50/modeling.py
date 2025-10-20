@@ -73,7 +73,7 @@ class Downsample(nnx.Module):
 
 class BlockGroup(nnx.Module):
     def __init__(self, in_channels: int, out_channels: int, blocks, stride: int, *, rngs: nnx.Rngs):
-        self.blocks = []
+        self.blocks = nnx.List()
 
         downsample = None
         if stride != 1 or in_channels != out_channels * 4:
@@ -130,6 +130,6 @@ def ResNet50(num_classes=1000, *, rngs: nnx.Rngs):
     return ResNet([3, 4, 6, 3], num_classes=num_classes, rngs=rngs)
 
 
-@partial(jax.jit, static_argnames=["model"])
+@jax.jit
 def forward(model, x):
     return model(x)
