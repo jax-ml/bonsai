@@ -34,7 +34,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-5, atol=1e-5)
 
-    def test_layers(self):
+    def test_first_layer(self):
         torch_layer = self.baseline_model.vit.encoder.layer[0]
         nnx_layer = self.bonsai_model.layers.layers[0]
 
