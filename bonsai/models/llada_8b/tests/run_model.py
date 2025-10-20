@@ -33,7 +33,7 @@ MODEL_CP_PATH = snapshot_download(HF_REPO, local_dir="/tmp/models-bonsai")
 
 # Tokenization helper
 def tokenize(tokenizer, inputs: list[str]):
-    pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id  # fall back to eos
+    pad_id = 126336  # Mask Token
     lines = [
         tokenizer.apply_chat_template([{"role": "user", "content": l}], tokenize=False, add_generation_prompt=True)
         for l in inputs
