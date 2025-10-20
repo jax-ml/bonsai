@@ -130,6 +130,7 @@ class MBConv(nnx.Module):
             self.bn0 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
         else:
             self.expand_conv = None
+            self.bn0 = None
 
         # Depthwise convolution
         self.depthwise_conv = nnx.Conv(

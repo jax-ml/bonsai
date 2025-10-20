@@ -25,17 +25,10 @@ from bonsai.models.resnet50 import params
 
 def run_model(MODEL_CP_PATH=None):
     # 1. Download safetensors file
-    model_name = "microsoft/resnet-50"
-    if MODEL_CP_PATH is None:
-        MODEL_CP_PATH = "/tmp/models-bonsai/" + model_name.split("/")[1]
-
-    if not os.path.isdir(MODEL_CP_PATH):
-        snapshot_download(model_name, local_dir=MODEL_CP_PATH)
-
-    safetensors_path = os.path.join(MODEL_CP_PATH, "model.safetensors")
+    model_ckpt_path = snapshot_download("microsoft/resnet-50")
 
     # 2. Load pretrained model
-    model = params.create_resnet50_from_pretrained(safetensors_path)
+    model = params.create_resnet50_from_pretrained(model_ckpt_path)
 
     # 3. Prepare dummy input
     batch_size = 8
