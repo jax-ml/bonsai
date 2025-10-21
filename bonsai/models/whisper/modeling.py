@@ -216,7 +216,7 @@ class ResidualAttentionBlock(nnx.Module):
             x = x + self.cross_attn(self.cross_attn_ln(x), xa, mask=None, kv_cache=kv_cache)[0]
         
         # MLP with residual connection (same as PyTorch: Sequential(Linear, GELU, Linear))
-        x = x + self.mlp_linear2(jax.nn.gelu(self.mlp_linear1(self.mlp_ln(x))))
+        x = x + self.mlp_linear2(jax.nn.gelu(self.mlp_linear1(self.mlp_ln(x)), approximate=False))
         
         return x
 
@@ -242,8 +242,8 @@ class AudioEncoder(nnx.Module):
     def __call__(self, x: jnp.ndarray):
         # x shape: (batch, n_mels, time) -> (batch, time, n_mels) for NNX Conv
         x = x.transpose(0, 2, 1)  # (batch, time, n_mels)
-        x = jax.nn.gelu(self.conv1(x))  # (batch, time, n_state)
-        x = jax.nn.gelu(self.conv2(x))  # (batch, time/2, n_state)
+        x = jax.nn.gelu(self.conv1(x), approximate=False)  # (batch, time, n_state)
+        x = jax.nn.gelu(self.conv2(x), approximate=False)  # (batch, time/2, n_state)
         # x is now (batch, time/2, n_state)
         
         # Add positional embeddings

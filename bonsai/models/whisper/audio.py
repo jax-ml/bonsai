@@ -156,5 +156,8 @@ def log_mel_spectrogram(
     log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
     log_spec = (log_spec + 4.0) / 4.0
     
+    # Drop last frame to match PyTorch (librosa produces 3001 frames, PyTorch produces 3000)
+    log_spec = log_spec[:, :-1]
+    
     # Convert to JAX array with correct dtype
     return jnp.array(log_spec, dtype=jnp.float32)
