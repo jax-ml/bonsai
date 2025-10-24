@@ -12,6 +12,8 @@ def run_model():
     rngs = nnx.Rngs(params=0, dropout=1)
     config = modeling.ModelCfg.b0()
     model = params.create_model(cfg=config, rngs=rngs)
+    graphdef, state = nnx.split(model)
+    state = jax.tree.leaves(state)
 
     # 2. Prepare dummy input
     batch_size = 4
@@ -19,16 +21,20 @@ def run_model():
     dummy_input = jnp.ones((batch_size, image_size, image_size, 3), dtype=jnp.float32)
 
     # 3. Warmup (triggers JIT compilation)
-    print("Starting JIT compilation (warmup)...")
-    _ = model(dummy_input, training=False)
-    jax.block_until_ready(_)
-    print("Warmup complete.")
+    _ = modeling.forward(graphdef, state, dummy_input).block_until_ready()
+
+    # Profile a few steps
+    jax.profiler.start_trace("/tmp/profile-densenet121")
+    for _ in range(5):
+        logits = modeling.forward(graphdef, state, dummy_input)
+        jax.block_until_ready(logits)
+    jax.profiler.stop_trace()
 
     # 4. Timed execution for inference
     num_runs = 10
     t0 = time.perf_counter()
     for _ in range(num_runs):
-        logits = model(dummy_input, training=False)
+        logits = modeling.forward(graphdef, state, dummy_input)
         jax.block_until_ready(logits)
     t1 = time.perf_counter()
     print(f"{num_runs} inference runs took {t1 - t0:.4f} s")

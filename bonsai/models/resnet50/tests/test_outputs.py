@@ -28,12 +28,8 @@ from bonsai.models.resnet50 import params
 class Resnet50Test(absltest.TestCase):
     def test_full(self):
         model_name = "microsoft/resnet-50"
-        MODEL_CP_PATH = "/tmp/models-bonsai/resnet-50"
-
-        if not os.path.isdir(MODEL_CP_PATH):
-            snapshot_download(model_name, local_dir=MODEL_CP_PATH)
-        safetensors_path = os.path.join(MODEL_CP_PATH, "model.safetensors")
-        bonsai_model = params.create_resnet50_from_pretrained(safetensors_path)
+        model_ckpt_path = snapshot_download("microsoft/resnet-50")
+        bonsai_model = params.create_resnet50_from_pretrained(model_ckpt_path)
         baseline_model = ResNetForImageClassification.from_pretrained(model_name)
 
         batch_size, image_size = 8, 224
