@@ -26,7 +26,7 @@ def interpolate_posembed(posemb, num_tokens: int, has_class_token: bool):
     posemb_grid = posemb_grid.reshape(gs_old, gs_old, -1)
 
     zoom = (gs_new / gs_old, gs_new / gs_old, 1)
-    posemb_grid = scipy.ndimage.zoom(posemb_grid, zoom, order=1)
+    posemb_grid = scipy.ndimage.zoom(posemb_grid, zoom, order=3)
     posemb_grid = posemb_grid.reshape(1, gs_new * gs_new, -1)
 
     return jnp.array(np.concatenate([posemb_tok, posemb_grid], axis=1))

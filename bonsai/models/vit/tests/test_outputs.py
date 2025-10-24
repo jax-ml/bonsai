@@ -69,10 +69,6 @@ class TestModuleForwardPasses(absltest.TestCase):
             ty = self.baseline_model(tx,interpolate_pos_encoding=True).logits
         jy = self.bonsai_model(jx)
 
-
-        print("Checking JAX (bonsai) vs PyTorch (transformers) outputs...")
         torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-5, atol=1e-1)
-        print("Interpolation Test Passed! ")
-
 if __name__ == "__main__":
     absltest.main()
