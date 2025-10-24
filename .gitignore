@@ -12,3 +12,4 @@
 .envrc
 build
 *venv*
+env/
