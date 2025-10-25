@@ -79,3 +79,6 @@ class Resnet152Test(absltest.TestCase):
 
 if __name__ == "__main__":
     absltest.main()
+    
+    
+# end of bonsai/models/resnet50/tests/test_outputs.py

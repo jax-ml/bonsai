@@ -211,3 +211,6 @@ def create_resnet152_from_pretrained(
         num_classes=num_classes,
         mesh=mesh,
     )
+
+
+# End of bonsai/models/resnet50/params.py

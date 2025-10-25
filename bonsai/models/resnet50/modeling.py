@@ -138,3 +138,6 @@ def ResNet152(num_classes=1000, *, rngs: nnx.Rngs):
 def forward(model, x):
     return model(x)
 
+
+
+# end of bonsai/models/resnet50/modeling.py
