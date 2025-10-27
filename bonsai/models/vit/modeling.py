@@ -2,8 +2,6 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 
-import scipy.ndimage
-from absl import logging 
 
 def interpolate_posembed(posemb : jnp.ndarray, num_tokens: int, has_class_token: bool) -> jnp.ndarray:
   
@@ -59,7 +57,6 @@ class Embeddings(nnx.Module):
         if  num_stored_patches == num_new_patch_patches + 1:
             current_pos_embeddings = stored_pos_embeddings
         else:
-            logging.info('Resizing position embeddings from %s to %s', num_stored_patches, num_new_patch_patches + 1)
             current_pos_embeddings = interpolate_posembed(
                 stored_pos_embeddings, 
                 num_tokens=num_new_patch_patches + 1,
