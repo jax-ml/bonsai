@@ -43,10 +43,14 @@ vgg19 = [
 densenet121 = [
   "h5py",
 ]
+efficientnet = [
+  "timm",
+]
 testing = [
   "torch",
   "keras_hub",
   "tensorflow",
+  "timm",
 ]
 
 [project.urls]
