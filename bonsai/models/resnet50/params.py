@@ -137,7 +137,6 @@ def _stoi(s):
     except ValueError:
         return s
 
-# --- THIS IS THE NEW GENERIC HELPER FUNCTION ---
 def _create_resnet_from_pretrained(
     model_cls: Callable[..., model_lib.ResNet], # <-- Takes the model (ResNet50 or ResNet152) as an argument
     file_dir: str,
@@ -158,8 +157,7 @@ def _create_resnet_from_pretrained(
     state_dict = {}
     for f in files:
         state_dict |= safetensors.load_file(f)
-
-    # --- Uses the model_cls argument here ---
+        
     model = nnx.eval_shape(lambda: model_cls(num_classes=num_classes, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(model)
     jax_state = abs_state.to_pure_dict()
@@ -181,8 +179,6 @@ def _create_resnet_from_pretrained(
     return nnx.merge(graph_def, jax_state)
 
 
-# --- THIS IS OUR ORIGINAL FUNCTION ---
-
 def create_resnet50_from_pretrained(
     file_dir: str,
     num_classes: int = 1000,
@@ -191,13 +187,11 @@ def create_resnet50_from_pretrained(
 ):
     """Loads ResNet50 weights."""
     return _create_resnet_from_pretrained(
-        model_lib.ResNet50,  # <-- It just calls the helper with ResNet50
+        model_lib.ResNet50,  
         file_dir=file_dir,
         num_classes=num_classes,
         mesh=mesh,
     )
-
-# --- THIS IS OUR NEW FUNCTION  ---
 def create_resnet152_from_pretrained(
     file_dir: str,
     num_classes: int = 1000,
@@ -206,11 +200,8 @@ def create_resnet152_from_pretrained(
 ):
     """Loads ResNet152 weights."""
     return _create_resnet_from_pretrained(
-        model_lib.ResNet152, # <-- It just calls the helper with ResNet152
+        model_lib.ResNet152, 
         file_dir=file_dir,
         num_classes=num_classes,
         mesh=mesh,
     )
-
-
-# End of bonsai/models/resnet50/params.py

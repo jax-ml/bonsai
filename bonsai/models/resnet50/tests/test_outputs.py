@@ -15,7 +15,7 @@
 import os
 
 import jax
-import numpy as np  # 
+import numpy as np 
 import torch
 from absl.testing import absltest
 from huggingface_hub import snapshot_download
@@ -64,7 +64,7 @@ class Resnet152Test(absltest.TestCase):
         random_inputs = jax.random.truncated_normal(
             jax.random.key(0), lower=-1, upper=1, shape=(batch_size, image_size, image_size, 3)
         )
-        # --- PyTorch input (this one is correct) ---
+        # --- PyTorch input 
         baseline_inputs = {"pixel_values": torch.tensor(np.array(random_inputs)).to(torch.float32).permute(0, 3, 1, 2)}
 
         # --- Get JAX model output ---
@@ -81,4 +81,3 @@ if __name__ == "__main__":
     absltest.main()
     
     
-# end of bonsai/models/resnet50/tests/test_outputs.py
