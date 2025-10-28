@@ -146,9 +146,9 @@ class SqueezeAndExcitation(nnx.Module):
 
         # 2. Excitation
         excitation = self.conv1(squeeze)
-        excitation = nnx.silu(excitation)  # act1: SiLU(inplace=True)에 대응
+        excitation = nnx.silu(excitation)
         excitation = self.conv2(excitation)
-        excitation = nnx.sigmoid(excitation)  # gate: Sigmoid()에 대응
+        excitation = nnx.sigmoid(excitation)
 
         # 3. Scale
         return x * excitation
