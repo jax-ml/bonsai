@@ -229,10 +229,9 @@ class AudioEncoder(nnx.Module):
         # Positional embeddings
         self.positional_embedding = nnx.Param(jnp.empty((n_ctx, n_state)))
 
-        # Transformer blocks
-        self.blocks = [
-            ResidualAttentionBlock(n_state, n_head, cross_attention=False, rngs=rngs) for _ in range(n_layer)
-        ]
+        self.blocks = nnx.List(
+            [ResidualAttentionBlock(n_state, n_head, cross_attention=False, rngs=rngs) for _ in range(n_layer)]
+        )
 
         self.ln_post = nnx.LayerNorm(n_state, rngs=rngs)
 
@@ -260,8 +259,9 @@ class TextDecoder(nnx.Module):
         self.token_embedding = nnx.Embed(n_vocab, n_state, rngs=rngs)
         self.positional_embedding = nnx.Param(jnp.empty((n_ctx, n_state)))
 
-        # Create blocks with cross-attention (same as PyTorch)
-        self.blocks = [ResidualAttentionBlock(n_state, n_head, cross_attention=True, rngs=rngs) for _ in range(n_layer)]
+        self.blocks = nnx.List(
+            [ResidualAttentionBlock(n_state, n_head, cross_attention=True, rngs=rngs) for _ in range(n_layer)]
+        )
 
         self.ln = nnx.LayerNorm(n_state, rngs=rngs)
 

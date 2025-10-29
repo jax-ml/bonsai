@@ -27,13 +27,19 @@ from bonsai.models.vgg19 import params as params_lib
 class TestModuleForwardPasses(absltest.TestCase):
     def setUp(self):
         super().setUp()
-        self.ref_model = keras_hub.models.ImageClassifier.from_preset("vgg_19_imagenet")
-        model_ckpt_path = snapshot_download("keras/vgg_19_imagenet")
-        self.nnx_model = params_lib.create_model_from_h5(model_ckpt_path, modeling.ModelCfg.vgg_19())
+        try:
+            self.ref_model = keras_hub.models.ImageClassifier.from_preset("vgg_19_imagenet")
+            model_ckpt_path = snapshot_download("keras/vgg_19_imagenet")
+            self.nnx_model = params_lib.create_model_from_h5(model_ckpt_path, modeling.ModelCfg.vgg_19())
 
-        image = np.random.uniform(size=(1, 224, 224, 3)).astype(np.float32)
-        self.jx = jnp.array(image)
-        self.tx = tf.constant(image)
+            image = np.random.uniform(size=(1, 224, 224, 3)).astype(np.float32)
+            self.jx = jnp.array(image)
+            self.tx = tf.constant(image)
+        except Exception as e:
+            self.skipTest(
+                "Skipping test because tensorflow-text requires 3.12 or below: %s"
+                "Manually install tensorflow-text and run if needed." % e
+            )
 
     def test_conv(self):
         ref_model = self.ref_model.backbone
