@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
-import subprocess
+from pathlib import Path
 
 import jax
 import jax.numpy as jnp
@@ -28,12 +27,10 @@ from bonsai.models.whisper import modeling as model_lib
 
 class WhisperTest(absltest.TestCase):
     def test_full(self):
-        # Download test audio if not exists
-        audio_path = os.path.join(os.path.dirname(__file__), "audio_samples", "bush_moscow_speech.mp3")
-        if not os.path.exists(audio_path):
-            os.makedirs(os.path.dirname(audio_path), exist_ok=True)
-            audio_url = "https://bush41library.tamu.edu/files/audio/Remarks%20of%20Vice%20President%20Bush%20Upon%20Arrival%20in%20Moscow%20for%20the%20Funeral%20of%20Konstantin%20Chernenko%2012%20March%201985.mp3"
-            subprocess.run(["wget", "-O", audio_path, audio_url], check=True, capture_output=True)
+        repo_root = Path(__file__).resolve().parents[4]
+        audio_path = repo_root / "bonsai/tests/data/Speech_12dB_s16_trimmed.flac"
+        if not audio_path.exists():
+            self.fail(f"Test audio file not found at: {audio_path}")
 
         # Load models
         jax_model = model_lib.load_model("tiny")
@@ -43,8 +40,8 @@ class WhisperTest(absltest.TestCase):
         mel_tensor = audio.log_mel_spectrogram(audio_tensor)
         mel_jax = jnp.array(mel_tensor)
 
-        # Test segment with speech (5-35 seconds)
-        mel_segment = mel_jax[:, 500:3500][None, :, :]  # 5-35 seconds
+        # Test segment.
+        mel_segment = mel_jax[:, :3000][None, :, :]
 
         # Get audio features
         audio_features = jax_model.embed_audio(mel_segment)
@@ -79,13 +76,8 @@ class WhisperTest(absltest.TestCase):
 
             torch_model = whisper.load_model("tiny")
 
-            # Extract same audio segment
-            start_sample = 5 * 16000
-            end_sample = 35 * 16000
-            audio_segment = audio_tensor[start_sample:end_sample]
+            torch_audio_segment = torch.from_numpy(np.array(audio_tensor)).float()
 
-            # PyTorch transcription
-            torch_audio_segment = torch.from_numpy(np.array(audio_segment)).float()
             with torch.no_grad():
                 result = torch_model.transcribe(
                     torch_audio_segment, language="en", task="transcribe", initial_prompt=None, verbose=False
@@ -96,15 +88,15 @@ class WhisperTest(absltest.TestCase):
             jax_tokens = self._greedy_decode_jax(jax_model, audio_features, tokenizer, max_length=200)
             jax_text = tokenizer.decode(jax_tokens[0].tolist(), skip_special_tokens=True)
 
-            # Check similarity (should be high)
+            # Check similarity
             jax_words = set(jax_text.lower().split())
             torch_words = set(torch_text.lower().split())
             common_words = jax_words & torch_words
             all_words = jax_words | torch_words
             similarity = len(common_words) / len(all_words) if all_words else 0
 
-            # Should be at least 60% similar
-            self.assertGreater(similarity, 0.6, f"Transcriptions too different: {similarity:.2f}")
+            # TODO(team): Improve model quality and test with higher expected similarity.
+            self.assertGreater(similarity, 0.6, f"Transcriptions differ. JAX: '{jax_text}' vs Torch: '{torch_text}'")
 
         except ImportError:
             self.skipTest("PyTorch Whisper not available for comparison")
