@@ -3,9 +3,9 @@ from functools import lru_cache
 from subprocess import CalledProcessError, run
 from typing import Optional, Union
 
-import numpy as np
 import jax.numpy as jnp
 import librosa
+import numpy as np
 
 from .utils import exact_div
 
@@ -42,18 +42,24 @@ def load_audio(file: str, sr: int = SAMPLE_RATE):
     try:
         audio, _ = librosa.load(file, sr=sr, mono=True)
         return audio.astype(np.float32)
-    except Exception as e:
+    except Exception:
         # Fallback to ffmpeg if librosa fails
         cmd = [
             "ffmpeg",
             "-nostdin",
-            "-threads", "0",
-            "-i", file,
-            "-f", "s16le",
-            "-ac", "1",
-            "-acodec", "pcm_s16le",
-            "-ar", str(sr),
-            "-"
+            "-threads",
+            "0",
+            "-i",
+            file,
+            "-f",
+            "s16le",
+            "-ac",
+            "1",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            str(sr),
+            "-",
         ]
         try:
             out = run(cmd, capture_output=True, check=True).stdout
@@ -69,7 +75,7 @@ def pad_or_trim(array, length: int = N_SAMPLES, *, axis: int = -1):
     if isinstance(array, jnp.ndarray):
         if array.shape[axis] > length:
             array = jnp.take(array, jnp.arange(length), axis=axis)
-        
+
         if array.shape[axis] < length:
             pad_widths = [(0, 0)] * array.ndim
             pad_widths[axis] = (0, length - array.shape[axis])
@@ -94,7 +100,7 @@ def mel_filters(n_mels: int) -> np.ndarray:
     Uses librosa to generate mel filters on the fly.
     """
     assert n_mels in {80, 128}, f"Unsupported n_mels: {n_mels}"
-    
+
     # Generate mel filters using librosa
     mel_filters = librosa.filters.mel(sr=SAMPLE_RATE, n_fft=N_FFT, n_mels=n_mels)
     return mel_filters.astype(np.float32)
@@ -126,17 +132,17 @@ def log_mel_spectrogram(
     """
     if isinstance(audio, str):
         audio = load_audio(audio)
-    
+
     # Convert to numpy if it's a JAX array
     if isinstance(audio, jnp.ndarray):
         audio = np.array(audio)
-    
+
     # Ensure it's a numpy array
     audio = np.array(audio)
-    
+
     if padding > 0:
         audio = np.pad(audio, (0, padding))
-    
+
     # Compute mel spectrogram using librosa
     mel_spec = librosa.feature.melspectrogram(
         y=audio,
@@ -147,17 +153,17 @@ def log_mel_spectrogram(
         fmin=0,
         fmax=None,
         htk=False,
-        norm='slaney',
-        dtype=np.float32
+        norm="slaney",
+        dtype=np.float32,
     )
-    
+
     # Convert to log scale (same as original implementation)
     log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
     log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
     log_spec = (log_spec + 4.0) / 4.0
-    
+
     # Drop last frame to match PyTorch (librosa produces 3001 frames, PyTorch produces 3000)
     log_spec = log_spec[:, :-1]
-    
+
     # Convert to JAX array with correct dtype
     return jnp.array(log_spec, dtype=jnp.float32)
