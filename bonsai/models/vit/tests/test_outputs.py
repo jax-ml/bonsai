@@ -58,6 +58,18 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-5, atol=5e-2)
 
+    def test_full_interpolation(self):
+        image_shape_384 = (self.batch_size, 384, 384, 3)
+
+        jx = jax.random.normal(jax.random.key(1), image_shape_384, dtype=jnp.float32)
+        tx = torch.tensor(jx).permute(0, 3, 1, 2)
+
+        with torch.no_grad():
+            ty = self.baseline_model(tx, interpolate_pos_encoding=True).logits
+        jy = self.bonsai_model(jx)
+
+        torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-5, atol=1e-1)
+
 
 if __name__ == "__main__":
     absltest.main()
