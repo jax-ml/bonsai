@@ -646,7 +646,7 @@ class LLaDAModel(nnx.Module):
         output_hidden_states: bool | None = None,
         last_logits_only: bool = False,
     ) -> LLaDAOutput:  # returns logits  (B, T or 1, V)
-        batch_size, seq_len = input_ids.shape if input_embeddings is None else input_embeddings.shape[:2]
+        _, seq_len = input_ids.shape if input_embeddings is None else input_embeddings.shape[:2]
         x = self.wte(input_ids) if input_embeddings is None else input_embeddings  # (B, T, D)
 
         if self.cfg.input_emb_norm:
