@@ -131,7 +131,6 @@ def ResNet50(num_classes=1000, *, rngs: nnx.Rngs):
 
 
 def ResNet152(num_classes=1000, *, rngs: nnx.Rngs):
-    # ResNet-152 uses 3, 8, 36, 3 blocks
     return ResNet([3, 8, 36, 3], num_classes=num_classes, rngs=rngs)
 
 @jax.jit

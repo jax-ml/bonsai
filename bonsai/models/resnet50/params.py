@@ -14,8 +14,7 @@
 
 import logging
 import re
-from typing import Callable  # --- Make sure to import Callable ---
-
+from typing import Callable
 import jax
 import safetensors.flax as safetensors
 from etils import epath
