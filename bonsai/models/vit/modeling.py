@@ -3,6 +3,29 @@ import jax.numpy as jnp
 from flax import nnx
 
 
+def interpolate_posembed(posemb: jnp.ndarray, num_tokens: int, has_class_token: bool) -> jnp.ndarray:
+    assert posemb.shape[0] == 1
+    if has_class_token:
+        posemb_tok, posemb_grid = posemb[:, :1], posemb[0, 1:]
+        num_tokens -= 1
+    else:
+        posemb_tok, posemb_grid = posemb[:, :0], posemb[0, 0:]
+
+    gs_old = int(jnp.sqrt(len(posemb_grid)))
+    gs_new = int(jnp.sqrt(num_tokens))
+
+    assert gs_old**2 == len(posemb_grid), f"{gs_old**2} != {len(posemb_grid)}"
+    assert gs_new**2 == num_tokens, f"{gs_new**2} != {num_tokens}"
+
+    posemb_grid = posemb_grid.reshape(1, gs_old, gs_old, -1)
+
+    zoom = (1, gs_new, gs_new, posemb_grid.shape[-1])
+    posemb_grid = jax.image.resize(posemb_grid, zoom, method="bicubic")
+    posemb_grid = posemb_grid.reshape(1, gs_new * gs_new, -1)
+
+    return jnp.array(jnp.concatenate([posemb_tok, posemb_grid], axis=1))
+
+
 class Embeddings(nnx.Module):
     def __init__(
         self,
@@ -25,9 +48,23 @@ class Embeddings(nnx.Module):
         embeddings = self.projection(pixel_values)
         b, h, w, c = embeddings.shape
         embeddings = embeddings.reshape(b, h * w, c)
+
+        num_new_patch_patches = h * w
+
+        stored_pos_embeddings = self.pos_embeddings.value
+        num_stored_patches = stored_pos_embeddings.shape[1]
+
+        if num_stored_patches == num_new_patch_patches + 1:
+            current_pos_embeddings = stored_pos_embeddings
+        else:
+            current_pos_embeddings = interpolate_posembed(
+                stored_pos_embeddings, num_tokens=num_new_patch_patches + 1, has_class_token=True
+            )
+
         cls_tokens = jnp.tile(self.cls_token.value, (b, 1, 1))
         embeddings = jnp.concatenate((cls_tokens, embeddings), axis=1)
-        embeddings = embeddings + self.pos_embeddings.value
+
+        embeddings = embeddings + current_pos_embeddings
         embeddings = self.dropout(embeddings)
         return embeddings
 

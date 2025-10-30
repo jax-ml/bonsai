@@ -136,7 +136,7 @@ def run_model():
     ]
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_CP_PATH, use_fast=True)
-    tokens, pad_id, max_len, token_len = tokenize(tokenizer, prompt)
+    tokens, _, _, _ = tokenize(tokenizer, prompt)
     print("Tokenized batch")
 
     cfg = modeling.ModelConfig.llada_8b_instruct()
