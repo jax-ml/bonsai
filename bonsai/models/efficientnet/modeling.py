@@ -20,41 +20,37 @@ class BlockConfig:
     padding: int | Literal["SAME"]
 
 
-# Base block configurations for EfficientNet-B0. Other variants scale from this.
-DEFAULT_BLOCK_CONFIGS = [
-    BlockConfig(32, 16, 3, 1, 1, 1, 0.25, 1),
-    BlockConfig(16, 24, 3, 2, 6, 2, 0.25, 1),
-    BlockConfig(24, 40, 5, 2, 6, 2, 0.25, 2),
-    BlockConfig(40, 80, 3, 3, 6, 2, 0.25, 1),
-    BlockConfig(80, 112, 5, 3, 6, 1, 0.25, 2),
-    BlockConfig(112, 192, 5, 4, 6, 2, 0.25, 2),
-    BlockConfig(192, 320, 3, 1, 6, 1, 0.25, 1),
-]
-
-
-# Asymmetric Padding
-TF_BLOCK_CONFIGS = [
-    BlockConfig(32, 16, 3, 1, 1, 1, 0.25, "SAME"),
-    BlockConfig(16, 24, 3, 2, 6, 2, 0.25, "SAME"),
-    BlockConfig(24, 40, 5, 2, 6, 2, 0.25, "SAME"),
-    BlockConfig(40, 80, 3, 3, 6, 2, 0.25, "SAME"),
-    BlockConfig(80, 112, 5, 3, 6, 1, 0.25, "SAME"),
-    BlockConfig(112, 192, 5, 4, 6, 2, 0.25, "SAME"),
-    BlockConfig(192, 320, 3, 1, 6, 1, 0.25, "SAME"),
-]
-
-
 @dataclasses.dataclass(frozen=True)
 class BlockConfigs:
     items: Sequence[BlockConfig]
 
     @classmethod
     def default_block_config(cls):
-        return cls(DEFAULT_BLOCK_CONFIGS)
+        return cls(
+            [
+                BlockConfig(32, 16, 3, 1, 1, 1, 0.25, 1),
+                BlockConfig(16, 24, 3, 2, 6, 2, 0.25, 1),
+                BlockConfig(24, 40, 5, 2, 6, 2, 0.25, 2),
+                BlockConfig(40, 80, 3, 3, 6, 2, 0.25, 1),
+                BlockConfig(80, 112, 5, 3, 6, 1, 0.25, 2),
+                BlockConfig(112, 192, 5, 4, 6, 2, 0.25, 2),
+                BlockConfig(192, 320, 3, 1, 6, 1, 0.25, 1),
+            ]
+        )
 
     @classmethod
     def tf_block_config(cls):
-        return cls(TF_BLOCK_CONFIGS)
+        return cls(
+            [
+                BlockConfig(32, 16, 3, 1, 1, 1, 0.25, "SAME"),
+                BlockConfig(16, 24, 3, 2, 6, 2, 0.25, "SAME"),
+                BlockConfig(24, 40, 5, 2, 6, 2, 0.25, "SAME"),
+                BlockConfig(40, 80, 3, 3, 6, 2, 0.25, "SAME"),
+                BlockConfig(80, 112, 5, 3, 6, 1, 0.25, "SAME"),
+                BlockConfig(112, 192, 5, 4, 6, 2, 0.25, "SAME"),
+                BlockConfig(192, 320, 3, 1, 6, 1, 0.25, "SAME"),
+            ]
+        )
 
 
 @dataclasses.dataclass(frozen=True)

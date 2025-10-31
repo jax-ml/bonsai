@@ -108,7 +108,7 @@ def create_name_map(cfg: model_lib.ModelCfg):
     name_map["stem_bn"] = {jax_n: f"bn1.{timm_n}" for jax_n, timm_n in bn_map.items()}
 
     # 2. Blocks
-    block_configs = model_lib.DEFAULT_BLOCK_CONFIGS
+    block_configs = model_lib.BlockConfigs.default_block_config().items
     total_jax_block_idx = 0
     for i, bc in enumerate(block_configs):
         num_repeat = model_lib.round_repeats(bc.num_repeat, cfg.depth_coefficient)
