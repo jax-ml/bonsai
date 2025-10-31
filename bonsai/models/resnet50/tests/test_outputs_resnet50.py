@@ -15,7 +15,7 @@
 import os
 
 import jax
-import numpy as np 
+import numpy as np
 import torch
 from absl.testing import absltest
 from huggingface_hub import snapshot_download
@@ -62,7 +62,6 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         np.testing.assert_allclose(bonsai_outputs, baseline_outputs, rtol=1e-5)
 
+
 if __name__ == "__main__":
     absltest.main()
-    
-    
