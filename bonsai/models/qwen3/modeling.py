@@ -24,6 +24,8 @@ from jax import numpy as jnp
 from jax.interpreters import pxla
 from jaxtyping import Array, ArrayLike
 
+from bonsai.utils import BaseSampler
+
 # -2.3819763e38
 _K_MASK = jax._src.nn.functions._get_large_negative(jax.numpy.float32).item()
 
@@ -424,14 +426,19 @@ class Qwen3(nnx.Module):
         return logits
 
 
-@partial(jax.jit, donate_argnums=(1))
+@partial(jax.jit, donate_argnums=(1), static_argnums=(4))
 def forward(
-    graphdef: nnx.GraphDef[tuple[nnx.Module, Cache]], state: nnx.State, tokens: Array, pad_id: int
+    graphdef: nnx.GraphDef[tuple[nnx.Module, Cache]],
+    state: nnx.State,
+    tokens: Array,
+    pad_id: int,
+    sampler: BaseSampler,
+    key: jax.random.PRNGKey,
 ) -> tuple[Array, nnx.State]:
     model, cache = nnx.merge(graphdef, state)
     segment_ids = 1 * (tokens != pad_id)
     right_pads = num_right_pad(segment_ids[0])
     logits = model(tokens, segment_ids, right_pads, cache)
-    next_tokens = jnp.argmax(logits[:, -right_pads - 1], axis=-1, keepdims=True)
+    next_tokens = sampler(logits[:, -right_pads - 1], key=key)
     state = jax.tree.leaves(nnx.state((model, cache)))
     return next_tokens, state
