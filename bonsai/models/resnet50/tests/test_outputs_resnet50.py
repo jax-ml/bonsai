@@ -25,8 +25,8 @@ from bonsai.models.resnet50 import modeling as model_lib
 from bonsai.models.resnet50 import params
 
 
-class Resnet50Test(absltest.TestCase):
-    def test_full(self):
+class TestModuleForwardPasses(absltest.TestCase):
+    def test_full_50(self):
         model_name = "microsoft/resnet-50"
         model_ckpt_path = snapshot_download("microsoft/resnet-50")
         bonsai_model = params.create_resnet50_from_pretrained(model_ckpt_path)
@@ -37,6 +37,24 @@ class Resnet50Test(absltest.TestCase):
             jax.random.key(0), lower=-1, upper=1, shape=(batch_size, image_size, image_size, 3)
         )
         baseline_inputs = {"pixel_values": torch.tensor(random_inputs).to(torch.float32).permute(0, 3, 1, 2)}
+
+        bonsai_outputs = model_lib.forward(bonsai_model, random_inputs)
+        with torch.no_grad():
+            baseline_outputs = baseline_model(**baseline_inputs).logits.cpu().detach().numpy()
+
+        np.testing.assert_allclose(bonsai_outputs, baseline_outputs, rtol=1e-5)
+
+    def test_full_152(self):
+        model_name = "microsoft/resnet-152"
+        model_ckpt_path = snapshot_download("microsoft/resnet-152")
+        bonsai_model = params.create_resnet152_from_pretrained(model_ckpt_path)
+        baseline_model = ResNetForImageClassification.from_pretrained(model_name)
+
+        batch_size, image_size = 8, 224
+        random_inputs = jax.random.truncated_normal(
+            jax.random.key(0), lower=-1, upper=1, shape=(batch_size, image_size, image_size, 3)
+        )
+        baseline_inputs = {"pixel_values": torch.tensor(np.array(random_inputs)).to(torch.float32).permute(0, 3, 1, 2)}
 
         bonsai_outputs = model_lib.forward(bonsai_model, random_inputs)
         with torch.no_grad():

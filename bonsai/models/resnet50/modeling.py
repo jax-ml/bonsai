@@ -130,6 +130,10 @@ def ResNet50(num_classes=1000, *, rngs: nnx.Rngs):
     return ResNet([3, 4, 6, 3], num_classes=num_classes, rngs=rngs)
 
 
+def ResNet152(num_classes=1000, *, rngs: nnx.Rngs):
+    return ResNet([3, 8, 36, 3], num_classes=num_classes, rngs=rngs)
+
+
 @jax.jit
 def forward(model, x):
     return model(x)
