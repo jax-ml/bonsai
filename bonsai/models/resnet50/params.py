@@ -137,7 +137,7 @@ def _stoi(s):
         return s
 
 def _create_resnet_from_pretrained(
-    model_cls: Callable[..., model_lib.ResNet], # <-- Takes the model (ResNet50 or ResNet152) as an argument
+    model_cls: Callable[..., model_lib.ResNet],
     file_dir: str,
     num_classes: int = 1000,
     *,
