@@ -37,7 +37,7 @@ class TestModuleForwardPasses(absltest.TestCase):
             jax.random.key(0), lower=-1, upper=1, shape=(batch_size, image_size, image_size, 3)
         )
         baseline_inputs = {"pixel_values": torch.tensor(random_inputs).to(torch.float32).permute(0, 3, 1, 2)}
-        
+
         bonsai_outputs = model_lib.forward(bonsai_model, random_inputs)
         with torch.no_grad():
             baseline_outputs = baseline_model(**baseline_inputs).logits.cpu().detach().numpy()
