@@ -36,7 +36,7 @@ class BaseSampler(ABC):
     """
 
     @abstractmethod
-    def __call__(self):
+    def __call__(self, x: ArrayLike, *, key: PRNGKey):
         pass
 
 
@@ -60,7 +60,14 @@ class Sampler(BaseSampler):
     The outputs are then randomly sampled from this distribution.
     """
 
-    def __init__(self, p: float, k: int, temperature: float):
+    def __init__(self, *, p: float, k: int, temperature: float):
+        if p <= 0.0 or p > 1.0:
+            raise ValueError(f"Expected probability 0 < p <= 1 but got {p}")
+        if k <= 0:
+            raise ValueError(f"Expected k > 0 but got {k}")
+        if temperature <= 0.0:
+            raise ValueError(f"Expected temperature > 0 but got {temperature}")
+
         self.p = p
         self.k = k
         self.temperature = temperature
@@ -74,9 +81,7 @@ class Sampler(BaseSampler):
         mask = cumsum_probs - probs_sorted > self.p
         probs_sorted = jnp.where(mask, 0.0, probs_sorted)
         probs_sorted /= jnp.sum(probs_sorted, axis=-1, keepdims=True)
-
         next_token = jax.random.categorical(key, logits=jnp.log(probs_sorted))
-
         next_token = jnp.take_along_axis(indices, next_token[..., None], axis=-1)
         return next_token
 
@@ -84,19 +89,3 @@ class Sampler(BaseSampler):
 # TODO: Implement beam sampling
 class BeamSampler(BaseSampler):
     pass
-
-
-if __name__ == "__main__":
-    batch_size = 4
-    vocab_size = 64
-    logits = jax.random.normal(jax.random.key(0), (batch_size, vocab_size))
-
-    # GreedySampler Example
-    greedy_sampler = GreedySampler()
-    next_token = greedy_sampler(logits, key=jax.random.key(0))
-    print(next_token)
-
-    # Sampler Example
-    kptemp_sampler = GreedySampler()
-    next_token = kptemp_sampler(logits, key=jax.random.key(0))
-    print(next_token)
