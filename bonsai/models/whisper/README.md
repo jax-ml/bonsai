@@ -1,32 +1,23 @@
-# Whisper in JAX NNX
+# Whisper in JAX NNX (In Progress)
 
-This directory contains a **pure JAX implementation** of the [OpenAI Whisper speech recognition model](https://github.com/openai/whisper), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
+This directory contains a **JAX + NNX** implementation of the [OpenAI Whisper speech recognition model](https://github.com/openai/whisper), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
 
 Whisper is a general-purpose speech recognition model that can transcribe audio in multiple languages and perform various speech recognition tasks including transcription, translation, and language identification.
 
-**🚀 Status: Prototype* - The model successfully loads pretrained weights and performs accurate speech transcription for 30 sec. 
+## Model Status
 
-## Model Architecture
-
-The Whisper model consists of two main components:
-
-1. **Audio Encoder**: A convolutional neural network followed by transformer layers that processes mel spectrogram features
-2. **Text Decoder**: A transformer decoder that generates text tokens autoregressively with cross-attention to the audio features
-
-**Whisper Models** | | 
-| [Whisper Tiny](https://huggingface.co/openai/whisper-tiny) | ✅ | 
-| [Whisper Base](https://huggingface.co/openai/whisper-base) | ✅ |
-| [Whisper Small](https://huggingface.co/openai/whisper-small)| ✅ |
-| [Whisper Medium](https://huggingface.co/openai/whisper-medium) | ✅ |
-| [Whisper Large](https://huggingface.co/openai/whisper-large) | ✅ | 
-
-### Running this model
-
-Run Whisper in action, implemented in JAX NNX for high-performance speech recognition.
+Complete:
+1. Correct parameter loading. Testing so far suggests this is correct. 
+2. Attention mechanism using the `nnx.MultiheadAttention` layer. Starting with this implementation to reduce implementation complexity for now (e.g. caching taken care of). 
+3. Encoder layer passes tests. Decoder layer tests are done without caching. 
 
 
-**🔧 Basic Model Runner:**
-```sh
-python3 -m bonsai.models.whisper.tests.run_model
-```
+Remaining:
+1. Finish implementing and numerically testing the model for 30 second audio inputs. 
+    1. Test the decoder layer with caching. 
+    2. Implement the full model forward pass.
+    3. Add tests on real audio data. 
+2. Add chunking to deal with larger audio segments. 
+3. Create notebook and `run_model.py` file to demonstrate how to use the model and it's efficiency.   
+4. Implement sharding to improve performance with larger models. 
 
