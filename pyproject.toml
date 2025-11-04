@@ -54,10 +54,6 @@ models = [
   "jax-bonsai[densenet121,efficientnet,whisper,qwen3,resnet50,sam2,vgg19]",
 ]
 
-models = [
-  "jax-bonsai[densenet121,efficientnet,whisper,qwen3,resnet50,sam2,vgg19]",
-]
-
 [project.urls]
 Source = "https://github.com/jax-ml/bonsai"
 
