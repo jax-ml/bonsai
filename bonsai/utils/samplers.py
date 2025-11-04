@@ -75,15 +75,14 @@ class Sampler(BaseSampler):
     def __call__(self, x: ArrayLike, *, key: PRNGKey):
         probs = jax.nn.softmax(x / self.temperature, axis=-1)
 
-        # The folllowing is from tunix/generate/sampler.py
+        # The following is from tunix/generate/sampler.py
         probs_sorted, indices = jax.lax.top_k(probs, k=self.top_k)
         cumsum_probs = jnp.cumsum(probs_sorted, axis=-1)
         mask = cumsum_probs - probs_sorted > self.top_p
         probs_sorted = jnp.where(mask, 0.0, probs_sorted)
         probs_sorted /= jnp.sum(probs_sorted, axis=-1, keepdims=True)
         next_token = jax.random.categorical(key, logits=jnp.log(probs_sorted))
-        next_token = jnp.take_along_axis(indices, next_token[..., None], axis=-1)
-        return next_token
+        return jnp.take_along_axis(indices, next_token[..., None], axis=-1)
 
 
 # TODO: Implement beam sampling
