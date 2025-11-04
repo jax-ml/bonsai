@@ -14,6 +14,7 @@
 
 import logging
 import re
+from typing import Callable
 
 import jax
 import safetensors.flax as safetensors
@@ -137,14 +138,15 @@ def _stoi(s):
         return s
 
 
-def create_resnet50_from_pretrained(
+def _create_resnet_from_pretrained(
+    model_cls: Callable[..., model_lib.ResNet],
     file_dir: str,
     num_classes: int = 1000,
     *,
     mesh: jax.sharding.Mesh | None = None,
 ):
     """
-    Load safetensor weights from a file, then convert & merge into a flax.nnx ResNet50 model.
+    Load safetensor weights from a file, then convert & merge into a flax.nnx ResNet model.
 
     Returns:
       A flax.nnx.Model instance with loaded parameters.
@@ -157,8 +159,8 @@ def create_resnet50_from_pretrained(
     for f in files:
         state_dict |= safetensors.load_file(f)
 
-    res50 = nnx.eval_shape(lambda: model_lib.ResNet50(num_classes=num_classes, rngs=nnx.Rngs(params=0)))
-    graph_def, abs_state = nnx.split(res50)
+    model = nnx.eval_shape(lambda: model_cls(num_classes=num_classes, rngs=nnx.Rngs(params=0)))
+    graph_def, abs_state = nnx.split(model)
     jax_state = abs_state.to_pure_dict()
 
     mapping = _get_key_and_transform_mapping()
@@ -176,3 +178,33 @@ def create_resnet50_from_pretrained(
         jax_state = jax.device_put(jax_state, jax.devices()[0])
 
     return nnx.merge(graph_def, jax_state)
+
+
+def create_resnet50_from_pretrained(
+    file_dir: str,
+    num_classes: int = 1000,
+    *,
+    mesh: jax.sharding.Mesh | None = None,
+):
+    """Loads ResNet50 weights."""
+    return _create_resnet_from_pretrained(
+        model_lib.ResNet50,
+        file_dir=file_dir,
+        num_classes=num_classes,
+        mesh=mesh,
+    )
+
+
+def create_resnet152_from_pretrained(
+    file_dir: str,
+    num_classes: int = 1000,
+    *,
+    mesh: jax.sharding.Mesh | None = None,
+):
+    """Loads ResNet152 weights."""
+    return _create_resnet_from_pretrained(
+        model_lib.ResNet152,
+        file_dir=file_dir,
+        num_classes=num_classes,
+        mesh=mesh,
+    )

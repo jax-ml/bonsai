@@ -294,8 +294,9 @@ class RotaryEmbedding(nnx.Module):
         # Slice fp32 sin/cos tables to the current length
         T_q, T_k = q_.shape[-3], k_.shape[-3]
         self._ensure_table()
-        sin = self.pos_sin[:, :T_k, :, :]
-        cos = self.pos_cos[:, :T_k, :, :]
+        sin = self.pos_sin.value[:, :T_k, :, :]
+        cos = self.pos_cos.value[:, :T_k, :, :]
+
         sin_q, cos_q = sin[:, T_k - T_q : T_k, :, :], cos[:, T_k - T_q : T_k, :, :]
 
         sin = sin.astype(q_.dtype)
@@ -621,7 +622,7 @@ class LLaDAModel(nnx.Module):
             self.wpe = nnx.Embed(self.cfg.max_sequence_length, self.cfg.d_model, rngs=rngs)
 
         # Transformer blocks
-        self.blocks = [LLaDABlock(i, self.cfg, rngs=rngs) for i in range(self.cfg.n_layers)]
+        self.blocks = nnx.List([LLaDABlock(i, self.cfg, rngs=rngs) for i in range(self.cfg.n_layers)])
 
         # Final layer norm
         self.ln_f = LayerNormBase.build(self.cfg, rngs=rngs)
@@ -646,7 +647,7 @@ class LLaDAModel(nnx.Module):
         output_hidden_states: bool | None = None,
         last_logits_only: bool = False,
     ) -> LLaDAOutput:  # returns logits  (B, T or 1, V)
-        batch_size, seq_len = input_ids.shape if input_embeddings is None else input_embeddings.shape[:2]
+        _, seq_len = input_ids.shape if input_embeddings is None else input_embeddings.shape[:2]
         x = self.wte(input_ids) if input_embeddings is None else input_embeddings  # (B, T, D)
 
         if self.cfg.input_emb_norm:

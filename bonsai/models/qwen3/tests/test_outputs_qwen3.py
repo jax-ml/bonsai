@@ -117,6 +117,7 @@ class TestModuleForwardPasses(absltest.TestCase):
                 num_kv_heads=self.bonsai_config.num_kv_heads,
                 head_dim=self.bonsai_config.head_dim,
                 dtype=jnp.float32,
+                sharding=self.bonsai_config.shd_cfg.act_btnh,
             )
 
     def test_embedder(self):
