@@ -31,14 +31,14 @@ class TestSamplers(absltest.TestCase):
         greedy_sampler(self.logits, key=jax.random.key(0))
 
     def test_sampler(self):
-        kptemp_sampler = Sampler(p=0.1, k=10, temperature=1.0)
+        kptemp_sampler = Sampler(top_p=0.1, top_k=10, temperature=1.0)
         kptemp_sampler(self.logits, key=jax.random.key(0))
 
     def test_sampler_invalid_args(self):
-        self.assertRaises(ValueError, Sampler, p=0.0, k=10, temperature=1.0)
-        self.assertRaises(ValueError, Sampler, p=1.1, k=10, temperature=1.0)
-        self.assertRaises(ValueError, Sampler, p=0.5, k=0, temperature=1.0)
-        self.assertRaises(ValueError, Sampler, p=0.5, k=10, temperature=-1)
+        self.assertRaises(ValueError, Sampler, temperature=1.0, top_p=0.0, top_k=10)
+        self.assertRaises(ValueError, Sampler, temperature=1.0, top_p=1.1, top_k=10)
+        self.assertRaises(ValueError, Sampler, temperature=1.0, top_p=0.5, top_k=0)
+        self.assertRaises(ValueError, Sampler, temperature=-1.0, top_p=0.5, top_k=10)
 
 
 if __name__ == "__main__":

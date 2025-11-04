@@ -60,25 +60,25 @@ class Sampler(BaseSampler):
     The outputs are then randomly sampled from this distribution.
     """
 
-    def __init__(self, *, p: float, k: int, temperature: float):
-        if p <= 0.0 or p > 1.0:
-            raise ValueError(f"Expected probability 0 < p <= 1 but got {p}")
-        if k <= 0:
-            raise ValueError(f"Expected k > 0 but got {k}")
+    def __init__(self, *, temperature: float, top_p: float, top_k: int):
         if temperature <= 0.0:
             raise ValueError(f"Expected temperature > 0 but got {temperature}")
+        if top_p <= 0.0 or top_p > 1.0:
+            raise ValueError(f"Expected probability 0 < p <= 1 but got {top_p}")
+        if top_k <= 0:
+            raise ValueError(f"Expected k > 0 but got {top_k}")
 
-        self.p = p
-        self.k = k
         self.temperature = temperature
+        self.top_p = top_p
+        self.top_k = top_k
 
     def __call__(self, x: ArrayLike, *, key: PRNGKey):
         probs = jax.nn.softmax(x / self.temperature, axis=-1)
 
         # The folllowing is from tunix/generate/sampler.py
-        probs_sorted, indices = jax.lax.top_k(probs, k=self.k)
+        probs_sorted, indices = jax.lax.top_k(probs, k=self.top_k)
         cumsum_probs = jnp.cumsum(probs_sorted, axis=-1)
-        mask = cumsum_probs - probs_sorted > self.p
+        mask = cumsum_probs - probs_sorted > self.top_p
         probs_sorted = jnp.where(mask, 0.0, probs_sorted)
         probs_sorted /= jnp.sum(probs_sorted, axis=-1, keepdims=True)
         next_token = jax.random.categorical(key, logits=jnp.log(probs_sorted))

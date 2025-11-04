@@ -19,21 +19,12 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
-from absl import app, flags
 from flax import nnx
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 from bonsai.models.qwen3 import modeling, params
-from bonsai.utils import GreedySampler, Sampler, SamplerType
-
-FLAGS = flags.FLAGS
-flags.DEFINE_enum(
-    "sampler_type",
-    SamplerType.GREEDY.value,
-    enum_values=[SamplerType.GREEDY.value, SamplerType.SAMPLER.value],
-    help="The type of sampler for picking next tokens from LLM outputs.",
-)
+from bonsai.utils import Sampler
 
 
 def tokenize(tokenizer, input: list[str]):
@@ -48,7 +39,7 @@ def tokenize(tokenizer, input: list[str]):
     return jnp.array([np.pad(l, (max_l - len(l), buffer_len - max_l), constant_values=pad_idx) for l in lines]), max_l
 
 
-def run_model(sampler_type: str = "greedy"):
+def run_model():
     model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
 
     query = ["Why is the sky blue instead of any other color like purple?", "Who am I?"]
@@ -76,12 +67,7 @@ def run_model(sampler_type: str = "greedy"):
     state = jax.tree.leaves(state)  # Better perf from flattened jax state due to no pytree trasversals.
 
     # prefill
-    if sampler_type == "greedy":
-        sampler = GreedySampler()
-    elif sampler_type == "sampler":
-        sampler = Sampler(0.8, 10, 1.0)
-    else:
-        raise ValueError(f"Unknown sampler type: {sampler_type}")
+    sampler = Sampler(temperature=1.0, top_p=0.8, top_k=10)
 
     key = jax.random.key(0)
     next_tokens, state = modeling.forward(graphdef, state, tokens, tokenizer.pad_token_id, sampler, key)
@@ -114,12 +100,8 @@ def run_model(sampler_type: str = "greedy"):
         print(f"Answer:\n {tokenizer.decode(tokens_list[i], skip_special_tokens=True)}\n\n")
 
 
-def main(argv):
-    run_model(FLAGS.sampler_type)
-
-
 if __name__ == "__main__":
-    app.run(main)
+    run_model()
 
 
 __all__ = ["run_model"]
