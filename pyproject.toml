@@ -18,39 +18,40 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-  "jax[tpu]",
+  "jax",
   "jaxlib",
   "jaxtyping",
   "flax >= 0.12.0",
   "jinja2",
-  "pre-commit",
-  "setuptools",
   "huggingface-hub",
   "transformers",  # for the tokenizer and checkpoint
-  "xprof-nightly",
-  "xprof",
 ]
 
 [project.optional-dependencies]
+densenet121 = ["h5py"]
+efficientnet = ["timm"]
+whisper = ["librosa"]
 qwen3 = []
 resnet50 = []
-sam2 = [
-  "pillow>=11.3.0",
+sam2 = ["pillow>=11.3.0"]
+vgg19 = ["h5py"]
+
+dev = [
+  "xprof",
+  "pre-commit",
 ]
-vgg19 = [
-  "h5py",
-]
-densenet121 = [
-  "h5py",
-]
-efficientnet = [
-  "timm",
-]
+
 testing = [
+  "pytest",
+  "pytest-xdist",
   "torch",
   "keras_hub",
   "tensorflow",
   "timm",
+]
+
+models = [
+  "jax-bonsai[densenet121,efficientnet,whisper,qwen3,resnet50,sam2,vgg19]",
 ]
 
 [project.urls]
