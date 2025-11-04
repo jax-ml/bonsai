@@ -24,6 +24,7 @@ from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 from bonsai.models.qwen3 import modeling, params
+from bonsai.utils import Sampler
 
 
 def tokenize(tokenizer, input: list[str]):
@@ -66,17 +67,20 @@ def run_model():
     state = jax.tree.leaves(state)  # Better perf from flattened jax state due to no pytree trasversals.
 
     # prefill
-    next_tokens, state = modeling.forward(graphdef, state, tokens, tokenizer.pad_token_id)
+    sampler = Sampler(temperature=1.0, top_p=0.8, top_k=10)
+
+    key = jax.random.key(0)
+    next_tokens, state = modeling.forward(graphdef, state, tokens, tokenizer.pad_token_id, sampler, key)
 
     # decode - warmup
     tokens_list = [next_tokens]
-    next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
+    next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id, sampler, key)
     tokens_list.append(next_tokens)
 
     # profile
     jax.profiler.start_trace("/tmp/profile-data")
     for i in range(5):
-        next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
+        next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id, sampler, key)
         tokens_list.append(next_tokens)
     jax.block_until_ready(tokens_list)
     jax.profiler.stop_trace()
@@ -85,7 +89,7 @@ def run_model():
     t = time.perf_counter()
     decode_steps = 128
     for i in range(decode_steps):
-        next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
+        next_tokens, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id, sampler, key)
         tokens_list.append(next_tokens)
     jax.block_until_ready(tokens_list)
     print(f"Time: {(time.perf_counter() - t) / decode_steps:.4f} s per step")
