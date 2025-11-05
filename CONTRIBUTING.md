@@ -1,4 +1,4 @@
-# 🤝 Contributing to Bonsai
+# Contributing to Bonsai
 
 We love contributions! Bonsai aims to be a community-driven collection of high-quality JAX NNX model implementations. Whether you're fixing a bug, [adding a new model](#contributing-a-model), improving documentation, or proposing new features, your help is greatly appreciated.
 
@@ -19,8 +19,10 @@ There are many ways you can contribute to Bonsai:
 4.  **Improving Documentation:** Enhance the `README.md` files, add clearer explanations, or create new guides.
 5.  **Community Engagement:** Answer questions, help other users, and share your experiences.
 
-
 ## Contributing code using pull requests
+
+> [!TIP]
+> All submissions to Google Open Source projects need to follow Google’s Contributor License Agreement (CLA), in which contributors agree that their contribution is an original work of authorship. This doesn’t prohibit the use of coding assistance tools, but what’s submitted does need to be a contributor’s original creation.
 
 We do all of our development using git, so basic knowledge is assumed.
 
@@ -108,44 +110,20 @@ Bonsai uses [ruff](https://docs.astral.sh/ruff/) to statically test code quality
 easiest way to run these checks locally is via the
 [pre-commit](https://pre-commit.com/) framework via the following:
 
-#### 1. Install `pre-commit`.
+Install pre-commit. Alternatively, install the dev packages via `pip install -e ".[dev]"`
 ```bash
 pip install pre-commit
 ```
 
-#### 2. Install `pre-commit` hooks.
-Navigate to your `bonsai` repository root and install the hooks. This sets up the checks to run automatically before every `git commit`.
-
+Install the pre-commit hook. This will automatically run when you create a commit.
 ```bash
 pre-commit install
 ```
 
-Ruff is configured to automatically fix many linting and formatting issues. If Ruff makes any changes to your files, `pre-commit` will stop the commit, stage the fixed files, and notify you. You'll then need to git add the modified files and git commit again.
-
-#### 3. Manual checks (Optional, but recommended)
-
-While `pre-commit` handles checks on commit, you might want to manually run all checks across your entire codebase at any time (e.g., after pulling new changes, or before starting a significant refactor).
-
-* To run all configured pre-commit hooks against all files (not just staged ones):
-
-    ```bash
-    pre-commit run --all-files
-    ```
-
-* To run Ruff's linting and auto-fix capabilities across your entire project, referencing the rules in pyproject.toml:
-
-    ```bash
-    ruff check --fix
-    ```
-    This command will lint all Python files, applying any auto-fixable rules. It's a good habit to run this proactively.
-
-* To run Ruff's formatting capabilities across your entire project, referencing the style defined in pyproject.toml:
-    ```bash
-    ruff format .
-    ```
-
-Please ensure your code passes all linting, formatting, and type-checking checks before submitting a pull request. This helps maintain a clean and reliable codebase for everyone.
-
+Alternatively, manually run a pre-commit hook.
+```bash
+pre-commit run --all-files
+```
 
 ## Contributing a model
 
