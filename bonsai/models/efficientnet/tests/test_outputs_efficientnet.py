@@ -27,10 +27,14 @@ class TestModuleForwardPasses(parameterized.TestCase):
         nnx_name = f"efficientnet_b{version}"
         if version >= 5:
             timm_name = "tf_" + nnx_name + "_ap"
+            block_configs = modeling.BlockConfigs.tf_block_config()
         else:
             timm_name = nnx_name
+            block_configs = modeling.BlockConfigs.default_block_config()
+
         cfg = getattr(modeling.ModelCfg, f"b{version}")(1000)
-        jax_model = params.create_model(cfg, rngs=nnx.Rngs(0), mesh=None)
+
+        jax_model = params.create_model(cfg, block_configs, rngs=nnx.Rngs(0), mesh=None)
 
         # Download the pre-trained weights
         pretrained_weights = params.get_timm_pretrained_weights(nnx_name)
@@ -41,7 +45,6 @@ class TestModuleForwardPasses(parameterized.TestCase):
         timm_model.eval()
         return nnx_model, timm_model, cfg.resolution
 
-    # TODO (#45): EfficientNet tests failing for b5, b6, b7. Update implementation.
     @parameterized.parameters([0, 1, 2, 3, 4, 5, 6, 7])
     def test_full(self, version: int):
         nnx_model, timm_model, img_size = TestModuleForwardPasses._get_models_and_input_size(version)
