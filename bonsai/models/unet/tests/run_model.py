@@ -21,10 +21,11 @@ from flax import nnx
 
 from bonsai.models.unet import modeling, params
 
+
 def run_model():
     # 1. Create model and PRNG key
     rngs = nnx.Rngs(params=0)
-    config = modeling.ModelCfg(in_channels=3, num_classes=1) # Example: RGB input, binary output
+    config = modeling.ModelCfg(in_channels=3, num_classes=1)  # Example: RGB input, binary output
     model = params.create_model(cfg=config, rngs=rngs)
 
     # 2. Prepare dummy input
@@ -47,7 +48,6 @@ def run_model():
     t1 = time.perf_counter()
     print(f"{num_runs} runs took {t1 - t0:.4f} s")
     print(f"Average inference time: {(t1 - t0) / num_runs * 1000:.2f} ms")
-
 
     # 5. Show output shape
     print(f"\nInput shape: {dummy_input.shape}")

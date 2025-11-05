@@ -23,6 +23,7 @@ from flax import nnx
 @dataclasses.dataclass(frozen=True)
 class ModelCfg:
     """Configuration for the U-Net model."""
+
     in_channels: int = 1
     num_classes: int = 2
     features: tuple[int, int, int, int, int] = (64, 128, 256, 512, 1024)
