@@ -1,7 +1,7 @@
 import dataclasses
 import math
 from functools import partial
-from typing import Sequence
+from typing import Literal, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -17,19 +17,40 @@ class BlockConfig:
     expand_ratio: int
     strides: int
     se_ratio: float
-    padding: int
+    padding: int | Literal["SAME"]
 
 
-# Base block configurations for EfficientNet-B0. Other variants scale from this.
-DEFAULT_BLOCK_CONFIGS = [
-    BlockConfig(32, 16, 3, 1, 1, 1, 0.25, 1),
-    BlockConfig(16, 24, 3, 2, 6, 2, 0.25, 1),
-    BlockConfig(24, 40, 5, 2, 6, 2, 0.25, 2),
-    BlockConfig(40, 80, 3, 3, 6, 2, 0.25, 1),
-    BlockConfig(80, 112, 5, 3, 6, 1, 0.25, 2),
-    BlockConfig(112, 192, 5, 4, 6, 2, 0.25, 2),
-    BlockConfig(192, 320, 3, 1, 6, 1, 0.25, 1),
-]
+@dataclasses.dataclass(frozen=True)
+class BlockConfigs:
+    items: Sequence[BlockConfig]
+
+    @classmethod
+    def default_block_config(cls):
+        return cls(
+            [
+                BlockConfig(32, 16, 3, 1, 1, 1, 0.25, 1),
+                BlockConfig(16, 24, 3, 2, 6, 2, 0.25, 1),
+                BlockConfig(24, 40, 5, 2, 6, 2, 0.25, 2),
+                BlockConfig(40, 80, 3, 3, 6, 2, 0.25, 1),
+                BlockConfig(80, 112, 5, 3, 6, 1, 0.25, 2),
+                BlockConfig(112, 192, 5, 4, 6, 2, 0.25, 2),
+                BlockConfig(192, 320, 3, 1, 6, 1, 0.25, 1),
+            ]
+        )
+
+    @classmethod
+    def tf_block_config(cls):
+        return cls(
+            [
+                BlockConfig(32, 16, 3, 1, 1, 1, 0.25, "SAME"),
+                BlockConfig(16, 24, 3, 2, 6, 2, 0.25, "SAME"),
+                BlockConfig(24, 40, 5, 2, 6, 2, 0.25, "SAME"),
+                BlockConfig(40, 80, 3, 3, 6, 2, 0.25, "SAME"),
+                BlockConfig(80, 112, 5, 3, 6, 1, 0.25, "SAME"),
+                BlockConfig(112, 192, 5, 4, 6, 2, 0.25, "SAME"),
+                BlockConfig(192, 320, 3, 1, 6, 1, 0.25, "SAME"),
+            ]
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,39 +59,42 @@ class ModelCfg:
     depth_coefficient: float
     resolution: int
     dropout_rate: float
+    stem_conv_padding: int | Literal["SAME"]
+    bn_momentum: float
+    bn_epsilon: float
     num_classes: int = 1000
 
     @classmethod
     def b0(cls, num_classes=1000):
-        return cls(1.0, 1.0, 224, 0.2, num_classes)
+        return cls(1.0, 1.0, 224, 0.2, 1, 0.99, 1e-5, num_classes)
 
     @classmethod
     def b1(cls, num_classes=1000):
-        return cls(1.0, 1.1, 240, 0.2, num_classes)
+        return cls(1.0, 1.1, 240, 0.2, 1, 0.99, 1e-5, num_classes)
 
     @classmethod
     def b2(cls, num_classes=1000):
-        return cls(1.1, 1.2, 260, 0.3, num_classes)
+        return cls(1.1, 1.2, 260, 0.3, 1, 0.99, 1e-5, num_classes)
 
     @classmethod
     def b3(cls, num_classes=1000):
-        return cls(1.2, 1.4, 300, 0.3, num_classes)
+        return cls(1.2, 1.4, 300, 0.3, 1, 0.99, 1e-5, num_classes)
 
     @classmethod
     def b4(cls, num_classes=1000):
-        return cls(1.4, 1.8, 380, 0.4, num_classes)
+        return cls(1.4, 1.8, 380, 0.4, 1, 0.99, 1e-5, num_classes)
 
     @classmethod
     def b5(cls, num_classes=1000):
-        return cls(1.6, 2.2, 456, 0.4, num_classes)
+        return cls(1.6, 2.2, 456, 0.4, "SAME", 1e-1, 1e-3, num_classes)
 
     @classmethod
     def b6(cls, num_classes=1000):
-        return cls(1.8, 2.6, 528, 0.5, num_classes)
+        return cls(1.8, 2.6, 528, 0.5, "SAME", 1e-1, 1e-3, num_classes)
 
     @classmethod
     def b7(cls, num_classes=1000):
-        return cls(2.0, 3.1, 600, 0.5, num_classes)
+        return cls(2.0, 3.1, 600, 0.5, "SAME", 1e-1, 1e-3, num_classes)
 
 
 def round_filters(filters: int, width_coefficient: float, divisor: int = 8) -> int:
@@ -88,16 +112,41 @@ def round_repeats(repeats: int, depth_coefficient: float) -> int:
 
 
 class SqueezeAndExcitation(nnx.Module):
-    """Squeeze-and-Excitation block."""
+    """Squeeze-and-Excitation block"""
 
     def __init__(self, in_channels: int, se_channels: int, *, rngs: nnx.Rngs):
-        self.conv1 = nnx.Conv(in_channels, se_channels, kernel_size=(1, 1), rngs=rngs)
-        self.conv2 = nnx.Conv(se_channels, in_channels, kernel_size=(1, 1), rngs=rngs)
+        # conv_reduce
+        self.conv1 = nnx.Conv(
+            in_channels,
+            se_channels,
+            kernel_size=(1, 1),
+            strides=(1, 1),
+            padding="VALID",
+            use_bias=True,
+            rngs=rngs,
+        )
+        # conv_expand
+        self.conv2 = nnx.Conv(
+            se_channels,
+            in_channels,
+            kernel_size=(1, 1),
+            strides=(1, 1),
+            padding="VALID",
+            use_bias=True,
+            rngs=rngs,
+        )
 
     def __call__(self, x: jax.Array) -> jax.Array:
+        # 1. Squeeze
         squeeze = jnp.mean(x, axis=(1, 2), keepdims=True)
-        excitation = nnx.silu(self.conv1(squeeze))
-        excitation = nnx.sigmoid(self.conv2(excitation))
+
+        # 2. Excitation
+        excitation = self.conv1(squeeze)
+        excitation = nnx.silu(excitation)
+        excitation = self.conv2(excitation)
+        excitation = nnx.sigmoid(excitation)
+
+        # 3. Scale
         return x * excitation
 
 
@@ -112,8 +161,9 @@ class MBConv(nnx.Module):
         strides: int,
         expand_ratio: int,
         se_ratio: float,
-        padding: int,
+        padding: int | Literal["SAME"],
         *,
+        cfg: ModelCfg,
         rngs: nnx.Rngs,
     ):
         super().__init__()
@@ -127,7 +177,9 @@ class MBConv(nnx.Module):
         expanded_channels = in_channels * expand_ratio
         if expand_ratio != 1:
             self.expand_conv = nnx.Conv(in_channels, expanded_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)
-            self.bn0 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
+            self.bn0 = nnx.BatchNorm(
+                expanded_channels, momentum=cfg.bn_momentum, epsilon=cfg.bn_epsilon, use_running_average=True, rngs=rngs
+            )
         else:
             self.expand_conv = None
             self.bn0 = None
@@ -143,10 +195,11 @@ class MBConv(nnx.Module):
             use_bias=False,
             rngs=rngs,
         )
-        self.bn1 = nnx.BatchNorm(expanded_channels, use_running_average=True, rngs=rngs)
+        self.bn1 = nnx.BatchNorm(
+            expanded_channels, momentum=cfg.bn_momentum, epsilon=cfg.bn_epsilon, use_running_average=True, rngs=rngs
+        )
 
         # Squeeze-and-Excitation layer
-
         if 0 < se_ratio and se_ratio <= 1:
             se_channels = max(1, int(in_channels * se_ratio))
             self.se = SqueezeAndExcitation(expanded_channels, se_channels, rngs=rngs)
@@ -155,7 +208,9 @@ class MBConv(nnx.Module):
 
         # Projection phase (1x1 Conv)
         self.project_conv = nnx.Conv(expanded_channels, out_channels, kernel_size=(1, 1), use_bias=False, rngs=rngs)
-        self.bn2 = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
+        self.bn2 = nnx.BatchNorm(
+            out_channels, momentum=cfg.bn_momentum, epsilon=cfg.bn_epsilon, use_running_average=True, rngs=rngs
+        )
 
     def __call__(self, x: jax.Array, training: bool) -> jax.Array:
         identity = x
@@ -179,6 +234,7 @@ class MBConv(nnx.Module):
 
         if self.has_skip:
             x += identity
+
         return x
 
 
@@ -191,24 +247,29 @@ class EfficientNet(nnx.Module):
     def __init__(
         self,
         cfg: ModelCfg,
-        block_configs: Sequence[BlockConfig] | None = None,
+        block_configs: BlockConfigs,
         *,
         rngs: nnx.Rngs,
     ):
         super().__init__()
         self.cfg = cfg
-        if block_configs is None:
-            block_configs = DEFAULT_BLOCK_CONFIGS
-
         out_channels = round_filters(32, cfg.width_coefficient)
         self.stem_conv = nnx.Conv(
-            3, out_channels, kernel_size=(3, 3), strides=(2, 2), padding=1, use_bias=False, rngs=rngs
+            3,
+            out_channels,
+            kernel_size=(3, 3),
+            strides=(2, 2),
+            padding=cfg.stem_conv_padding,
+            use_bias=False,
+            rngs=rngs,
         )
-        self.stem_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
+        self.stem_bn = nnx.BatchNorm(
+            out_channels, momentum=cfg.bn_momentum, epsilon=cfg.bn_epsilon, use_running_average=True, rngs=rngs
+        )
 
         # Build blocks
         self.blocks = nnx.List()
-        for bc in block_configs:
+        for bc in block_configs.items:
             input_filters = round_filters(bc.input_filters, cfg.width_coefficient)
             output_filters = round_filters(bc.output_filters, cfg.width_coefficient)
             num_repeat = round_repeats(bc.num_repeat, cfg.depth_coefficient)
@@ -226,12 +287,12 @@ class EfficientNet(nnx.Module):
                         expand_ratio=bc.expand_ratio,
                         se_ratio=bc.se_ratio,
                         padding=bc.padding,
+                        cfg=cfg,
                         rngs=rngs,
                     )
                 )
-
         # Head
-        in_channels = round_filters(block_configs[-1].output_filters, cfg.width_coefficient)
+        in_channels = round_filters(block_configs.items[-1].output_filters, cfg.width_coefficient)
         out_channels = round_filters(1280, cfg.width_coefficient)
         self.head_conv = nnx.Conv(
             in_channels, out_channels, kernel_size=(1, 1), padding="SAME", use_bias=False, rngs=rngs

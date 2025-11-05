@@ -47,6 +47,7 @@ testing = [
   "torch",
   "keras_hub",
   "tensorflow",
+  "timm",
 ]
 
 models = [

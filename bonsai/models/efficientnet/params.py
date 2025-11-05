@@ -8,11 +8,12 @@ from bonsai.models.efficientnet import modeling as model_lib
 
 def create_model(
     cfg: model_lib.ModelCfg,
+    block_configs: model_lib.BlockConfigs,
     rngs: nnx.Rngs,
     mesh: jax.sharding.Mesh | None = None,
 ) -> model_lib.EfficientNet:
     """Generic EfficientNet creator."""
-    model = model_lib.EfficientNet(cfg, block_configs=model_lib.DEFAULT_BLOCK_CONFIGS, rngs=rngs)
+    model = model_lib.EfficientNet(cfg, block_configs=block_configs, rngs=rngs)
     if mesh is not None:
         graph_def, state = nnx.split(model)
         sharding = nnx.get_named_sharding(model, mesh)
@@ -23,35 +24,35 @@ def create_model(
 
 
 def EfficientNetB0(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b0(num_classes), rngs, mesh)
+    return create_model(model_lib.ModelCfg.b0(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
 
 
 def EfficientNetB1(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b1(num_classes), rngs, mesh)
+    return create_model(model_lib.ModelCfg.b1(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
 
 
 def EfficientNetB2(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b2(num_classes), rngs, mesh)
+    return create_model(model_lib.ModelCfg.b2(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
 
 
 def EfficientNetB3(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b3(num_classes), rngs, mesh)
+    return create_model(model_lib.ModelCfg.b3(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
 
 
 def EfficientNetB4(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b4(num_classes), rngs, mesh)
+    return create_model(model_lib.ModelCfg.b4(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
 
 
 def EfficientNetB5(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b5(num_classes), rngs, mesh)
+    return create_model(model_lib.ModelCfg.b5(num_classes), model_lib.BlockConfigs.tf_block_config(), rngs, mesh)
 
 
 def EfficientNetB6(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b6(num_classes), rngs, mesh)
+    return create_model(model_lib.ModelCfg.b6(num_classes), model_lib.BlockConfigs.tf_block_config(), rngs, mesh)
 
 
 def EfficientNetB7(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b7(num_classes), rngs, mesh)
+    return create_model(model_lib.ModelCfg.b7(num_classes), model_lib.BlockConfigs.tf_block_config(), rngs, mesh)
 
 
 def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
@@ -66,10 +67,6 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     """
     import timm
     import torch
-
-    # TODO(#45): Implement model versions 5-7
-    if int(model_name[-1]) >= 5:
-        raise NotImplementedError("Model implementations for versions 5-7 is still under development.")
 
     # Map to correct timm model names. Some larger models use specific checkpoints.
     timm_name_map = {
@@ -111,7 +108,7 @@ def create_name_map(cfg: model_lib.ModelCfg):
     name_map["stem_bn"] = {jax_n: f"bn1.{timm_n}" for jax_n, timm_n in bn_map.items()}
 
     # 2. Blocks
-    block_configs = model_lib.DEFAULT_BLOCK_CONFIGS
+    block_configs = model_lib.BlockConfigs.default_block_config().items
     total_jax_block_idx = 0
     for i, bc in enumerate(block_configs):
         num_repeat = model_lib.round_repeats(bc.num_repeat, cfg.depth_coefficient)
