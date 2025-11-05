@@ -1,10 +1,21 @@
-# U-Net in JAX
+# U-Net in JAX (Work in progress)
 
 This directory contains a pure JAX implementation of the [U-Net](https://arxiv.org/abs/1505.04597) with padded convolutions in its DoubleConv module, using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
 
 
+## Model Status
+
+Complete:
+1. Model implementation and colab testing.
+
+Needs work on:
+1. Loading of pretrained checkpoints in `params.py` (Example [checkpoints](https://huggingface.co/models?sort=downloads&search=unet)).
+2. Logit correctness test in `test_outputs_unet.py`.
+3. Clean up `UNet_segmentation_example.ipynb` to demonstrate proper parameter loading.
+
+
+
 ## Tested on:  
-*(Last Updated: 2025-09-19)*
 
  
 
