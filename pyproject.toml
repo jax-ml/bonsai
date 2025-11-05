@@ -5,43 +5,53 @@ authors = [
   { name = "JAX-bonsai developers", email = "jiyounha@google.com" },
 ]
 description = "A collection of lightweight, open-source models built on JAX."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 readme = "README.md"
 license = "Apache-2.0"
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-  "jax",  # "jax[tpu]" for TPU, "jax[cuda12]" for GPU.
+  "jax",
   "jaxlib",
   "jaxtyping",
-  "flax",
+  "flax >= 0.12.0",
   "jinja2",
-  "setuptools",
   "huggingface-hub",
   "transformers",  # for the tokenizer and checkpoint
-  "xprof-nightly",
-  "xprof",
 ]
 
 [project.optional-dependencies]
+densenet121 = ["h5py"]
+efficientnet = ["timm"]
+whisper = ["librosa"]
 qwen3 = []
 resnet50 = []
-sam2 = [
-  "pillow>=11.3.0",
+sam2 = ["pillow>=11.3.0"]
+vgg19 = ["h5py"]
+
+dev = [
+  "xprof",
+  "pre-commit",
 ]
-vgg19 = [
-  "h5py",
-]
+
 testing = [
+  "pytest",
+  "pytest-xdist",
   "torch",
+  "keras_hub",
+  "tensorflow",
+  "timm",
+]
+
+models = [
+  "jax-bonsai[densenet121,efficientnet,whisper,qwen3,resnet50,sam2,vgg19]",
 ]
 
 [project.urls]
@@ -58,8 +68,9 @@ include = ["bonsai*"]
 version = {attr = "bonsai.__version__"}
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py311"
 line-length = 120
+extend-include = ["*.ipynb"]
 
 [tool.ruff.lint]
 select = [
@@ -71,7 +82,7 @@ select = [
 ]
 ignore = [
   "E731",  # lambdas are allowed
-  "E501",  # don't check l gne lengths
+  "E501",  # don't check line lengths
   "F401",  # allow unused imports
   "E402",  # allow modules not at top of file
   "E741",  # allow "l" as a variable name

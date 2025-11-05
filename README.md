@@ -55,7 +55,7 @@ python bonsai/models/qwen3/tests/run_model.py
 We welcome contributions!
 If you're interested in [adding new models](CONTRIBUTING.md#contributing-a-model), improving existing implementations, or enhancing documentation, please see our [Contributing Guidelines](CONTRIBUTING.md).
 
-Join our [discord](https://discord.gg/YvVRrsXG) to socialize with other JAX enthusiasts.
+Join our [discord](https://discord.gg/9x62QwZXj7) to socialize with other JAX enthusiasts.
 
 ## Useful Links
 * [JAX](https://docs.jax.dev/en/latest/quickstart.html): Learn more about JAX, a super fast NumPy-based ML framework with automatic differentiation.
