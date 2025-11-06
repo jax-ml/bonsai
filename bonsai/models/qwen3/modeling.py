@@ -14,17 +14,14 @@
 
 import dataclasses
 from functools import partial
-from typing import Any, Tuple, TypeAlias
+from typing import Tuple, TypeAlias
 
-import flax
 import jax
 from flax import nnx
 from jax import numpy as jnp
 from jax.sharding import PartitionSpec as P
 from jax.sharding import auto_axes, get_abstract_mesh, reshard
 from jaxtyping import Array, ArrayLike
-
-from bonsai.utils import BaseSampler
 
 _K_MASK = jnp.finfo(jnp.bfloat16).min
 ShardingSpec = Tuple[str | None, ...]
@@ -46,18 +43,34 @@ class ShardingCfg:
     act_btnh: ShardingSpec
 
     @staticmethod
-    def default(is_sampling: bool = False):
-        fsdp = "fsdp" if not is_sampling else None
+    def no_sharding():
+        """Configuration with no sharding (all None)."""
         return ShardingCfg(
-            emb_vd=("tp", fsdp),
-            emb_dv=(fsdp, "tp"),
-            q_weight_ndh=("tp", fsdp, None),
-            kv_weight_ndh=("tp", fsdp, None),
-            o_weight_nhd=("tp", None, fsdp),
-            ffw_weight_df=(fsdp, "tp"),
-            ffw_weight_fd=("tp", fsdp),
+            emb_vd=(None, None),
+            emb_dv=(None, None),
+            q_weight_ndh=(None, None, None),
+            kv_weight_ndh=(None, None, None),
+            o_weight_nhd=(None, None, None),
+            ffw_weight_df=(None, None),
+            ffw_weight_fd=(None, None),
+            rms_norm=(None,),
+            act_btd=(None, None, None),
+            act_btf=(None, None, None),
+            act_btnh=(None, None, None, None),
+        )
+
+    @staticmethod
+    def default():
+        return ShardingCfg(
+            emb_vd=("tp", "fsdp"),
+            emb_dv=("fsdp", "tp"),
+            q_weight_ndh=("tp", "fsdp", None),
+            kv_weight_ndh=("tp", "fsdp", None),
+            o_weight_nhd=("tp", None, "fsdp"),
+            ffw_weight_df=("fsdp", "tp"),
+            ffw_weight_fd=("tp", "fsdp"),
             rms_norm=("tp",),
-            act_btd=("fsdp", None, None if is_sampling else "tp"),
+            act_btd=("fsdp", None, "tp"),
             act_btf=("fsdp", None, "tp"),
             act_btnh=("fsdp", None, "tp", None),
         )
@@ -77,11 +90,18 @@ class ModelCfg:
     local_rope_theta: float
     norm_eps: float
     tie_word_embeddings: bool
-    shd_cfg: ShardingCfg = ShardingCfg.default()
+    shd_cfg: ShardingCfg = ShardingCfg.no_sharding()
 
     @classmethod
-    def qwen3_0_6b(cls):  # qwen3-0.6B
-        return cls(
+    def _from_param(cls, use_sharding: bool, **kwargs):
+        if use_sharding:
+            kwargs["shd_cfg"] = ShardingCfg.default()
+        return cls(**kwargs)
+
+    @classmethod
+    def qwen3_0_6b(cls, use_sharding: bool = False):  # qwen3-0.6B
+        return cls._from_param(
+            use_sharding,
             num_layers=28,
             vocab_size=151936,
             emb_dim=1024,
@@ -97,8 +117,9 @@ class ModelCfg:
         )
 
     @classmethod
-    def qwen3_1_7b(cls):  # qwen3-1.7B
-        return cls(
+    def qwen3_1_7b(cls, use_sharding: bool = False):  # qwen3-1.7B
+        return cls._from_param(
+            use_sharding,
             num_layers=28,
             vocab_size=151936,
             emb_dim=2048,
@@ -114,8 +135,9 @@ class ModelCfg:
         )
 
     @classmethod
-    def qwen3_4b(cls):  # qwen3-4B
-        return cls(
+    def qwen3_4b(cls, use_sharding: bool = False):  # qwen3-4B
+        return cls._from_param(
+            use_sharding,
             num_layers=36,
             vocab_size=151936,
             emb_dim=2560,
@@ -131,8 +153,9 @@ class ModelCfg:
         )
 
     @classmethod
-    def qwen3_8b(cls):  # qwen3-8B
-        return cls(
+    def qwen3_8b(cls, use_sharding: bool = False):  # qwen3-8B
+        return cls._from_param(
+            use_sharding,
             num_layers=36,
             vocab_size=151936,
             emb_dim=4096,
@@ -148,30 +171,14 @@ class ModelCfg:
         )
 
     @classmethod
-    def qwen3_14b(cls):  # qwen3-14B
-        return cls(
+    def qwen3_14b(cls, use_sharding: bool = False):  # qwen3-14B
+        return cls._from_param(
+            use_sharding,
             num_layers=40,
             vocab_size=151936,
             emb_dim=5120,
             mlp_dim=17408,
             num_heads=40,
-            head_dim=128,
-            num_kv_heads=8,
-            norm_eps=1e-06,
-            rope_theta=1_000_000,
-            rope_scaling_factor=8.0,
-            local_rope_theta=1e4,
-            tie_word_embeddings=False,
-        )
-
-    @classmethod
-    def qwen3_32b(cls):  # qwen3-32B
-        return cls(
-            num_layers=64,
-            vocab_size=151936,
-            emb_dim=5120,
-            mlp_dim=25600,
-            num_heads=64,
             head_dim=128,
             num_kv_heads=8,
             norm_eps=1e-06,
@@ -190,11 +197,10 @@ def shard(x: jnp.ndarray, s: ShardingType):
 
 
 class LayerCache(nnx.Module):
-    def __init__(self, batch_size, cache_size, num_kv_heads, head_dim, dtype):
-        cache_shape = (batch_size, cache_size, num_kv_heads, head_dim)
-        shd = ShardingCfg.default().act_btnh
-        self.k_cache = nnx.Cache(shard(jnp.zeros(cache_shape, dtype=dtype), shd))
-        self.v_cache = nnx.Cache(shard(jnp.zeros(cache_shape, dtype=dtype), shd))
+    def __init__(self, cfg: ModelCfg, batch_size: int, cache_size: int, dtype: jnp.dtype):
+        cache_shape = (batch_size, cache_size, cfg.num_kv_heads, cfg.head_dim)
+        self.k_cache = nnx.Cache(shard(jnp.zeros(cache_shape, dtype=dtype), cfg.shd_cfg.act_btnh))
+        self.v_cache = nnx.Cache(shard(jnp.zeros(cache_shape, dtype=dtype), cfg.shd_cfg.act_btnh))
         self.size = self.k_cache.shape[1]
         self.start_ind = nnx.Variable(-1 * jnp.ones((batch_size,), dtype=jnp.int32))  # first non-pad ind.
         self.cur_ind = nnx.Variable(jnp.zeros((), dtype=jnp.int32))  # scalar for compute efficiency.
@@ -203,19 +209,12 @@ class LayerCache(nnx.Module):
 Cache: TypeAlias = list[LayerCache]
 
 
-def init_cache(
-    num_layers: int,
-    batch_size: int,
-    cache_size: int,
-    num_kv_heads: int,
-    head_dim: int,
-    dtype: jnp.dtype = jnp.bfloat16,
-) -> Cache:
-    return [LayerCache(batch_size, cache_size, num_kv_heads, head_dim, dtype) for _ in range(num_layers)]
+def init_cache(cfg: ModelCfg, batch_size: int, cache_size: int, dtype: jnp.dtype = jnp.bfloat16) -> Cache:
+    return [LayerCache(cfg, batch_size, cache_size, dtype) for _ in range(cfg.num_layers)]
 
 
 class Einsum(nnx.Module):
-    def __init__(self, einsum_str: str, shape: flax.typing.Shape, *, shd: ShardingSpec, rngs: nnx.Rngs):
+    def __init__(self, einsum_str: str, shape: tuple[int, ...], *, shd: ShardingSpec, rngs: nnx.Rngs):
         self.einsum_str = einsum_str
         self.shape = shape
         self.w = shard(nnx.Param(nnx.initializers.normal()(rngs.params(), shape)), shd)
@@ -241,9 +240,7 @@ class Embedder(nnx.Module):
 
 
 def _generate_pos_embeddings(
-    positions: jax.Array,
-    head_dim: int,
-    rope_theta: int = 1_000_000,
+    positions: jax.Array, head_dim: int, rope_theta: int = 1_000_000
 ) -> tuple[jax.Array, jax.Array]:
     # Forked from: jax-llm-examples/qwen3/qwen3_jax/model.py;l=571
     fraction = jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim
@@ -263,9 +260,9 @@ def apply_rope(x: jax.Array, sin: jax.Array, cos: jax.Array) -> jax.Array:
 
 
 class RMSNorm(nnx.Module):
-    def __init__(self, dim: int, *, norm_eps: float = 1e-06, shd: ShardingSpec, rngs: nnx.Rngs):
-        self.scale = shard(nnx.Param(nnx.initializers.ones_init()(rngs.params(), dim)), shd)
-        self.norm_eps = norm_eps
+    def __init__(self, dim: int, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        self.scale = shard(nnx.Param(nnx.initializers.ones_init()(rngs.params(), dim)), cfg.shd_cfg.rms_norm)
+        self.norm_eps = cfg.norm_eps
 
     @jax.named_scope("rms_norm")
     def __call__(self, x: Array) -> Array:
@@ -289,20 +286,24 @@ def compute_positions_from_segment_ids(seg_ids):
 
 
 class Attention(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, shd_cfg: ShardingCfg = ShardingCfg.default(), rngs: nnx.Rngs):
-        self.shd_cfg = shd_cfg
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        self.shd_cfg = cfg.shd_cfg
         einsum_fn = partial(Einsum, rngs=rngs)
-        self.q_proj = einsum_fn("BTD,DNH->BTNH", (cfg.emb_dim, cfg.num_heads, cfg.head_dim), shd=shd_cfg.q_weight_ndh)
+        self.q_proj = einsum_fn(
+            "BTD,DNH->BTNH", (cfg.emb_dim, cfg.num_heads, cfg.head_dim), shd=self.shd_cfg.q_weight_ndh
+        )
         self.k_proj = einsum_fn(
-            "BSD,DKH->BSKH", (cfg.emb_dim, cfg.num_kv_heads, cfg.head_dim), shd=shd_cfg.kv_weight_ndh
+            "BSD,DKH->BSKH", (cfg.emb_dim, cfg.num_kv_heads, cfg.head_dim), shd=self.shd_cfg.kv_weight_ndh
         )
         self.v_proj = einsum_fn(
-            "BSD,DKH->BSKH", (cfg.emb_dim, cfg.num_kv_heads, cfg.head_dim), shd=shd_cfg.kv_weight_ndh
+            "BSD,DKH->BSKH", (cfg.emb_dim, cfg.num_kv_heads, cfg.head_dim), shd=self.shd_cfg.kv_weight_ndh
         )
-        self.o_proj = einsum_fn("BTNH,NHD->BTD", (cfg.num_heads, cfg.head_dim, cfg.emb_dim), shd=shd_cfg.o_weight_nhd)
+        self.o_proj = einsum_fn(
+            "BTNH,NHD->BTD", (cfg.num_heads, cfg.head_dim, cfg.emb_dim), shd=self.shd_cfg.o_weight_nhd
+        )
 
-        self.q_norm = RMSNorm(cfg.head_dim, norm_eps=cfg.norm_eps, shd=shd_cfg.rms_norm, rngs=rngs)
-        self.k_norm = RMSNorm(cfg.head_dim, norm_eps=cfg.norm_eps, shd=shd_cfg.rms_norm, rngs=rngs)
+        self.q_norm = RMSNorm(cfg.head_dim, cfg, rngs=rngs)
+        self.k_norm = RMSNorm(cfg.head_dim, cfg, rngs=rngs)
         self.n_rep = cfg.num_heads // cfg.num_kv_heads
         self.scale = self.head_dim**-0.5
 
@@ -357,12 +358,12 @@ class Attention(nnx.Module):
 
 
 class MLP(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, shd_cfg: ShardingCfg = ShardingCfg.default(), rngs: nnx.Rngs):
-        self.shd_cfg = shd_cfg
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        self.shd_cfg = cfg.shd_cfg
         linear = partial(nnx.Linear, use_bias=False, rngs=rngs)
-        self.gate_proj = shard(linear(cfg.emb_dim, cfg.mlp_dim), shd_cfg.ffw_weight_df)
-        self.up_proj = shard(linear(cfg.emb_dim, cfg.mlp_dim), shd_cfg.ffw_weight_df)
-        self.down_proj = shard(linear(cfg.mlp_dim, cfg.emb_dim), shd_cfg.ffw_weight_fd)
+        self.gate_proj = shard(linear(cfg.emb_dim, cfg.mlp_dim), self.shd_cfg.ffw_weight_df)
+        self.up_proj = shard(linear(cfg.emb_dim, cfg.mlp_dim), self.shd_cfg.ffw_weight_df)
+        self.down_proj = shard(linear(cfg.mlp_dim, cfg.emb_dim), self.shd_cfg.ffw_weight_fd)
 
     @jax.named_scope("feed_forward")
     def __call__(self, x: ArrayLike) -> Array:
@@ -373,11 +374,11 @@ class MLP(nnx.Module):
 
 
 class DecoderLayer(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, shd_cfg: ShardingCfg = ShardingCfg.default(), rngs: nnx.Rngs):
-        self.input_layernorm = RMSNorm(cfg.emb_dim, norm_eps=cfg.norm_eps, shd=shd_cfg.rms_norm, rngs=rngs)
-        self.attn = Attention(cfg=cfg, shd_cfg=shd_cfg, rngs=rngs)
-        self.post_attention_layernorm = RMSNorm(cfg.emb_dim, norm_eps=cfg.norm_eps, shd=shd_cfg.rms_norm, rngs=rngs)
-        self.mlp = MLP(cfg=cfg, shd_cfg=shd_cfg, rngs=rngs)
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        self.input_layernorm = RMSNorm(cfg.emb_dim, cfg, rngs=rngs)
+        self.attn = Attention(cfg=cfg, rngs=rngs)
+        self.post_attention_layernorm = RMSNorm(cfg.emb_dim, cfg, rngs=rngs)
+        self.mlp = MLP(cfg=cfg, rngs=rngs)
 
     def __call__(self, x: Array, cache: LayerCache | None, segment_ids: Array, num_right_pads: int) -> Array:
         inputs_normalized = self.input_layernorm(x)
@@ -387,12 +388,12 @@ class DecoderLayer(nnx.Module):
 
 
 class Qwen3(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, shd_cfg: ShardingCfg = ShardingCfg.default(), rngs: nnx.Rngs):
-        self.embedder = Embedder(vocab_size=cfg.vocab_size, emb_dim=cfg.emb_dim, shd=shd_cfg.act_btd, rngs=rngs)
-        self.layers = nnx.List([DecoderLayer(cfg=cfg, shd_cfg=shd_cfg, rngs=rngs) for _ in range(cfg.num_layers)])
-        self.final_norm = RMSNorm(cfg.emb_dim, norm_eps=cfg.norm_eps, shd=shd_cfg.rms_norm, rngs=rngs)
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        self.embedder = Embedder(vocab_size=cfg.vocab_size, emb_dim=cfg.emb_dim, shd=cfg.shd_cfg.act_btd, rngs=rngs)
+        self.layers = nnx.List([DecoderLayer(cfg=cfg, rngs=rngs) for _ in range(cfg.num_layers)])
+        self.final_norm = RMSNorm(cfg.emb_dim, cfg, rngs=rngs)
         self.lm_head = Einsum(
-            einsum_str="BTD,DV->BTV", shape=(cfg.emb_dim, cfg.vocab_size), shd=shd_cfg.emb_dv, rngs=rngs
+            einsum_str="BTD,DV->BTV", shape=(cfg.emb_dim, cfg.vocab_size), shd=cfg.shd_cfg.emb_dv, rngs=rngs
         )
 
     def __call__(self, tokens, segment_ids, num_right_pads, cache):
@@ -403,19 +404,13 @@ class Qwen3(nnx.Module):
         return logits
 
 
-@partial(jax.jit, donate_argnums=(1), static_argnums=(4))
+@partial(jax.jit, donate_argnums=(1))
 def forward(
-    graphdef: nnx.GraphDef[tuple[nnx.Module, Cache]],
-    state: nnx.State,
-    tokens: Array,
-    pad_id: int,
-    sampler: BaseSampler,
-    key: jax.random.PRNGKey,
+    graphdef: nnx.GraphDef[tuple[nnx.Module, Cache]], state: nnx.State, tokens: Array, pad_id: int
 ) -> tuple[Array, nnx.State]:
     model, cache = nnx.merge(graphdef, state)
     segment_ids = 1 * (tokens != pad_id)
     num_right_pads = count_right_pads(segment_ids, out_sharding=P(None))
     logits = model(tokens, segment_ids, num_right_pads, cache)
-    next_tokens = sampler(logits[:, -num_right_pads - 1], key=key)
     state = jax.tree.leaves(nnx.state((model, cache)))
-    return next_tokens, state
+    return logits[:, -num_right_pads - 1], state
