@@ -31,7 +31,9 @@ from bonsai.utils import Sampler
 def tokenize(tokenizer, input: list[str]):
     pad_idx = tokenizer.pad_token_id
     lines = [
-        tokenizer.apply_chat_template([{"role": "user", "content": l}], tokenize=False, add_generation_prompt=True)
+        tokenizer.apply_chat_template(
+            [{"role": "user", "content": l}], tokenize=False, add_generation_prompt=True, enable_thinking=True
+        )
         for l in input
     ]
     lines = [tokenizer.encode(line) for line in lines]
@@ -84,15 +86,11 @@ def run_model():
     jax.block_until_ready(tokens_list)
     jax.profiler.stop_trace()
 
-    # measure time:
-    t = time.perf_counter()
     decode_steps = 128
     for i in range(decode_steps):
         logits, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
         next_tokens = sampler(logits, key=key)
         tokens_list.append(next_tokens)
-    jax.block_until_ready(tokens_list)
-    print(f"Time: {(time.perf_counter() - t) / decode_steps:.4f} s per step")
 
     tokens_list = jnp.concatenate(tokens_list, axis=-1)
     for i, q in enumerate(query):
