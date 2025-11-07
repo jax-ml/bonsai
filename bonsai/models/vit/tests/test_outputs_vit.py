@@ -6,6 +6,7 @@ from huggingface_hub import snapshot_download
 from transformers import ViTForImageClassification
 
 from bonsai.models.vit import params
+from bonsai.models.vit.modeling import ModelCfg
 
 
 class TestModuleForwardPasses(absltest.TestCase):
@@ -13,7 +14,8 @@ class TestModuleForwardPasses(absltest.TestCase):
         super().setUp()
         model_name = "google/vit-base-patch16-224"
         model_ckpt_path = snapshot_download(model_name)
-        self.bonsai_model = params.create_vit_from_pretrained(model_ckpt_path)
+        self.bonsai_config = ModelCfg.vit_p16_224()
+        self.bonsai_model = params.create_vit_from_pretrained(model_ckpt_path, self.bonsai_config)
         self.baseline_model = ViTForImageClassification.from_pretrained(model_name)
         self.bonsai_model.eval()
         self.baseline_model.eval()

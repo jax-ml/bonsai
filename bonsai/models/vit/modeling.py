@@ -1,6 +1,37 @@
+import dataclasses
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelCfg:
+    image_size: tuple[int, int]
+    patch_size: tuple[int, int]
+    num_channels: int
+    hidden_dim: int
+    dropout_prob: float
+    num_heads: int
+    mlp_dim: int
+    eps: float
+    num_layers: int
+    num_labels: int
+
+    @classmethod
+    def vit_p16_224(cls):
+        return cls(
+            image_size=(224, 224),
+            patch_size=(16, 16),
+            num_channels=3,
+            hidden_dim=768,
+            dropout_prob=0.0,
+            num_heads=12,
+            mlp_dim=3072,
+            eps=1e-12,
+            num_layers=12,
+            num_labels=1000,
+        )
 
 
 def interpolate_posembed(posemb: jnp.ndarray, num_tokens: int, has_class_token: bool) -> jnp.ndarray:
@@ -27,22 +58,15 @@ def interpolate_posembed(posemb: jnp.ndarray, num_tokens: int, has_class_token: 
 
 
 class Embeddings(nnx.Module):
-    def __init__(
-        self,
-        image_size: tuple[int, int],
-        patch_size: tuple[int, int],
-        num_channels: int,
-        hidden_dim: int,
-        dropout_prob: float,
-        *,
-        rngs: nnx.Rngs,
-    ):
-        num_patches = (image_size[0] // patch_size[0]) * (image_size[1] // patch_size[1])
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        num_patches = (cfg.image_size[0] // cfg.patch_size[0]) * (cfg.image_size[1] // cfg.patch_size[1])
 
-        self.projection = nnx.Conv(num_channels, hidden_dim, kernel_size=patch_size, strides=patch_size, rngs=rngs)
-        self.cls_token = nnx.Variable(jax.random.normal(rngs.params(), (1, 1, hidden_dim)))
-        self.pos_embeddings = nnx.Variable(jax.random.normal(rngs.params(), (1, num_patches + 1, hidden_dim)))
-        self.dropout = nnx.Dropout(dropout_prob, rngs=rngs)
+        self.projection = nnx.Conv(
+            cfg.num_channels, cfg.hidden_dim, kernel_size=cfg.patch_size, strides=cfg.patch_size, rngs=rngs
+        )
+        self.cls_token = nnx.Variable(jax.random.normal(rngs.params(), (1, 1, cfg.hidden_dim)))
+        self.pos_embeddings = nnx.Variable(jax.random.normal(rngs.params(), (1, num_patches + 1, cfg.hidden_dim)))
+        self.dropout = nnx.Dropout(cfg.dropout_prob, rngs=rngs)
 
     def __call__(self, pixel_values: jnp.ndarray) -> jnp.ndarray:
         embeddings = self.projection(pixel_values)
@@ -70,13 +94,15 @@ class Embeddings(nnx.Module):
 
 
 class TransformerEncoder(nnx.Module):
-    def __init__(self, num_heads: int, attn_dim: int, mlp_dim: int, dropout_prob: float, eps: float, *, rngs: nnx.Rngs):
-        self.attention = nnx.MultiHeadAttention(num_heads=num_heads, in_features=attn_dim, decode=False, rngs=rngs)
-        self.linear1 = nnx.Linear(attn_dim, mlp_dim, rngs=rngs)
-        self.linear2 = nnx.Linear(mlp_dim, attn_dim, rngs=rngs)
-        self.dropout = nnx.Dropout(dropout_prob, rngs=rngs)
-        self.layernorm_before = nnx.LayerNorm(attn_dim, epsilon=eps, rngs=rngs)
-        self.layernorm_after = nnx.LayerNorm(attn_dim, epsilon=eps, rngs=rngs)
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        self.attention = nnx.MultiHeadAttention(
+            num_heads=cfg.num_heads, in_features=cfg.hidden_dim, decode=False, rngs=rngs
+        )
+        self.linear1 = nnx.Linear(cfg.hidden_dim, cfg.mlp_dim, rngs=rngs)
+        self.linear2 = nnx.Linear(cfg.mlp_dim, cfg.hidden_dim, rngs=rngs)
+        self.dropout = nnx.Dropout(cfg.dropout_prob, rngs=rngs)
+        self.layernorm_before = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)
+        self.layernorm_after = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)
 
     def __call__(self, hidden_states, head_mask=None):
         hidden_states_norm = self.layernorm_before(hidden_states)
@@ -91,30 +117,11 @@ class TransformerEncoder(nnx.Module):
 
 
 class ViTClassificationModel(nnx.Module):
-    def __init__(
-        self,
-        image_size: tuple[int, int],
-        patch_size: tuple[int, int],
-        num_channels: int,
-        hidden_dim: int,
-        dropout_prob: float,
-        num_heads: int,
-        mlp_dim: int,
-        eps: float,
-        num_layers: int,
-        num_labels: int,
-        *,
-        rngs: nnx.Rngs,
-    ):
-        self.pos_embeddings = Embeddings(image_size, patch_size, num_channels, hidden_dim, dropout_prob, rngs=rngs)
-        self.layers = nnx.Sequential(
-            *[
-                TransformerEncoder(num_heads, hidden_dim, mlp_dim, dropout_prob, eps, rngs=rngs)
-                for _ in range(num_layers)
-            ]
-        )
-        self.ln = nnx.LayerNorm(hidden_dim, epsilon=eps, rngs=rngs)
-        self.classifier = nnx.Linear(hidden_dim, num_labels, rngs=rngs)
+    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        self.pos_embeddings = Embeddings(cfg, rngs=rngs)
+        self.layers = nnx.Sequential(*[TransformerEncoder(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
+        self.ln = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)
+        self.classifier = nnx.Linear(cfg.hidden_dim, cfg.num_labels, rngs=rngs)
 
     def __call__(self, x):
         x = self.pos_embeddings(x)
@@ -122,10 +129,6 @@ class ViTClassificationModel(nnx.Module):
         x = self.ln(x)
         x = self.classifier(x[:, 0, :])
         return x
-
-
-def ViT(num_classes: int, *, rngs: nnx.Rngs):
-    return ViTClassificationModel((224, 224), (16, 16), 3, 768, 0.0, 12, 3072, 1e-12, 12, num_classes, rngs=rngs)
 
 
 @jax.jit
