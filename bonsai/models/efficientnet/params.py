@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+import timm
 from flax import nnx
 
 from bonsai.models.efficientnet import modeling as model_lib
@@ -8,12 +9,11 @@ from bonsai.models.efficientnet import modeling as model_lib
 
 def create_model(
     cfg: model_lib.ModelCfg,
-    block_configs: model_lib.BlockConfigs,
     rngs: nnx.Rngs,
     mesh: jax.sharding.Mesh | None = None,
 ) -> model_lib.EfficientNet:
     """Generic EfficientNet creator."""
-    model = model_lib.EfficientNet(cfg, block_configs=block_configs, rngs=rngs)
+    model = model_lib.EfficientNet(cfg, rngs=rngs)
     if mesh is not None:
         graph_def, state = nnx.split(model)
         sharding = nnx.get_named_sharding(model, mesh)
@@ -21,38 +21,6 @@ def create_model(
         return nnx.merge(graph_def, state)
     else:
         return model
-
-
-def EfficientNetB0(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b0(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
-
-
-def EfficientNetB1(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b1(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
-
-
-def EfficientNetB2(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b2(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
-
-
-def EfficientNetB3(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b3(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
-
-
-def EfficientNetB4(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b4(num_classes), model_lib.BlockConfigs.default_block_config(), rngs, mesh)
-
-
-def EfficientNetB5(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b5(num_classes), model_lib.BlockConfigs.tf_block_config(), rngs, mesh)
-
-
-def EfficientNetB6(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b6(num_classes), model_lib.BlockConfigs.tf_block_config(), rngs, mesh)
-
-
-def EfficientNetB7(num_classes: int, rngs: nnx.Rngs, mesh: jax.sharding.Mesh | None = None):
-    return create_model(model_lib.ModelCfg.b7(num_classes), model_lib.BlockConfigs.tf_block_config(), rngs, mesh)
 
 
 def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
@@ -65,9 +33,6 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     Returns:
       A dictionary mapping pre-trained layer names to NumPy arrays.
     """
-    import timm
-    import torch
-
     # Map to correct timm model names. Some larger models use specific checkpoints.
     timm_name_map = {
         "efficientnet_b0": "efficientnet_b0",
@@ -82,7 +47,6 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     timm_model_name = timm_name_map.get(model_name)
     if not timm_model_name:
         raise ValueError(f"No timm mapping for '{model_name}'. Available models are: {list(timm_name_map.keys())}")
-
     m = timm.create_model(timm_model_name, pretrained=True)
     m.eval()
 
@@ -90,7 +54,7 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     return {k: v.numpy() for k, v in m.state_dict().items()}
 
 
-def create_name_map(cfg: model_lib.ModelCfg):
+def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg) -> dict:
     """
     Creates a mapping from the JAX model's parameter names to the timm model's names.
     This version correctly handles the different architectures of the MBConv blocks.
@@ -126,9 +90,7 @@ def create_name_map(cfg: model_lib.ModelCfg):
             else:  # This block handles the first MBConv layer where expand_ratio = 1
                 name_map[f"{jax_base}.depthwise_conv"] = {"kernel": f"{timm_base}.conv_dw.weight"}
                 name_map[f"{jax_base}.bn1"] = {jax_n: f"{timm_base}.bn1.{timm_n}" for jax_n, timm_n in bn_map.items()}
-                name_map[f"{jax_base}.project_conv"] = {
-                    "kernel": f"{timm_base}.conv_pw.weight"  # <--- THIS IS THE CORRECTED LINE
-                }
+                name_map[f"{jax_base}.project_conv"] = {"kernel": f"{timm_base}.conv_pw.weight"}
                 name_map[f"{jax_base}.bn2"] = {jax_n: f"{timm_base}.bn2.{timm_n}" for jax_n, timm_n in bn_map.items()}
 
             # Squeeze-and-Excitation is the same for both block types
@@ -158,7 +120,7 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
     """
     Loads pre-trained weights by directly modifying the JAX model's attributes in-place.
     """
-    name_map = create_name_map(model.cfg)
+    name_map = _get_key_and_transform_mapping(model.cfg)
 
     timm_to_jax_map = {}
     for jax_module_path, params_map in name_map.items():
@@ -198,3 +160,20 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
         param_to_update.value = jnp.array(weight_np)
 
     return model
+
+
+def create_efficientnet_from_pretrained(
+    file_dir: str,
+    config: model_lib.ModelCfg,
+    *,
+    mesh: jax.sharding.Mesh | None = None,
+):
+    """
+    Load safetensor weights from a file, then convert & merge into a flax.nnx ViT model.
+
+    Returns:
+      A flax.nnx.Model instance with loaded parameters.
+    """
+    torch_state_dict = get_timm_pretrained_weights(file_dir)
+    model = create_model(config, nnx.Rngs(0), mesh)
+    return load_pretrained_weights(model, torch_state_dict)

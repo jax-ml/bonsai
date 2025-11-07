@@ -9,12 +9,8 @@ from bonsai.models.efficientnet import modeling, params
 
 def run_model():
     # 1. Create model and PRNG keys
-    rngs = nnx.Rngs(params=0, dropout=1)
     config = modeling.ModelCfg.b0()
-    block_configs = modeling.BlockConfigs.default_block_config()
-    model = params.create_model(cfg=config, block_configs=block_configs, rngs=rngs)
-    pretrained_weights = params.get_timm_pretrained_weights("efficientnet_b0")
-    model = params.load_pretrained_weights(model, pretrained_weights)
+    model = params.create_efficientnet_from_pretrained("efficientnet_b0", config, mesh=None)
 
     # 2. Prepare dummy input
     batch_size = 4

@@ -25,25 +25,15 @@ from bonsai.models.efficientnet import modeling, params
 class TestModuleForwardPasses(parameterized.TestCase):
     def _get_models_and_input_size(version: int):
         nnx_name = f"efficientnet_b{version}"
-        if version >= 5:
-            timm_name = "tf_" + nnx_name + "_ap"
-            block_configs = modeling.BlockConfigs.tf_block_config()
-        else:
-            timm_name = nnx_name
-            block_configs = modeling.BlockConfigs.default_block_config()
+        timm_name = nnx_name if version < 5 else "tf_" + nnx_name + "_ap"
 
-        cfg = getattr(modeling.ModelCfg, f"b{version}")(1000)
+        cfg = getattr(modeling.ModelCfg, f"b{version}")()
 
-        jax_model = params.create_model(cfg, block_configs, rngs=nnx.Rngs(0), mesh=None)
-
-        # Download the pre-trained weights
-        pretrained_weights = params.get_timm_pretrained_weights(nnx_name)
-
-        nnx_model = params.load_pretrained_weights(jax_model, pretrained_weights)
+        nnx_model = params.create_efficientnet_from_pretrained(nnx_name, cfg, mesh=None)
 
         timm_model = timm.create_model(timm_name, pretrained=True)
         timm_model.eval()
-        return nnx_model, timm_model, cfg.resolution
+        return nnx_model, timm_model, nnx_model.cfg.resolution
 
     @parameterized.parameters([0, 1, 2, 3, 4, 5, 6, 7])
     def test_full(self, version: int):
