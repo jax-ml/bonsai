@@ -30,7 +30,7 @@ These are listed based on status and then alphabetically.
 | [ResNet50](bonsai/models/resnet50)            | Image classification | ✅     |         |
 | [VGG](bonsai/models/vgg19)                    | Image classification | ✅     |         |
 | [ViT](bonsai/models/vit)                      | Image classification | ⚙️     | Update to include sharding        |
-| [Llada8](bonsai/models/llada_8b/)             | Diffusion LLM        | 🟡     | Need more numerical testing        |
+| [LLaDa](bonsai/models/llada_8b/)             | Diffusion LLM        | 🟡     | Need more numerical testing        |
 | [Sam2](bonsai/models/sam2/)                   | Image segmentation   | 🟡     | Need more numerical testing        |
 | [UNet](bonsai/models/unet/)                   | Image                | 🟡     | Need a reference implementation and numerical testing        |
 | [VAE](bonsai/models/vae/)                     | Generative model     | 🟡     | Need a reference implementation and numerical testing         |
