@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
 import re
 
 import jax
-import safetensors.flax as safetensors
+import safetensors
 from etils import epath
 from flax import nnx
 
@@ -89,8 +90,8 @@ def _torch_key_to_jax_key(mapping, source_key):
     return subs[0]
 
 
-def _assign_weights(keys, tensor, state_dict, torch_key, transform, transpose_first: bool = True):
-    """Convert weights and assign to nnx state_dict."""
+def _assign_weights(keys, tensor, state_dict, torch_key, transform, sharding_dict, transpose_first: bool = True):
+    """Convert weights and assign to nnx state_dict with immediate device placement."""
     key = keys[0]
     if len(keys) == 1:
         try:
@@ -106,13 +107,15 @@ def _assign_weights(keys, tensor, state_dict, torch_key, transform, transpose_fi
 
         if tensor.shape != state_dict[key].shape:
             raise ValueError(f"shape must match for {torch_key}, got {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = tensor
+        state_dict[key] = jax.device_put(tensor, sharding_dict[key])
         return state_dict
     else:
         if key not in state_dict:
             raise ValueError(f"Unfound key {key} in {state_dict}")
         next_transpose_first = keys[0] not in ["q_proj", "k_proj", "v_proj"]
-        _assign_weights(keys[1:], tensor, state_dict[key], torch_key, transform, next_transpose_first)
+        _assign_weights(
+            keys[1:], tensor, state_dict[key], torch_key, transform, sharding_dict[key], next_transpose_first
+        )
         return state_dict
 
 
@@ -124,24 +127,27 @@ def _stoi(s):
 
 
 def create_model_from_safe_tensors(file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh) -> model_lib.Qwen3:
-    """Load tensors from the safetensors file and create a Qwen3 model."""
+    """Load tensors from the safetensors file and create a Qwen3 model (memory-optimized)."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:
         raise ValueError(f"No safetensors found in {file_dir}")
 
-    tensor_dict = {}
-    for f in files:
-        tensor_dict |= safetensors.load_file(f)
     qwen3 = nnx.eval_shape(lambda: model_lib.Qwen3(cfg, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(qwen3)
     state_dict = abs_state.to_pure_dict()
+    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
 
-    for k, v in tensor_dict.items():
-        jax_key, transform = _torch_key_to_jax_key(_get_key_and_transform_mapping(cfg), k)
-        jax_keys = [_stoi(s) for s in jax_key.split(".")]
-        _assign_weights(jax_keys, v, state_dict, k, transform)
+    key_mapping = _get_key_and_transform_mapping(cfg)
+    for f in files:
+        with safetensors.safe_open(f, framework="numpy") as sf:
+            for torch_key in sf.keys():
+                tensor = sf.get_tensor(torch_key)
+                jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+                jax_keys = [_stoi(s) for s in jax_key.split(".")]
+                _assign_weights(jax_keys, tensor, state_dict, torch_key, transform, sharding)
+        gc.collect()
+
     if cfg.tie_word_embeddings:
         state_dict["lm_head"]["w"] = state_dict["embedder"]["input_emb"].T
-    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
-    state_dict = jax.device_put(state_dict, sharding)
+    gc.collect()
     return nnx.merge(graph_def, state_dict)
