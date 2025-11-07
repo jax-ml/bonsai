@@ -14,6 +14,7 @@
 
 """SAM 2 model."""
 
+import logging
 from dataclasses import dataclass
 from functools import partial
 
@@ -583,6 +584,7 @@ class SAM2Base(nnx.Module):
         rngs: nnx.Rngs,
     ):
         super().__init__()
+        logging.warning("This model is still undergoing testing")
         self.training = False  # Inference only for now
 
         # Part 1: the image backbone

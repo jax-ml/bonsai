@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import dataclasses
+import logging
 from functools import partial
 
 import jax
@@ -91,6 +92,7 @@ class UNet(nnx.Module):
     """
 
     def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        logging.warning("This model does not load weights from a reference implementation.")
         features = cfg.features
         self.inc = DoubleConv(cfg.in_channels, features[0], rngs=rngs)
         self.down1 = Down(features[0], features[1], rngs=rngs)
