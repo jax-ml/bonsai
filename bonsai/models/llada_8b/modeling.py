@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import math
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -612,6 +613,7 @@ class LLaDAOutput(NamedTuple):
 
 class LLaDAModel(nnx.Module):
     def __init__(self, cfg: ModelConfig, *, rngs):
+        logging.warning("This model is still undergoing testing")
         self.cfg = cfg
         # Token embedding
         self.wte = nnx.Embed(self.cfg.vocab_size, self.cfg.d_model, rngs=rngs)

@@ -1,6 +1,7 @@
 # whisper modeling
 
 import dataclasses
+import logging
 import math
 
 import jax
@@ -364,6 +365,7 @@ class WhisperDecoder(nnx.Module):
 
 class Whisper(nnx.Module):
     def __init__(self, config: ModelCfg, *, rngs: nnx.Rngs):
+        logging.warning("This model is under active development.")
         self.encoder = WhisperEncoder(config, rngs=rngs)
         self.decoder = WhisperDecoder(config, rngs=rngs)
 
