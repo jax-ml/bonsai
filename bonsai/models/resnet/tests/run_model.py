@@ -19,8 +19,8 @@ import jax
 import jax.numpy as jnp
 from huggingface_hub import snapshot_download
 
-from bonsai.models.resnet50 import modeling as model_lib
-from bonsai.models.resnet50 import params
+from bonsai.models.resnet import modeling as model_lib
+from bonsai.models.resnet import params
 
 
 def run_model(MODEL_CP_PATH=None):
@@ -28,7 +28,8 @@ def run_model(MODEL_CP_PATH=None):
     model_ckpt_path = snapshot_download("microsoft/resnet-50")
 
     # 2. Load pretrained model
-    model = params.create_resnet50_from_pretrained(model_ckpt_path)
+    config = model_lib.ModelCfg.resnet50()
+    model = params.create_resnet_from_pretrained(model_ckpt_path, config)
 
     # 3. Prepare dummy input
     batch_size = 8

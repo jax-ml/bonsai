@@ -18,6 +18,7 @@ import re
 from enum import Enum
 
 import jax
+import jax.numpy as jnp
 import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
@@ -209,6 +210,7 @@ def _st_key_to_jax_key(mapping, source_key):
     return subs[0]
 
 
+# TODO: Update to load in jnp.arrays
 def _assign_weights(keys, tensor, state_dict, st_key, transform, dtype):
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
     key, *rest = keys
@@ -225,7 +227,7 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform, dtype):
             raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
         if dtype is not None:
             tensor = tensor.astype(dtype)
-        state_dict[key] = tensor
+        state_dict[key] = jnp.array(tensor)
     else:
         _assign_weights(rest, tensor, state_dict[key], st_key, transform, dtype)
 
