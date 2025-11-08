@@ -3,6 +3,8 @@ import jax.numpy as jnp
 import torch
 from absl.testing import absltest
 from huggingface_hub import snapshot_download
+from jax.sharding import AxisType
+from jax.sharding import PartitionSpec as P
 from jax.typing import DTypeLike
 from transformers import AutoTokenizer
 from transformers.cache_utils import DynamicCache
@@ -21,11 +23,11 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         ## models
         self.torch_model = Qwen3ForCausalLM.from_pretrained(model_name, dtype="auto").eval()
-        self.bonsai_config = modeling.ModelCfg.qwen3_0_6b()
+        self.bonsai_config = modeling.ModelCfg.qwen3_0_6b(use_sharding=False)
         model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
-        self.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"))
-        with self.mesh:
-            self.nnx_model = params.create_model_from_safe_tensors(model_ckpt_path, self.bonsai_config, self.mesh)
+        self.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        jax.set_mesh(self.mesh)
+        self.nnx_model = params.create_model_from_safe_tensors(model_ckpt_path, self.bonsai_config, self.mesh)
 
         self.batch_size = 32
         self.num_input_tokens = 5
@@ -84,7 +86,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         """Forward pass for the nnx model"""
         segment_ids = 1 * (tokens != self.tokenizer.pad_token_id)
         x = self.nnx_model.embedder.encode(tokens).astype(dtype)
-        right_pads = modeling.num_right_pad(segment_ids[0])
+        right_pads = modeling.count_right_pads(segment_ids, out_sharding=P(None))
         for i, layer in enumerate(self.nnx_model.layers):
             x = layer(x, cache[i], segment_ids, right_pads).astype(dtype)
         nnx_logits = self.nnx_model.lm_head(self.nnx_model.final_norm(x))
@@ -109,22 +111,16 @@ class TestModuleForwardPasses(absltest.TestCase):
         return model_inputs
 
     def _init_nnx_cache(self, batch_size: int):
-        with self.mesh:
-            return modeling.init_cache(
-                num_layers=self.bonsai_config.num_layers,
-                batch_size=batch_size,
-                cache_size=self.cache_size,
-                num_kv_heads=self.bonsai_config.num_kv_heads,
-                head_dim=self.bonsai_config.head_dim,
-                dtype=jnp.float32,
-            )
+        return modeling.init_cache(
+            cfg=self.bonsai_config, batch_size=batch_size, cache_size=self.cache_size, dtype=jnp.float32
+        )
 
     def test_embedder(self):
         nm = self.nnx_model.embedder
         tm = self.torch_model.model.embed_tokens
 
         tx = torch.randint(0, self.torch_model.config.vocab_size, size=(self.batch_size, self.num_input_tokens))
-        jx = tx.cpu().detach().numpy()
+        jx = jnp.array(tx.cpu().detach().numpy())
 
         jy, ty = nm.encode(jx), tm(tx)
         torch.testing.assert_close(torch.tensor(jy), ty)

@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from functools import partial
 from itertools import pairwise
 from typing import Sequence
@@ -62,6 +63,7 @@ class VAE(nnx.Module):
     """Full Variational Autoencoder model."""
 
     def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+        logging.warning("This model does not load weights from a reference implementation.")
         self.cfg = cfg
         self.encoder = Encoder(cfg, rngs=rngs)
         self.decoder = Decoder(cfg, rngs=rngs)

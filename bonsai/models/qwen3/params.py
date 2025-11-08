@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
 import re
+from enum import Enum
 
 import jax
-import safetensors.flax as safetensors
+import safetensors
 from etils import epath
 from flax import nnx
 
@@ -23,58 +25,39 @@ from bonsai.models.qwen3 import modeling as model_lib
 
 
 def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
+    class Transform(Enum):
+        """Transformations for model parameters"""
+
+        BIAS = None
+        LINEAR = ((1, 0), None, False)
+        EMBED = None
+        ATTN_Q = ((2, 0, 1), (cfg.num_heads, cfg.head_dim, cfg.emb_dim), True)
+        ATTN_KV = ((2, 0, 1), (cfg.num_kv_heads, cfg.head_dim, cfg.emb_dim), True)
+        ATTN_OUT = ((1, 0), (cfg.num_heads, cfg.head_dim, cfg.emb_dim), False)
+        SCALE = None
+
     # Mapping of torch_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     return {
-        r"model\.embed_tokens\.weight": ("embedder.input_emb", None),
-        r"model\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (
-            r"layers.\1.attn.q_proj.w",
-            ((2, 0, 1), (cfg.num_heads, cfg.head_dim, cfg.emb_dim)),
-        ),
-        r"model\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (
-            r"layers.\1.attn.k_proj.w",
-            ((2, 0, 1), (cfg.num_kv_heads, cfg.head_dim, cfg.emb_dim)),
-        ),
-        r"model\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (
-            r"layers.\1.attn.v_proj.w",
-            ((2, 0, 1), (cfg.num_kv_heads, cfg.head_dim, cfg.emb_dim)),
-        ),
-        r"model\.layers\.([0-9]+)\.self_attn\.o_proj\.weight": (
-            r"layers.\1.attn.o_proj.w",
-            ((1, 0), (cfg.num_heads, cfg.head_dim, cfg.emb_dim)),
-        ),
+        r"model\.embed_tokens\.weight": ("embedder.input_emb", Transform.EMBED),
+        r"model\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (r"layers.\1.attn.q_proj.w", Transform.ATTN_Q),
+        r"model\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (r"layers.\1.attn.k_proj.w", Transform.ATTN_KV),
+        r"model\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (r"layers.\1.attn.v_proj.w", Transform.ATTN_KV),
+        r"model\.layers\.([0-9]+)\.self_attn\.o_proj\.weight": (r"layers.\1.attn.o_proj.w", Transform.ATTN_OUT),
         # mlp
-        r"model\.layers\.([0-9]+)\.mlp\.gate_proj\.weight": (
-            r"layers.\1.mlp.gate_proj.kernel",
-            ((1, 0), None),
-        ),
-        r"model\.layers\.([0-9]+)\.mlp\.up_proj\.weight": (
-            r"layers.\1.mlp.up_proj.kernel",
-            ((1, 0), None),
-        ),
-        r"model\.layers\.([0-9]+)\.mlp\.down_proj\.weight": (
-            r"layers.\1.mlp.down_proj.kernel",
-            ((1, 0), None),
-        ),
-        r"model\.norm\.weight": ("final_norm.scale", None),
+        r"model\.layers\.([0-9]+)\.mlp\.gate_proj\.weight": (r"layers.\1.mlp.gate_proj.kernel", Transform.LINEAR),
+        r"model\.layers\.([0-9]+)\.mlp\.up_proj\.weight": (r"layers.\1.mlp.up_proj.kernel", Transform.LINEAR),
+        r"model\.layers\.([0-9]+)\.mlp\.down_proj\.weight": (r"layers.\1.mlp.down_proj.kernel", Transform.LINEAR),
+        r"model\.norm\.weight": ("final_norm.scale", Transform.SCALE),
         # norms
-        r"model\.layers\.([0-9]+)\.self_attn\.q_norm\.weight": (
-            r"layers.\1.attn.q_norm.scale",
-            None,
-        ),
-        r"model\.layers\.([0-9]+)\.self_attn\.k_norm\.weight": (
-            r"layers.\1.attn.k_norm.scale",
-            None,
-        ),
+        r"model\.layers\.([0-9]+)\.self_attn\.q_norm\.weight": (r"layers.\1.attn.q_norm.scale", Transform.SCALE),
+        r"model\.layers\.([0-9]+)\.self_attn\.k_norm\.weight": (r"layers.\1.attn.k_norm.scale", Transform.SCALE),
         # layer norms (pre/post attention)
-        r"model\.layers\.([0-9]+)\.input_layernorm\.weight": (
-            r"layers.\1.input_layernorm.scale",
-            None,
-        ),
+        r"model\.layers\.([0-9]+)\.input_layernorm\.weight": (r"layers.\1.input_layernorm.scale", Transform.SCALE),
         r"model\.layers\.([0-9]+)\.post_attention_layernorm\.weight": (
             r"layers.\1.post_attention_layernorm.scale",
-            None,
+            Transform.SCALE,
         ),
-        r"lm_head\.weight": ("lm_head.w", ((1, 0), None)),
+        r"lm_head\.weight": ("lm_head.w", Transform.LINEAR),
     }
 
 
@@ -89,31 +72,23 @@ def _torch_key_to_jax_key(mapping, source_key):
     return subs[0]
 
 
-def _assign_weights(keys, tensor, state_dict, torch_key, transform, transpose_first: bool = True):
-    """Convert weights and assign to nnx state_dict."""
-    key = keys[0]
-    if len(keys) == 1:
-        try:
-            if transform is not None:
-                permute, reshape = transform
-                if transpose_first:
-                    tensor = tensor.transpose(permute) if permute else tensor
-                tensor = tensor.reshape(reshape) if reshape else tensor
-                if not transpose_first:
-                    tensor = tensor.transpose(permute) if permute else tensor
-        except Exception as e:
-            raise RuntimeError(f"Failed to transform tensor {torch_key} with shape {tensor.shape}: {e}") from e
-
+def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
+    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
+    key, *rest = keys
+    if not rest:
+        if transform is not None:
+            permute, reshape, reshape_first = transform
+            if reshape_first and reshape is not None:
+                tensor = tensor.reshape(reshape)
+            if permute:
+                tensor = tensor.transpose(permute)
+            if not reshape_first and reshape is not None:
+                tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"shape must match for {torch_key}, got {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = tensor
-        return state_dict
+            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
+        state_dict[key] = jax.device_put(tensor, sharding_dict[key])
     else:
-        if key not in state_dict:
-            raise ValueError(f"Unfound key {key} in {state_dict}")
-        next_transpose_first = keys[0] not in ["q_proj", "k_proj", "v_proj"]
-        _assign_weights(keys[1:], tensor, state_dict[key], torch_key, transform, next_transpose_first)
-        return state_dict
+        _assign_weights(rest, tensor, state_dict[key], st_key, transform, sharding_dict[key])
 
 
 def _stoi(s):
@@ -124,24 +99,41 @@ def _stoi(s):
 
 
 def create_model_from_safe_tensors(file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh) -> model_lib.Qwen3:
-    """Load tensors from the safetensors file and create a Qwen3 model."""
+    """Load tensors from the safetensors file and create a Qwen3 model (memory-optimized)."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:
         raise ValueError(f"No safetensors found in {file_dir}")
 
-    tensor_dict = {}
-    for f in files:
-        tensor_dict |= safetensors.load_file(f)
     qwen3 = nnx.eval_shape(lambda: model_lib.Qwen3(cfg, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(qwen3)
     state_dict = abs_state.to_pure_dict()
+    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
 
-    for k, v in tensor_dict.items():
-        jax_key, transform = _torch_key_to_jax_key(_get_key_and_transform_mapping(cfg), k)
-        jax_keys = [_stoi(s) for s in jax_key.split(".")]
-        _assign_weights(jax_keys, v, state_dict, k, transform)
+    key_mapping = _get_key_and_transform_mapping(cfg)
+    conversion_errors = []
+    for f in files:
+        with safetensors.safe_open(f, framework="numpy") as sf:
+            for torch_key in sf.keys():
+                tensor = sf.get_tensor(torch_key)
+
+                jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+                if jax_key is None:
+                    continue
+                keys = [_stoi(k) for k in jax_key.split(".")]
+                try:
+                    _assign_weights(keys, tensor, state_dict, torch_key, transform.value, sharding)
+                except Exception as e:
+                    full_jax_key = ".".join([str(k) for k in keys])
+                    conversion_errors.append(
+                        f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}"
+                    )
+        gc.collect()
+
+    if conversion_errors:
+        full_error_log = "\n".join(conversion_errors)
+        raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
+
     if cfg.tie_word_embeddings:
         state_dict["lm_head"]["w"] = state_dict["embedder"]["input_emb"].T
-    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
-    state_dict = jax.device_put(state_dict, sharding)
+    gc.collect()
     return nnx.merge(graph_def, state_dict)
