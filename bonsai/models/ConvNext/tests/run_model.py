@@ -6,13 +6,12 @@ import jax.numpy as jnp
 from flax import nnx
 from huggingface_hub import snapshot_download
 
-# Import your ConvNeXt-specific modules
 from bonsai.models.ConvNext import modeling as model_lib
 from bonsai.models.ConvNext import params
 
 
 def run_model():
-    # --- 1. Download Model Weights ---
+    # 1. Download Model Weights
     model_name = "facebook/convnext-large-224"
     model_ckpt_path = snapshot_download(
         repo_id=model_name,
@@ -20,7 +19,7 @@ def run_model():
     )
     print(f"Downloaded Keras weights from: {model_name}")
 
-    # --- 2. Load Pretrained Model ---
+    # 2. Load Pretrained Model
 
     model = params._create_convnext_from_pretrained(
         model_cls=model_lib.ConvNeXt,
@@ -30,14 +29,14 @@ def run_model():
     
     graphdef, state = nnx.split(model)
     
-    # --- Dummy Input ---
+    # 3. Prepare dummy input
     batch_size, channels, image_size = 8, 3, 224
     dummy_input = jnp.ones((batch_size, image_size, image_size, channels), dtype=jnp.float32)
 
     key = jax.random.PRNGKey(0)
     key, warmup_key, prof_key, time_key = jax.random.split(key, 4)
 
-    # --- Warmup  ---
+    # 4. Warmup + profiling 
     
     _ = model_lib.forward(
         graphdef, 
@@ -47,7 +46,7 @@ def run_model():
         train=False
     ).block_until_ready()
 
-    # --- 5. Profile a Few Steps ---
+    # Profile a Few Steps 
     
     prof_keys = jax.random.split(prof_key, 5)
     
@@ -64,7 +63,7 @@ def run_model():
     jax.profiler.stop_trace()
     print("Profiling complete. Trace saved to /tmp/profile-convnext")
 
-    # --- 6. Timed Execution ---
+    # 5. Timed execution
     
     time_keys = jax.random.split(time_key, 10)
     
@@ -82,7 +81,7 @@ def run_model():
     print(f"Step time: {step_time:.4f} s")
     print(f"Throughput: {batch_size / step_time:.2f} images/s")
 
-    # --- 7. Show Top-1 Predicted Class ---
+    # 6. Show Top-1 Predicted Class 
     
     pred = jnp.argmax(logits, axis=-1)
     print("Predicted classes (batch):", pred)
