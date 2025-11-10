@@ -25,7 +25,7 @@ from bonsai.models.unet import modeling, params
 def run_model():
     # 1. Create model and PRNG key
     rngs = nnx.Rngs(params=0)
-    config = modeling.ModelCfg(in_channels=3, num_classes=1)  # Example: RGB input, binary output
+    config = modeling.ModelConfig(in_channels=3, num_classes=1)  # Example: RGB input, binary output
     model = params.create_model(cfg=config, rngs=rngs)
 
     # 2. Prepare dummy input

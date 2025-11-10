@@ -21,7 +21,7 @@ from flax import nnx
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     num_classes: int
     dense_block_layers: list[int]
     growth_rate: int
@@ -82,7 +82,7 @@ class TransitionLayer(nnx.Module):
 
 
 class DenseNet(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.init_conv = nnx.Conv(
             3, 2 * cfg.growth_rate, kernel_size=(7, 7), strides=(2, 2), padding="SAME", use_bias=False, rngs=rngs
         )

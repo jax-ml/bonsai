@@ -19,7 +19,7 @@ from bonsai.models.unet import modeling as model_lib
 
 
 def create_model(
-    cfg: model_lib.ModelCfg,
+    cfg: model_lib.ModelConfig,
     rngs: nnx.Rngs,
     mesh: jax.sharding.Mesh | None = None,
 ) -> model_lib.UNet:

@@ -77,7 +77,7 @@ class ShardingCfg:
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     num_layers: int
     vocab_size: int
     emb_dim: int
@@ -197,7 +197,7 @@ def shard(x: jnp.ndarray, s: ShardingType):
 
 
 class LayerCache(nnx.Module):
-    def __init__(self, cfg: ModelCfg, batch_size: int, cache_size: int, dtype: jnp.dtype):
+    def __init__(self, cfg: ModelConfig, batch_size: int, cache_size: int, dtype: jnp.dtype):
         cache_shape = (batch_size, cache_size, cfg.num_kv_heads, cfg.head_dim)
         self.k_cache = nnx.Cache(shard(jnp.zeros(cache_shape, dtype=dtype), cfg.shd_cfg.act_btnh))
         self.v_cache = nnx.Cache(shard(jnp.zeros(cache_shape, dtype=dtype), cfg.shd_cfg.act_btnh))
@@ -209,7 +209,7 @@ class LayerCache(nnx.Module):
 Cache: TypeAlias = list[LayerCache]
 
 
-def init_cache(cfg: ModelCfg, batch_size: int, cache_size: int, dtype: jnp.dtype = jnp.bfloat16) -> Cache:
+def init_cache(cfg: ModelConfig, batch_size: int, cache_size: int, dtype: jnp.dtype = jnp.bfloat16) -> Cache:
     return [LayerCache(cfg, batch_size, cache_size, dtype) for _ in range(cfg.num_layers)]
 
 
@@ -260,7 +260,7 @@ def apply_rope(x: jax.Array, sin: jax.Array, cos: jax.Array) -> jax.Array:
 
 
 class RMSNorm(nnx.Module):
-    def __init__(self, dim: int, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, dim: int, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.scale = shard(nnx.Param(nnx.initializers.ones_init()(rngs.params(), dim)), cfg.shd_cfg.rms_norm)
         self.norm_eps = cfg.norm_eps
 
@@ -286,7 +286,7 @@ def compute_positions_from_segment_ids(seg_ids):
 
 
 class Attention(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.shd_cfg = cfg.shd_cfg
         einsum_fn = partial(Einsum, rngs=rngs)
         self.q_proj = einsum_fn(
@@ -358,7 +358,7 @@ class Attention(nnx.Module):
 
 
 class MLP(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.shd_cfg = cfg.shd_cfg
         linear = partial(nnx.Linear, use_bias=False, rngs=rngs)
         self.gate_proj = shard(linear(cfg.emb_dim, cfg.mlp_dim), self.shd_cfg.ffw_weight_df)
@@ -374,7 +374,7 @@ class MLP(nnx.Module):
 
 
 class DecoderLayer(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.input_layernorm = RMSNorm(cfg.emb_dim, cfg, rngs=rngs)
         self.attn = Attention(cfg=cfg, rngs=rngs)
         self.post_attention_layernorm = RMSNorm(cfg.emb_dim, cfg, rngs=rngs)
@@ -388,7 +388,7 @@ class DecoderLayer(nnx.Module):
 
 
 class Qwen3(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.embedder = Embedder(vocab_size=cfg.vocab_size, emb_dim=cfg.emb_dim, shd=cfg.shd_cfg.act_btd, rngs=rngs)
         self.layers = nnx.List([DecoderLayer(cfg=cfg, rngs=rngs) for _ in range(cfg.num_layers)])
         self.final_norm = RMSNorm(cfg.emb_dim, cfg, rngs=rngs)

@@ -27,7 +27,7 @@ def run_model():
     model_ckpt_path = snapshot_download("keras/vgg_19_imagenet")
 
     # 2. Load pretrained model
-    config = modeling.ModelCfg.vgg_19()
+    config = modeling.ModelConfig.vgg_19()
     model = params.create_model_from_h5(model_ckpt_path, config)
     graphdef, state = nnx.split(model)
     state = jax.tree.leaves(state)
