@@ -30,7 +30,7 @@ def run_model():
     model_ckpt_path = snapshot_download(model_name)
 
     # Load pretrained model
-    model = params.create_vit_from_pretrained(model_ckpt_path, model_lib.ModelCfg.vit_p16_224())
+    model = params.create_vit_from_pretrained(model_ckpt_path, model_lib.ModelConfig.vit_p16_224())
     graphdef, state = nnx.split(model)
     flat_state = jax.tree.leaves(state)
 

@@ -23,7 +23,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         ## models
         self.torch_model = Qwen3ForCausalLM.from_pretrained(model_name, dtype="auto").eval()
-        self.bonsai_config = modeling.ModelCfg.qwen3_0_6b(use_sharding=False)
+        self.bonsai_config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
         model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
         self.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(self.mesh)

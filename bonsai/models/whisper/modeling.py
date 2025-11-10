@@ -105,7 +105,7 @@ SUPPRESS_TOKENS: list[int] = [
 # TODO: Double check all the numbers
 # So far, tests are all passing. Should still double check before final version.
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     activation_dropout: float
     activation_function: str
     apply_spec_augment: bool
@@ -209,7 +209,7 @@ def custom_gelu(x: Array) -> Array:
 
 
 class WhisperEncoderLayer(nnx.Module):
-    def __init__(self, config: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
         # TODO: Need to update the bias. This will work for now since 0 initialized
         self.self_attn = nnx.MultiHeadAttention(
             num_heads=config.encoder_attention_heads,
@@ -246,7 +246,7 @@ class WhisperEncoderLayer(nnx.Module):
 
 
 class WhisperEncoder(nnx.Module):
-    def __init__(self, config: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
         self.conv1 = nnx.Conv(config.num_mel_bins, config.d_model, kernel_size=3, strides=1, padding=1, rngs=rngs)
         self.conv2 = nnx.Conv(config.d_model, config.d_model, kernel_size=3, strides=2, padding=1, rngs=rngs)
         self.embed_positions = nnx.Embed(config.max_source_positions, config.d_model, rngs=rngs)
@@ -268,7 +268,7 @@ class WhisperEncoder(nnx.Module):
 
 
 class WhisperDecoderLayer(nnx.Module):
-    def __init__(self, config: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
         self.self_attn = nnx.MultiHeadAttention(
             num_heads=config.encoder_attention_heads,
             in_features=config.d_model,
@@ -336,7 +336,7 @@ class WhisperDecoderLayer(nnx.Module):
 
 
 class WhisperDecoder(nnx.Module):
-    def __init__(self, config: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
         self.embed_tokens = nnx.Embed(config.vocab_size, config.d_model, rngs=rngs)
         self.embed_positions = nnx.Embed(config.max_length, config.d_model, rngs=rngs)
         self.layers = nnx.List([WhisperDecoderLayer(config, rngs=rngs) for _ in range(config.decoder_layers)])
@@ -364,7 +364,7 @@ class WhisperDecoder(nnx.Module):
 
 
 class Whisper(nnx.Module):
-    def __init__(self, config: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
         logging.warning("This model is under active development.")
         self.encoder = WhisperEncoder(config, rngs=rngs)
         self.decoder = WhisperDecoder(config, rngs=rngs)

@@ -16,6 +16,7 @@
 
 import logging
 import re
+from enum import Enum
 
 import jax
 import jax.numpy as np
@@ -28,50 +29,58 @@ from bonsai.models.llada_8b import modeling as model_lib
 
 def _get_key_and_transform_mapping():
     # Maps safetensor keys → (JAX nnx key template, no transform needed)
+    class Transform(Enum):
+        """Transformations for model parameters"""
+
+        BIAS = None
+        LINEAR = ((1, 0), None)
+        EMBED = None
+        LN_SCALE = None
+
     mapping = {
         # Embeddings
-        r"^wte\.weight$": ("wte.embedding", None),
-        r"^wpe\.weight$": ("wpe.embedding", None),
+        r"^wte\.weight$": ("wte.embedding", Transform.EMBED),
+        r"^wpe\.weight$": ("wpe.embedding", Transform.EMBED),
         # Final LayerNorm
-        r"^ln_f\.weight$": ("ln_f.scale", None),
-        r"^ln_f\.bias$": ("ln_f.bias", None),
+        r"^ln_f\.weight$": ("ln_f.scale", Transform.LN_SCALE),
+        r"^ln_f\.bias$": ("ln_f.bias", Transform.BIAS),
         # Transformer Blocks
         # Block-level norms
-        r"^blocks\.([0-9]+)\.attn_norm\.weight$": (r"blocks.\1.attn_norm.scale", None),
-        r"^blocks\.([0-9]+)\.attn_norm\.bias$": (r"blocks.\1.attn_norm.bias", None),
-        r"^blocks\.([0-9]+)\.ff_norm\.weight$": (r"blocks.\1.ff_norm.scale", None),
-        r"^blocks\.([0-9]+)\.ff_norm\.bias$": (r"blocks.\1.ff_norm.bias", None),
+        r"^blocks\.([0-9]+)\.attn_norm\.weight$": (r"blocks.\1.attn_norm.scale", Transform.LN_SCALE),
+        r"^blocks\.([0-9]+)\.attn_norm\.bias$": (r"blocks.\1.attn_norm.bias", Transform.BIAS),
+        r"^blocks\.([0-9]+)\.ff_norm\.weight$": (r"blocks.\1.ff_norm.scale", Transform.LN_SCALE),
+        r"^blocks\.([0-9]+)\.ff_norm\.bias$": (r"blocks.\1.ff_norm.bias", Transform.BIAS),
         # Optional per-head Q/K norms (if attention_layer_norm=True)
-        r"^blocks\.([0-9]+)\.q_norm\.weight$": (r"blocks.\1.q_norm.scale", None),
-        r"^blocks\.([0-9]+)\.q_norm\.bias$": (r"blocks.\1.q_norm.bias", None),
-        r"^blocks\.([0-9]+)\.k_norm\.weight$": (r"blocks.\1.k_norm.scale", None),
-        r"^blocks\.([0-9]+)\.k_norm\.bias$": (r"blocks.\1.k_norm.bias", None),
+        r"^blocks\.([0-9]+)\.q_norm\.weight$": (r"blocks.\1.q_norm.scale", Transform.LN_SCALE),
+        r"^blocks\.([0-9]+)\.q_norm\.bias$": (r"blocks.\1.q_norm.bias", Transform.BIAS),
+        r"^blocks\.([0-9]+)\.k_norm\.weight$": (r"blocks.\1.k_norm.scale", Transform.LN_SCALE),
+        r"^blocks\.([0-9]+)\.k_norm\.bias$": (r"blocks.\1.k_norm.bias", Transform.BIAS),
         # Attention projections
         # SEQUENTIAL variant: fused Q‖K‖V
-        r"^blocks\.([0-9]+)\.att_proj\.weight$": (r"blocks.\1.att_proj.kernel", ((1, 0), None)),
-        r"^blocks\.([0-9]+)\.att_proj\.bias$": (r"blocks.\1.att_proj.bias", None),
+        r"^blocks\.([0-9]+)\.att_proj\.weight$": (r"blocks.\1.att_proj.kernel", Transform.LINEAR),
+        r"^blocks\.([0-9]+)\.att_proj\.bias$": (r"blocks.\1.att_proj.bias", Transform.BIAS),
         # LLAMA variant: split Q / K / V
-        r"^blocks\.([0-9]+)\.q_proj\.weight$": (r"blocks.\1.q_proj.kernel", ((1, 0), None)),
-        r"^blocks\.([0-9]+)\.q_proj\.bias$": (r"blocks.\1.q_proj.bias", None),
-        r"^blocks\.([0-9]+)\.k_proj\.weight$": (r"blocks.\1.k_proj.kernel", ((1, 0), None)),
-        r"^blocks\.([0-9]+)\.k_proj\.bias$": (r"blocks.\1.k_proj.bias", None),
-        r"^blocks\.([0-9]+)\.v_proj\.weight$": (r"blocks.\1.v_proj.kernel", ((1, 0), None)),
-        r"^blocks\.([0-9]+)\.v_proj\.bias$": (r"blocks.\1.v_proj.bias", None),
+        r"^blocks\.([0-9]+)\.q_proj\.weight$": (r"blocks.\1.q_proj.kernel", Transform.LINEAR),
+        r"^blocks\.([0-9]+)\.q_proj\.bias$": (r"blocks.\1.q_proj.bias", Transform.BIAS),
+        r"^blocks\.([0-9]+)\.k_proj\.weight$": (r"blocks.\1.k_proj.kernel", Transform.LINEAR),
+        r"^blocks\.([0-9]+)\.k_proj\.bias$": (r"blocks.\1.k_proj.bias", Transform.BIAS),
+        r"^blocks\.([0-9]+)\.v_proj\.weight$": (r"blocks.\1.v_proj.kernel", Transform.LINEAR),
+        r"^blocks\.([0-9]+)\.v_proj\.bias$": (r"blocks.\1.v_proj.bias", Transform.BIAS),
         # Attention output projection (common)
-        r"^blocks\.([0-9]+)\.attn_out\.weight$": (r"blocks.\1.attn_out.kernel", ((1, 0), None)),
-        r"^blocks\.([0-9]+)\.attn_out\.bias$": (r"blocks.\1.attn_out.bias", None),
+        r"^blocks\.([0-9]+)\.attn_out\.weight$": (r"blocks.\1.attn_out.kernel", Transform.LINEAR),
+        r"^blocks\.([0-9]+)\.attn_out\.bias$": (r"blocks.\1.attn_out.bias", Transform.BIAS),
         # MLP / Feed-Forward
         # SEQUENTIAL (plain FFN or SwiGLU single-proj input)
-        r"^blocks\.([0-9]+)\.ff_proj\.weight$": (r"blocks.\1.ff_proj.kernel", ((1, 0), None)),
-        r"^blocks\.([0-9]+)\.ff_proj\.bias$": (r"blocks.\1.ff_proj.bias", None),
-        r"^blocks\.([0-9]+)\.ff_out\.weight$": (r"blocks.\1.ff_out.kernel", ((1, 0), None)),
-        r"^blocks\.([0-9]+)\.ff_out\.bias$": (r"blocks.\1.ff_out.bias", None),
+        r"^blocks\.([0-9]+)\.ff_proj\.weight$": (r"blocks.\1.ff_proj.kernel", Transform.LINEAR),
+        r"^blocks\.([0-9]+)\.ff_proj\.bias$": (r"blocks.\1.ff_proj.bias", Transform.BIAS),
+        r"^blocks\.([0-9]+)\.ff_out\.weight$": (r"blocks.\1.ff_out.kernel", Transform.LINEAR),
+        r"^blocks\.([0-9]+)\.ff_out\.bias$": (r"blocks.\1.ff_out.bias", Transform.BIAS),
         # LLAMA (gate/up style)
-        r"^blocks\.([0-9]+)\.up_proj\.weight$": (r"blocks.\1.up_proj.kernel", ((1, 0), None)),
-        r"^blocks\.([0-9]+)\.up_proj\.bias$": (r"blocks.\1.up_proj.bias", None),  # include if present
+        r"^blocks\.([0-9]+)\.up_proj\.weight$": (r"blocks.\1.up_proj.kernel", Transform.LINEAR),
+        r"^blocks\.([0-9]+)\.up_proj\.bias$": (r"blocks.\1.up_proj.bias", Transform.BIAS),  # include if present
         # Untied LM head (only if weight_tying == False)
-        r"^ff_out\.weight$": ("ff_out.kernel", ((1, 0), None)),
-        r"^ff_out\.bias$": ("ff_out.bias", None),
+        r"^ff_out\.weight$": ("ff_out.kernel", Transform.LINEAR),
+        r"^ff_out\.bias$": ("ff_out.bias", Transform.BIAS),
     }
     return mapping
 

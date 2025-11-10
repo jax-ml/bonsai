@@ -26,6 +26,7 @@ class BlockConfigs:
 
     @classmethod
     def default_block_config(cls):
+        # (in, out, kernel, repeat, expand, stride, se_ratio)
         return cls(
             [
                 BlockConfig(32, 16, 3, 1, 1, 1, 0.25, 1),
@@ -40,6 +41,7 @@ class BlockConfigs:
 
     @classmethod
     def tf_block_config(cls):
+        # (in, out, kernel, repeat, expand, stride, se_ratio)
         return cls(
             [
                 BlockConfig(32, 16, 3, 1, 1, 1, 0.25, "SAME"),
@@ -54,7 +56,7 @@ class BlockConfigs:
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     width_coefficient: float
     depth_coefficient: float
     resolution: int
@@ -62,39 +64,40 @@ class ModelCfg:
     stem_conv_padding: int | Literal["SAME"]
     bn_momentum: float
     bn_epsilon: float
+    block_configs: BlockConfigs
     num_classes: int = 1000
 
     @classmethod
     def b0(cls, num_classes=1000):
-        return cls(1.0, 1.0, 224, 0.2, 1, 0.99, 1e-5, num_classes)
+        return cls(1.0, 1.0, 224, 0.2, 1, 0.99, 1e-5, BlockConfigs.default_block_config(), num_classes)
 
     @classmethod
     def b1(cls, num_classes=1000):
-        return cls(1.0, 1.1, 240, 0.2, 1, 0.99, 1e-5, num_classes)
+        return cls(1.0, 1.1, 240, 0.2, 1, 0.99, 1e-5, BlockConfigs.default_block_config(), num_classes)
 
     @classmethod
     def b2(cls, num_classes=1000):
-        return cls(1.1, 1.2, 260, 0.3, 1, 0.99, 1e-5, num_classes)
+        return cls(1.1, 1.2, 260, 0.3, 1, 0.99, 1e-5, BlockConfigs.default_block_config(), num_classes)
 
     @classmethod
     def b3(cls, num_classes=1000):
-        return cls(1.2, 1.4, 300, 0.3, 1, 0.99, 1e-5, num_classes)
+        return cls(1.2, 1.4, 300, 0.3, 1, 0.99, 1e-5, BlockConfigs.default_block_config(), num_classes)
 
     @classmethod
     def b4(cls, num_classes=1000):
-        return cls(1.4, 1.8, 380, 0.4, 1, 0.99, 1e-5, num_classes)
+        return cls(1.4, 1.8, 380, 0.4, 1, 0.99, 1e-5, BlockConfigs.default_block_config(), num_classes)
 
     @classmethod
     def b5(cls, num_classes=1000):
-        return cls(1.6, 2.2, 456, 0.4, "SAME", 1e-1, 1e-3, num_classes)
+        return cls(1.6, 2.2, 456, 0.4, "SAME", 1e-1, 1e-3, BlockConfigs.tf_block_config(), num_classes)
 
     @classmethod
     def b6(cls, num_classes=1000):
-        return cls(1.8, 2.6, 528, 0.5, "SAME", 1e-1, 1e-3, num_classes)
+        return cls(1.8, 2.6, 528, 0.5, "SAME", 1e-1, 1e-3, BlockConfigs.tf_block_config(), num_classes)
 
     @classmethod
     def b7(cls, num_classes=1000):
-        return cls(2.0, 3.1, 600, 0.5, "SAME", 1e-1, 1e-3, num_classes)
+        return cls(2.0, 3.1, 600, 0.5, "SAME", 1e-1, 1e-3, BlockConfigs.tf_block_config(), num_classes)
 
 
 def round_filters(filters: int, width_coefficient: float, divisor: int = 8) -> int:
@@ -163,7 +166,7 @@ class MBConv(nnx.Module):
         se_ratio: float,
         padding: int | Literal["SAME"],
         *,
-        cfg: ModelCfg,
+        cfg: ModelConfig,
         rngs: nnx.Rngs,
     ):
         super().__init__()
@@ -246,8 +249,7 @@ class EfficientNet(nnx.Module):
 
     def __init__(
         self,
-        cfg: ModelCfg,
-        block_configs: BlockConfigs,
+        cfg: ModelConfig,
         *,
         rngs: nnx.Rngs,
     ):
@@ -269,7 +271,7 @@ class EfficientNet(nnx.Module):
 
         # Build blocks
         self.blocks = nnx.List()
-        for bc in block_configs.items:
+        for bc in cfg.block_configs.items:
             input_filters = round_filters(bc.input_filters, cfg.width_coefficient)
             output_filters = round_filters(bc.output_filters, cfg.width_coefficient)
             num_repeat = round_repeats(bc.num_repeat, cfg.depth_coefficient)
@@ -292,7 +294,7 @@ class EfficientNet(nnx.Module):
                     )
                 )
         # Head
-        in_channels = round_filters(block_configs.items[-1].output_filters, cfg.width_coefficient)
+        in_channels = round_filters(cfg.block_configs.items[-1].output_filters, cfg.width_coefficient)
         out_channels = round_filters(1280, cfg.width_coefficient)
         self.head_conv = nnx.Conv(
             in_channels, out_channels, kernel_size=(1, 1), padding="SAME", use_bias=False, rngs=rngs
@@ -323,3 +325,9 @@ class EfficientNet(nnx.Module):
         x = self.dropout(x, deterministic=not training)
         x = self.classifier(x)
         return x
+
+
+@jax.jit
+def forward(graphdef: nnx.GraphDef, state: nnx.State, x: jax.Array) -> jax.Array:
+    model = nnx.merge(graphdef, state)
+    return model(x)

@@ -44,7 +44,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         self.torch_config = self.torch_model.config
         self.torch_model.eval()
 
-        self.bonsai_config = modeling.ModelCfg.whisper_tiny()
+        self.bonsai_config = modeling.ModelConfig.whisper_tiny()
         model_ckpt_path = snapshot_download(self.model_name)
         self.bonsai_model = params.create_whisper_from_pretrained(
             model_ckpt_path, self.bonsai_config, dtype=self.jdtype
@@ -264,8 +264,9 @@ class TestModuleForwardPasses(absltest.TestCase):
         t_input_ids = torch.randint(0, 100, (1, 200), device=self.tdevice)
         n_input_ids = t_input_ids.detach().cpu().numpy()
 
-        t_encoder = torch.randn((1, 200, 384), device=self.tdevice)
-        n_encoder = t_encoder.detach().cpu().numpy()
+        t_encoder = torch.randn((1, 200, 384), device=self.tdevice, dtype=self.tdtype)
+        n_encoder = t_encoder.detach().cpu().numpy().astype(self.jdtype)
+
         self_mask = nnx.make_causal_mask(n_input_ids)
         cross_mask = nnx.make_attention_mask(n_input_ids, n_input_ids)
 

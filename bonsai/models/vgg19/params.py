@@ -38,7 +38,7 @@ def _load_h5_file(file_path: str):
     return tensor_dict
 
 
-def _get_key_and_transform_mapping():
+def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     return {
         # conv_block 0
@@ -130,7 +130,8 @@ def _stoi(s):
 
 def create_model_from_h5(
     file_dir: str,
-    cfg: model_lib.ModelCfg,
+    cfg: model_lib.ModelConfig,
+    *,
     mesh: jax.sharding.Mesh | None = None,
 ) -> model_lib.VGG:
     """
@@ -149,13 +150,22 @@ def create_model_from_h5(
     graph_def, abs_state = nnx.split(vgg)
     state_dict = abs_state.to_pure_dict()
 
-    mapping = _get_key_and_transform_mapping()
+    mapping = _get_key_and_transform_mapping(cfg)
+    conversion_errors = []
     for st_key, tensor in tensor_dict.items():
         jax_key, transform = _st_key_to_jax_key(mapping, st_key)
         if jax_key is None:
             continue
         keys = [_stoi(k) for k in jax_key.split(".")]
-        _assign_weights(keys, tensor, state_dict, st_key, transform)
+        try:
+            _assign_weights(keys, tensor, state_dict, st_key, transform)
+        except Exception as e:
+            full_jax_key = ".".join([str(k) for k in keys])
+            conversion_errors.append(f"Failed to assign '{st_key}' to '{full_jax_key}': {type(e).__name__}: {e}")
+
+    if conversion_errors:
+        full_error_log = "\n".join(conversion_errors)
+        raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
 
     if mesh is not None:
         sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()

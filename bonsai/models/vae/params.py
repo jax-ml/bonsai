@@ -5,7 +5,7 @@ from bonsai.models.vae import modeling as vae_lib
 
 
 def create_model(
-    cfg: vae_lib.ModelCfg,
+    cfg: vae_lib.ModelConfig,
     rngs: nnx.Rngs,
     mesh: jax.sharding.Mesh | None = None,
 ) -> vae_lib.VAE:
