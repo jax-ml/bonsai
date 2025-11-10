@@ -46,7 +46,7 @@ def run_model():
     model_ckpt_path = snapshot_download("Qwen/Qwen3-4B")
 
     # Sharding is set False by default. Configure to meet device needs.
-    config = modeling.ModelCfg.qwen3_4b(use_sharding=False)
+    config = modeling.ModelConfig.qwen3_4b(use_sharding=False)
     mesh = jax.make_mesh((1, 1), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
     jax.set_mesh(mesh)
 

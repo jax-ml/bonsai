@@ -26,7 +26,7 @@ from flax import nnx
 from bonsai.models.resnet import modeling as model_lib
 
 
-def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
+def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     class Transform(Enum):
         """Transformations for model parameters"""
 
@@ -129,7 +129,7 @@ def _stoi(s):
 
 def create_resnet_from_pretrained(
     file_dir: str,
-    config: model_lib.ModelCfg,
+    config: model_lib.ModelConfig,
     *,
     mesh: jax.sharding.Mesh | None = None,
 ):

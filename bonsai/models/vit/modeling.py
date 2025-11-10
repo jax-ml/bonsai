@@ -6,7 +6,7 @@ from flax import nnx
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     image_size: tuple[int, int]
     patch_size: tuple[int, int]
     num_channels: int
@@ -58,7 +58,7 @@ def interpolate_posembed(posemb: jnp.ndarray, num_tokens: int, has_class_token: 
 
 
 class Embeddings(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         num_patches = (cfg.image_size[0] // cfg.patch_size[0]) * (cfg.image_size[1] // cfg.patch_size[1])
 
         self.projection = nnx.Conv(
@@ -94,7 +94,7 @@ class Embeddings(nnx.Module):
 
 
 class TransformerEncoder(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.attention = nnx.MultiHeadAttention(
             num_heads=cfg.num_heads, in_features=cfg.hidden_dim, decode=False, rngs=rngs
         )
@@ -117,7 +117,7 @@ class TransformerEncoder(nnx.Module):
 
 
 class ViTClassificationModel(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.pos_embeddings = Embeddings(cfg, rngs=rngs)
         self.layers = nnx.Sequential(*[TransformerEncoder(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
         self.ln = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)

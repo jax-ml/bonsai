@@ -44,7 +44,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         self.torch_config = self.torch_model.config
         self.torch_model.eval()
 
-        self.bonsai_config = modeling.ModelCfg.whisper_tiny()
+        self.bonsai_config = modeling.ModelConfig.whisper_tiny()
         model_ckpt_path = snapshot_download(self.model_name)
         self.bonsai_model = params.create_whisper_from_pretrained(
             model_ckpt_path, self.bonsai_config, dtype=self.jdtype

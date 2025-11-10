@@ -21,15 +21,15 @@ from flax.linen.pooling import max_pool
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     block_layers: list[int]
     num_classes: int
 
     def resnet50(num_classes: int = 1000):
-        return ModelCfg([3, 4, 6, 3], num_classes=num_classes)
+        return ModelConfig([3, 4, 6, 3], num_classes=num_classes)
 
     def resnet152(num_classes: int = 1000):
-        return ModelCfg([3, 8, 36, 3], num_classes=num_classes)
+        return ModelConfig([3, 8, 36, 3], num_classes=num_classes)
 
 
 class Bottleneck(nnx.Module):
@@ -116,7 +116,7 @@ class Stem(nnx.Module):
 
 
 class ResNet(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.stem = Stem(rngs=rngs)
 
         self.layer0 = BlockGroup(64, 64, cfg.block_layers[0], stride=1, rngs=rngs)

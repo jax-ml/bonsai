@@ -28,7 +28,7 @@ def run_model(MODEL_CP_PATH=None):
     model_ckpt_path = snapshot_download("microsoft/resnet-50")
 
     # 2. Load pretrained model
-    config = model_lib.ModelCfg.resnet50()
+    config = model_lib.ModelConfig.resnet50()
     model = params.create_resnet_from_pretrained(model_ckpt_path, config)
 
     # 3. Prepare dummy input

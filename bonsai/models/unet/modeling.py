@@ -22,7 +22,7 @@ from flax import nnx
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     """Configuration for the U-Net model."""
 
     in_channels: int = 1
@@ -91,7 +91,7 @@ class UNet(nnx.Module):
     See: https://arxiv.org/abs/1505.04597
     """
 
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         logging.warning("This model does not load weights from a reference implementation.")
         features = cfg.features
         self.inc = DoubleConv(cfg.in_channels, features[0], rngs=rngs)

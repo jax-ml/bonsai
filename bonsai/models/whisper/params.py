@@ -26,7 +26,7 @@ from flax import nnx
 from bonsai.models.whisper import modeling as model_lib
 
 
-def _get_key_and_transform_mapping(config: model_lib.ModelCfg):
+def _get_key_and_transform_mapping(config: model_lib.ModelConfig):
     nheads = config.decoder_attention_heads
     head_dim = config.d_model // nheads
 
@@ -260,7 +260,7 @@ def create_whisper_from_pretrained(
     for f in files:
         tensor_dict |= safetensors.load_file(f)
 
-    config = model_lib.ModelCfg.whisper_tiny()
+    config = model_lib.ModelConfig.whisper_tiny()
     whisper = model_lib.Whisper(config, rngs=nnx.Rngs(0))
     graph_def, abs_state = nnx.split(whisper)
     jax_state = abs_state.to_pure_dict()

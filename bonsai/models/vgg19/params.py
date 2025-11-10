@@ -38,7 +38,7 @@ def _load_h5_file(file_path: str):
     return tensor_dict
 
 
-def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
+def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     return {
         # conv_block 0
@@ -130,7 +130,7 @@ def _stoi(s):
 
 def create_model_from_h5(
     file_dir: str,
-    cfg: model_lib.ModelCfg,
+    cfg: model_lib.ModelConfig,
     *,
     mesh: jax.sharding.Mesh | None = None,
 ) -> model_lib.VGG:

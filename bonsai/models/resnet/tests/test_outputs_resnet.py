@@ -29,7 +29,7 @@ class TestModuleForwardPasses(absltest.TestCase):
     def test_full_50(self):
         model_name = "microsoft/resnet-50"
         model_ckpt_path = snapshot_download("microsoft/resnet-50")
-        bonsai_config = model_lib.ModelCfg.resnet50()
+        bonsai_config = model_lib.ModelConfig.resnet50()
         bonsai_model = params.create_resnet_from_pretrained(model_ckpt_path, bonsai_config)
         baseline_model = ResNetForImageClassification.from_pretrained(model_name)
 
@@ -48,7 +48,7 @@ class TestModuleForwardPasses(absltest.TestCase):
     def test_full_152(self):
         model_name = "microsoft/resnet-152"
         model_ckpt_path = snapshot_download("microsoft/resnet-152")
-        bonsai_config = model_lib.ModelCfg.resnet152()
+        bonsai_config = model_lib.ModelConfig.resnet152()
         bonsai_model = params.create_resnet_from_pretrained(model_ckpt_path, bonsai_config)
         baseline_model = ResNetForImageClassification.from_pretrained(model_name)
 

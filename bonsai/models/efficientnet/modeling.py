@@ -26,6 +26,7 @@ class BlockConfigs:
 
     @classmethod
     def default_block_config(cls):
+        # (in, out, kernel, repeat, expand, stride, se_ratio)
         return cls(
             [
                 BlockConfig(32, 16, 3, 1, 1, 1, 0.25, 1),
@@ -40,6 +41,7 @@ class BlockConfigs:
 
     @classmethod
     def tf_block_config(cls):
+        # (in, out, kernel, repeat, expand, stride, se_ratio)
         return cls(
             [
                 BlockConfig(32, 16, 3, 1, 1, 1, 0.25, "SAME"),
@@ -54,7 +56,7 @@ class BlockConfigs:
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     width_coefficient: float
     depth_coefficient: float
     resolution: int
@@ -164,7 +166,7 @@ class MBConv(nnx.Module):
         se_ratio: float,
         padding: int | Literal["SAME"],
         *,
-        cfg: ModelCfg,
+        cfg: ModelConfig,
         rngs: nnx.Rngs,
     ):
         super().__init__()
@@ -247,7 +249,7 @@ class EfficientNet(nnx.Module):
 
     def __init__(
         self,
-        cfg: ModelCfg,
+        cfg: ModelConfig,
         *,
         rngs: nnx.Rngs,
     ):
@@ -323,3 +325,9 @@ class EfficientNet(nnx.Module):
         x = self.dropout(x, deterministic=not training)
         x = self.classifier(x)
         return x
+
+
+@jax.jit
+def forward(graphdef: nnx.GraphDef, state: nnx.State, x: jax.Array) -> jax.Array:
+    model = nnx.merge(graphdef, state)
+    return model(x)

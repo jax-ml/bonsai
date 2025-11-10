@@ -10,7 +10,7 @@ from flax import nnx
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     """Configuration for the Variational Autoencoder (VAE) model."""
 
     input_dim: int = 784  # 28*28 for MNIST
@@ -21,7 +21,7 @@ class ModelCfg:
 class Encoder(nnx.Module):
     """Encodes the input into latent space parameters (mu and logvar)."""
 
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.hidden_layers = [
             nnx.Linear(in_features, out_features, rngs=rngs)
             for in_features, out_features in zip([cfg.input_dim, *list(cfg.hidden_dims)], cfg.hidden_dims)
@@ -43,7 +43,7 @@ class Encoder(nnx.Module):
 class Decoder(nnx.Module):
     """Decodes the latent vector back into the original input space."""
 
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         # Mirrored architecture of the encoder
         dims = [cfg.latent_dim, *list(reversed(cfg.hidden_dims))]
         self.hidden_layers = [
@@ -62,7 +62,7 @@ class Decoder(nnx.Module):
 class VAE(nnx.Module):
     """Full Variational Autoencoder model."""
 
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         logging.warning("This model does not load weights from a reference implementation.")
         self.cfg = cfg
         self.encoder = Encoder(cfg, rngs=rngs)

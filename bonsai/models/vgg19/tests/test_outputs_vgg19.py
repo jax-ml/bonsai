@@ -30,7 +30,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         try:
             self.ref_model = keras_hub.models.ImageClassifier.from_preset("vgg_19_imagenet")
             model_ckpt_path = snapshot_download("keras/vgg_19_imagenet")
-            self.nnx_model = params_lib.create_model_from_h5(model_ckpt_path, modeling.ModelCfg.vgg_19())
+            self.nnx_model = params_lib.create_model_from_h5(model_ckpt_path, modeling.ModelConfig.vgg_19())
 
             image = np.random.uniform(size=(1, 224, 224, 3)).astype(np.float32)
             self.jx = jnp.array(image)

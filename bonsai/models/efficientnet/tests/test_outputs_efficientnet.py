@@ -17,9 +17,8 @@ import numpy as np
 import timm
 import torch
 from absl.testing import absltest, parameterized
-from flax import nnx
 
-from bonsai.models.efficientnet import modeling, params
+from bonsai.models.efficientnet import params
 
 
 class TestModuleForwardPasses(parameterized.TestCase):
@@ -27,9 +26,7 @@ class TestModuleForwardPasses(parameterized.TestCase):
         nnx_name = f"efficientnet_b{version}"
         timm_name = nnx_name if version < 5 else "tf_" + nnx_name + "_ap"
 
-        cfg = getattr(modeling.ModelCfg, f"b{version}")()
-
-        nnx_model = params.create_efficientnet_from_pretrained(nnx_name, cfg, mesh=None)
+        nnx_model = params.create_efficientnet_from_pretrained(version=version)
 
         timm_model = timm.create_model(timm_name, pretrained=True)
         timm_model.eval()

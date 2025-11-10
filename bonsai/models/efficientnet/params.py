@@ -7,22 +7,6 @@ from flax import nnx
 from bonsai.models.efficientnet import modeling as model_lib
 
 
-def create_model(
-    cfg: model_lib.ModelCfg,
-    rngs: nnx.Rngs,
-    mesh: jax.sharding.Mesh | None = None,
-) -> model_lib.EfficientNet:
-    """Generic EfficientNet creator."""
-    model = model_lib.EfficientNet(cfg, rngs=rngs)
-    if mesh is not None:
-        graph_def, state = nnx.split(model)
-        sharding = nnx.get_named_sharding(model, mesh)
-        state = jax.device_put(state, sharding)
-        return nnx.merge(graph_def, state)
-    else:
-        return model
-
-
 def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     """
     Downloads and returns pre-trained EfficientNet weights from the 'timm' library.
@@ -54,7 +38,7 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     return {k: v.numpy() for k, v in m.state_dict().items()}
 
 
-def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg) -> dict:
+def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig) -> dict:
     """
     Creates a mapping from the JAX model's parameter names to the timm model's names.
     This version correctly handles the different architectures of the MBConv blocks.
@@ -162,18 +146,16 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
     return model
 
 
-def create_efficientnet_from_pretrained(
-    file_dir: str,
-    config: model_lib.ModelCfg,
-    *,
-    mesh: jax.sharding.Mesh | None = None,
-):
+def create_efficientnet_from_pretrained(version: int):
     """
     Load safetensor weights from a file, then convert & merge into a flax.nnx ViT model.
 
     Returns:
       A flax.nnx.Model instance with loaded parameters.
     """
-    torch_state_dict = get_timm_pretrained_weights(file_dir)
-    model = create_model(config, nnx.Rngs(0), mesh)
+    if version < 0 or version >= 8:
+        raise ValueError(f"Expected efficientnet version between 0 and 7, but got {version}")
+    config = getattr(model_lib.ModelConfig, f"b{version}")(1000)
+    torch_state_dict = get_timm_pretrained_weights(f"efficientnet_b{version}")
+    model = model_lib.EfficientNet(config, rngs=nnx.Rngs(0))
     return load_pretrained_weights(model, torch_state_dict)

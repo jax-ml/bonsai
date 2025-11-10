@@ -22,7 +22,7 @@ from flax.linen.pooling import max_pool
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelCfg:
+class ModelConfig:
     num_classes: int
     block_layers: list[int]
     channels: list[int]
@@ -50,7 +50,7 @@ class ConvBlock(nnx.Module):
 
 
 class VGG(nnx.Module):
-    def __init__(self, cfg: ModelCfg, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.conv_block0 = ConvBlock(cfg.block_layers[0], in_channels=3, out_channels=cfg.channels[0], rngs=rngs)
         self.conv_block1 = ConvBlock(
             cfg.block_layers[1], in_channels=cfg.channels[0], out_channels=cfg.channels[1], rngs=rngs
