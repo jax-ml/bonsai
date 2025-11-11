@@ -25,7 +25,7 @@ from jax.sharding import PartitionSpec as P
 from transformers import AutoTokenizer
 
 from bonsai.models.qwen3 import modeling, params
-from bonsai.utils import Sampler
+from bonsai.utils import GreedySampler, Sampler
 
 
 def tokenize(tokenizer, input: list[str]):
@@ -37,9 +37,8 @@ def tokenize(tokenizer, input: list[str]):
         for l in input
     ]
     lines = [tokenizer.encode(line) for line in lines]
-    max_l = max(len(line) for line in lines)  # Right-align, left-padding to the max token length.
-    buffer_len = 2 ** math.ceil(math.log2(max(max_l, 1)))  # Pad the sequence to power-of-two buffer length.
-    return jnp.array([np.pad(l, (max_l - len(l), buffer_len - max_l), constant_values=pad_idx) for l in lines]), max_l
+    max_len = max(len(line) for line in lines)  # Right-align, left-padding to the max token length.
+    return jnp.array([np.pad(l, (max_len - len(l), 0), constant_values=pad_idx) for l in lines])
 
 
 def run_model():
@@ -50,17 +49,20 @@ def run_model():
     mesh = jax.make_mesh((1, 1), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
     jax.set_mesh(mesh)
 
-    query = ["Why is the sky blue instead of any other color like purple?", "Who am I?"]
+    query = [
+        "Why is the sky blue instead of any other color like purple?",
+        "Who am I?",
+        "Tell me 10 flavors of ice creams.",
+    ]
 
     tokenizer = AutoTokenizer.from_pretrained(model_ckpt_path)
-    tokens, max_len = tokenize(tokenizer, query)
-    batch_size, _ = tokens.shape
+    tokens = tokenize(tokenizer, query)
+    batch_size, token_len = tokens.shape
 
-    cache_size, gen_steps = 128, 11
-    assert cache_size >= max_len + gen_steps, f"Cache size ({cache_size}) must be >= {max_len} + {gen_steps}"
+    generate_steps = 256
+    cache = modeling.init_cache(config, batch_size, token_len, generate_steps)
 
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh)
-    cache = modeling.init_cache(config, batch_size, cache_size)
     graphdef, state = nnx.split((model, cache))
     state = jax.tree.leaves(state)  # Better perf from flattened jax state due to no pytree trasversals.
 
@@ -71,33 +73,26 @@ def run_model():
     logits, state = modeling.forward(graphdef, state, tokens, tokenizer.pad_token_id)
     next_tokens = sampler(logits, key=key)
 
-    # decode - warmup
+    # decode
     tokens_list = [next_tokens]
-    logits, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
-    next_tokens = sampler(logits, key=key)
-    tokens_list.append(next_tokens)
-
-    # profile
-    jax.profiler.start_trace("/tmp/profile-data")
-    for i in range(5):
+    finished = jnp.zeros((batch_size,), dtype=jnp.bool_)
+    for i in range(generate_steps):
         logits, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
         next_tokens = sampler(logits, key=key)
+        finished = finished | (next_tokens.squeeze(-1) == tokenizer.eos_token_id)
         tokens_list.append(next_tokens)
-    jax.block_until_ready(tokens_list)
-    jax.profiler.stop_trace()
+        if finished.all():
+            break
 
-    decode_steps = 128
-    for i in range(decode_steps):
-        logits, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
-        next_tokens = sampler(logits, key=key)
-        tokens_list.append(next_tokens)
-
-    tokens_list = jnp.concatenate(tokens_list, axis=-1)
+    all_output_tokens = jax.device_get(jnp.concatenate(tokens_list, axis=-1))
     for i, q in enumerate(query):
         print(f"User:\n {q}")
-        print(
-            f"Answer:\n {tokenizer.decode(tokens_list.at[i].get(out_sharding=P(None)), skip_special_tokens=True)}\n\n"
-        )
+        seq_tokens = all_output_tokens[i]
+        eos_idx = np.where(seq_tokens == tokenizer.eos_token_id)[0]
+        if eos_idx.size > 0:
+            seq_tokens = seq_tokens[: eos_idx[0]]
+        decoded = tokenizer.decode(seq_tokens, skip_special_tokens=True)
+        print(f"Answer:\n {decoded}\n\n")
 
 
 if __name__ == "__main__":
