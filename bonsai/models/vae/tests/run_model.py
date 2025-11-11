@@ -8,7 +8,7 @@ from bonsai.models.vae import modeling, params
 def run_model():
     # 1. Create model and PRNG keys
     rngs = nnx.Rngs(params=0, sample=1)
-    config = modeling.ModelCfg(input_dim=28 * 28, hidden_dims=(512, 256), latent_dim=20)
+    config = modeling.ModelConfig(input_dim=28 * 28, hidden_dims=(512, 256), latent_dim=20)
     model = params.create_model(cfg=config, rngs=rngs)
 
     # 2. Prepare dummy input

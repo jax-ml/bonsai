@@ -14,87 +14,76 @@
 
 import logging
 import re
+from enum import Enum
 from typing import Callable
 
 import jax
+import jax.numpy as jnp
 import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
 
-from bonsai.models.resnet50 import modeling as model_lib
+from bonsai.models.resnet import modeling as model_lib
 
 
-def _get_key_and_transform_mapping():
+def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
+    class Transform(Enum):
+        """Transformations for model parameters"""
+
+        BIAS = None
+        LINEAR = ((1, 0), None)
+        CONV2D = ((2, 3, 1, 0), None)
+        DEFAULT = None
+
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     return {
-        # stem
-        r"^resnet\.embedder\.embedder\.convolution\.weight$": (
-            "stem.conv.kernel",
-            ((2, 3, 1, 0), None),
-        ),
-        r"^resnet\.embedder\.embedder\.normalization\.weight$": ("stem.bn.scale", None),
-        r"^resnet\.embedder\.embedder\.normalization\.bias$": ("stem.bn.bias", None),
-        r"^resnet\.embedder\.embedder\.normalization\.running_mean$": (
-            "stem.bn.mean",
-            None,
-        ),
-        r"^resnet\.embedder\.embedder\.normalization\.running_var$": (
-            "stem.bn.var",
-            None,
-        ),
-        # any of conv1/conv2/conv3 kernels
+        r"^resnet\.embedder\.embedder\.convolution\.weight$": ("stem.conv.kernel", Transform.CONV2D),
+        r"^resnet\.embedder\.embedder\.normalization\.weight$": ("stem.bn.scale", Transform.DEFAULT),
+        r"^resnet\.embedder\.embedder\.normalization\.bias$": ("stem.bn.bias", Transform.BIAS),
+        r"^resnet\.embedder\.embedder\.normalization\.running_mean$": ("stem.bn.mean", Transform.DEFAULT),
+        r"^resnet\.embedder\.embedder\.normalization\.running_var$": ("stem.bn.var", Transform.DEFAULT),
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.layer\.([0-2])\.convolution\.weight$": (
             r"layer\1.blocks.\2.conv\3.kernel",
-            ((2, 3, 1, 0), None),
+            Transform.CONV2D,
         ),
-        # BN scale (formerly 'weight')
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.layer\.([0-2])\.normalization\.weight$": (
             r"layer\1.blocks.\2.bn\3.scale",
-            None,
+            Transform.DEFAULT,
         ),
-        # BN bias
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.layer\.([0-2])\.normalization\.bias$": (
             r"layer\1.blocks.\2.bn\3.bias",
-            None,
+            Transform.BIAS,
         ),
-        # BN running mean
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.layer\.([0-2])\.normalization\.running_mean$": (
             r"layer\1.blocks.\2.bn\3.mean",
-            None,
+            Transform.DEFAULT,
         ),
-        # BN running var
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.layer\.([0-2])\.normalization\.running_var$": (
             r"layer\1.blocks.\2.bn\3.var",
-            None,
+            Transform.DEFAULT,
         ),
-        # shortcut conv
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.shortcut\.convolution\.weight$": (
             r"layer\1.blocks.\2.downsample.conv.kernel",
-            ((2, 3, 1, 0), None),
+            Transform.CONV2D,
         ),
-        # shortcut BN scale
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.shortcut\.normalization\.weight$": (
             r"layer\1.blocks.\2.downsample.bn.scale",
-            None,
+            Transform.DEFAULT,
         ),
-        # shortcut BN bias
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.shortcut\.normalization\.bias$": (
             r"layer\1.blocks.\2.downsample.bn.bias",
-            None,
+            Transform.BIAS,
         ),
-        # shortcut BN running mean
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.shortcut\.normalization\.running_mean$": (
             r"layer\1.blocks.\2.downsample.bn.mean",
-            None,
+            Transform.DEFAULT,
         ),
-        # shortcut BN running var
         r"^resnet\.encoder\.stages\.([0-3])\.layers\.([0-9]+)\.shortcut\.normalization\.running_var$": (
             r"layer\1.blocks.\2.downsample.bn.var",
-            None,
+            Transform.DEFAULT,
         ),
-        # final classifier
-        r"^classifier\.1\.weight$": ("fc.kernel", ((1, 0), None)),
-        r"^classifier\.1\.bias$": ("fc.bias", None),
+        r"^classifier\.1\.weight$": ("fc.kernel", Transform.LINEAR),
+        r"^classifier\.1\.bias$": ("fc.bias", Transform.BIAS),
     }
 
 
@@ -126,7 +115,7 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform):
                 tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
             raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = tensor
+        state_dict[key] = jnp.array(tensor)
     else:
         _assign_weights(rest, tensor, state_dict[key], st_key, transform)
 
@@ -138,10 +127,9 @@ def _stoi(s):
         return s
 
 
-def _create_resnet_from_pretrained(
-    model_cls: Callable[..., model_lib.ResNet],
+def create_resnet_from_pretrained(
     file_dir: str,
-    num_classes: int = 1000,
+    config: model_lib.ModelConfig,
     *,
     mesh: jax.sharding.Mesh | None = None,
 ):
@@ -159,17 +147,27 @@ def _create_resnet_from_pretrained(
     for f in files:
         state_dict |= safetensors.load_file(f)
 
-    model = nnx.eval_shape(lambda: model_cls(num_classes=num_classes, rngs=nnx.Rngs(params=0)))
+    model = nnx.eval_shape(lambda: model_lib.ResNet(config, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(model)
     jax_state = abs_state.to_pure_dict()
 
-    mapping = _get_key_and_transform_mapping()
+    mapping = _get_key_and_transform_mapping(config)
+    conversion_errors = []
     for st_key, tensor in state_dict.items():
         jax_key, transform = _st_key_to_jax_key(mapping, st_key)
         if jax_key is None:
             continue
         keys = [_stoi(k) for k in jax_key.split(".")]
-        _assign_weights(keys, tensor, jax_state, st_key, transform)
+
+        try:
+            _assign_weights(keys, tensor, jax_state, st_key, transform.value)
+        except Exception as e:
+            full_jax_key = ".".join([str(k) for k in keys])
+            conversion_errors.append(f"Failed to assign '{st_key}' to '{full_jax_key}': {type(e).__name__}: {e}")
+
+    if conversion_errors:
+        full_error_log = "\n".join(conversion_errors)
+        raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
 
     if mesh is not None:
         sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
@@ -178,33 +176,3 @@ def _create_resnet_from_pretrained(
         jax_state = jax.device_put(jax_state, jax.devices()[0])
 
     return nnx.merge(graph_def, jax_state)
-
-
-def create_resnet50_from_pretrained(
-    file_dir: str,
-    num_classes: int = 1000,
-    *,
-    mesh: jax.sharding.Mesh | None = None,
-):
-    """Loads ResNet50 weights."""
-    return _create_resnet_from_pretrained(
-        model_lib.ResNet50,
-        file_dir=file_dir,
-        num_classes=num_classes,
-        mesh=mesh,
-    )
-
-
-def create_resnet152_from_pretrained(
-    file_dir: str,
-    num_classes: int = 1000,
-    *,
-    mesh: jax.sharding.Mesh | None = None,
-):
-    """Loads ResNet152 weights."""
-    return _create_resnet_from_pretrained(
-        model_lib.ResNet152,
-        file_dir=file_dir,
-        num_classes=num_classes,
-        mesh=mesh,
-    )

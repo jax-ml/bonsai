@@ -24,7 +24,7 @@ from flax import nnx
 from bonsai.models.qwen3 import modeling as model_lib
 
 
-def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
+def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     class Transform(Enum):
         """Transformations for model parameters"""
 
@@ -98,7 +98,9 @@ def _stoi(s):
         return s
 
 
-def create_model_from_safe_tensors(file_dir: str, cfg: model_lib.ModelCfg, mesh: jax.sharding.Mesh) -> model_lib.Qwen3:
+def create_model_from_safe_tensors(
+    file_dir: str, cfg: model_lib.ModelConfig, mesh: jax.sharding.Mesh
+) -> model_lib.Qwen3:
     """Load tensors from the safetensors file and create a Qwen3 model (memory-optimized)."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:

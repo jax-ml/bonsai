@@ -27,7 +27,7 @@ def run_model():
     model_ckpt_path = snapshot_download("keras/densenet_121_imagenet")
 
     # 2. Load pretrained model
-    config = modeling.ModelCfg.densenet_121()
+    config = modeling.ModelConfig.densenet_121()
     model = params.create_model_from_h5(model_ckpt_path, config)
     graphdef, state = nnx.split(model)
     state = jax.tree.leaves(state)

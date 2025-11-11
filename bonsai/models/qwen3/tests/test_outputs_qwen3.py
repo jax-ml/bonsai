@@ -23,7 +23,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         ## models
         self.torch_model = Qwen3ForCausalLM.from_pretrained(model_name, dtype="auto").eval()
-        self.bonsai_config = modeling.ModelCfg.qwen3_0_6b(use_sharding=False)
+        self.bonsai_config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
         model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
         self.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(self.mesh)
@@ -86,9 +86,8 @@ class TestModuleForwardPasses(absltest.TestCase):
         """Forward pass for the nnx model"""
         segment_ids = 1 * (tokens != self.tokenizer.pad_token_id)
         x = self.nnx_model.embedder.encode(tokens).astype(dtype)
-        right_pads = modeling.count_right_pads(segment_ids, out_sharding=P(None))
         for i, layer in enumerate(self.nnx_model.layers):
-            x = layer(x, cache[i], segment_ids, right_pads).astype(dtype)
+            x = layer(x, cache[i], segment_ids).astype(dtype)
         nnx_logits = self.nnx_model.lm_head(self.nnx_model.final_norm(x))
         return nnx_logits
 
@@ -112,7 +111,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     def _init_nnx_cache(self, batch_size: int):
         return modeling.init_cache(
-            cfg=self.bonsai_config, batch_size=batch_size, cache_size=self.cache_size, dtype=jnp.float32
+            cfg=self.bonsai_config, batch_size=batch_size, token_len=10, generate_steps=32, dtype=jnp.float32
         )
 
     def test_embedder(self):
@@ -135,7 +134,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         nnx_cache = self._init_nnx_cache(self.batch_size)
         torch_inputs = self._setup_torch_attn(tx)
 
-        jy, ty = nm(jx, nnx_cache[0], jnp.ones((self.batch_size, self.num_input_tokens)), 0), tm(**torch_inputs)
+        jy, ty = nm(jx, nnx_cache[0], jnp.ones((self.batch_size, self.num_input_tokens))), tm(**torch_inputs)
         torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_all_decoder_layers(self):
@@ -146,7 +145,7 @@ class TestModuleForwardPasses(absltest.TestCase):
             jx = jax.random.normal(jax.random.key(0), shape=shape)
             tx = torch.tensor(jx)
 
-            jy = nm(jx, nc, jnp.ones((self.batch_size, self.num_input_tokens)), 0)
+            jy = nm(jx, nc, jnp.ones((self.batch_size, self.num_input_tokens)))
             torch_inputs = self._setup_torch_attn(tx)
             ty = tm.to(torch.float32)(**torch_inputs)
             torch.testing.assert_close(torch.tensor(jy), ty, atol=self.relaxed_tol, rtol=self.relaxed_tol)
@@ -172,7 +171,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         torch_inputs = self._setup_torch_attn(tx)
         nnx_cache = self._init_nnx_cache(self.batch_size)
 
-        jy = nm(jx, nnx_cache[0], jnp.ones((self.batch_size, self.num_input_tokens), dtype=jnp.float32), 0)
+        jy = nm(jx, nnx_cache[0], jnp.ones((self.batch_size, self.num_input_tokens), dtype=jnp.float32))
         ty = tm(**torch_inputs)[0]
         torch.testing.assert_close(torch.tensor(jy), ty)
 
@@ -267,7 +266,8 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     def test_full(self):
         query = ["Why is the sky blue instead of any other color like purple?"]
-        tokens, max_len = tokenize(self.tokenizer, query)
+        tokens = tokenize(self.tokenizer, query)
+        _, token_len = tokens.shape
         self.torch_model = self.torch_model.to(torch.float32)
         nnx_cache = self._init_nnx_cache(len(query))
 
@@ -275,12 +275,12 @@ class TestModuleForwardPasses(absltest.TestCase):
         torch_inputs = self._process_hf_tokens(query)
         torch_logits = self.torch_model(**torch_inputs).logits
         torch.testing.assert_close(
-            torch.tensor(nnx_logits)[:, :max_len, :], torch_logits, rtol=self.relaxed_tol, atol=self.relaxed_tol
+            torch.tensor(nnx_logits)[:, :token_len, :], torch_logits, rtol=self.relaxed_tol, atol=self.relaxed_tol
         )
 
     def test_full_batched(self):
         query = ["Why is the sky blue instead of any other color like purple?", "Who am I?"]
-        tokens, _ = tokenize(self.tokenizer, query)
+        tokens = tokenize(self.tokenizer, query)
         self.torch_model = self.torch_model.to(torch.float32)
         nnx_cache = self._init_nnx_cache(len(query))
 

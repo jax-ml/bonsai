@@ -25,7 +25,7 @@ from flax import nnx
 from bonsai.models.vit import modeling as model_lib
 
 
-def _get_key_and_transform_mapping(cfg: model_lib.ModelCfg):
+def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     head_dim = cfg.hidden_dim // cfg.num_heads
 
     class Transform(Enum):
@@ -151,7 +151,7 @@ def _stoi(s):
 
 def create_vit_from_pretrained(
     file_dir: str,
-    config: model_lib.ModelCfg,
+    config: model_lib.ModelConfig,
     *,
     mesh: jax.sharding.Mesh | None = None,
 ):

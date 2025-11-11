@@ -29,7 +29,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         try:
             self.ref_model = keras_hub.models.ImageClassifier.from_preset("densenet_121_imagenet")
             model_ckpt_path = snapshot_download("keras/densenet_121_imagenet")
-            self.nnx_model = params.create_model_from_h5(model_ckpt_path, modeling.ModelCfg.densenet_121())
+            self.nnx_model = params.create_model_from_h5(model_ckpt_path, modeling.ModelConfig.densenet_121())
         except Exception as e:
             self.skipTest(
                 "Skipping test because tensorflow-text requires 3.12 or below: %s"

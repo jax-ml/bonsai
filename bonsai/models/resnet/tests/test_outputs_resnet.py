@@ -21,15 +21,16 @@ from absl.testing import absltest
 from huggingface_hub import snapshot_download
 from transformers import ResNetForImageClassification
 
-from bonsai.models.resnet50 import modeling as model_lib
-from bonsai.models.resnet50 import params
+from bonsai.models.resnet import modeling as model_lib
+from bonsai.models.resnet import params
 
 
 class TestModuleForwardPasses(absltest.TestCase):
     def test_full_50(self):
         model_name = "microsoft/resnet-50"
         model_ckpt_path = snapshot_download("microsoft/resnet-50")
-        bonsai_model = params.create_resnet50_from_pretrained(model_ckpt_path)
+        bonsai_config = model_lib.ModelConfig.resnet50()
+        bonsai_model = params.create_resnet_from_pretrained(model_ckpt_path, bonsai_config)
         baseline_model = ResNetForImageClassification.from_pretrained(model_name)
 
         batch_size, image_size = 8, 224
@@ -47,7 +48,8 @@ class TestModuleForwardPasses(absltest.TestCase):
     def test_full_152(self):
         model_name = "microsoft/resnet-152"
         model_ckpt_path = snapshot_download("microsoft/resnet-152")
-        bonsai_model = params.create_resnet152_from_pretrained(model_ckpt_path)
+        bonsai_config = model_lib.ModelConfig.resnet152()
+        bonsai_model = params.create_resnet_from_pretrained(model_ckpt_path, bonsai_config)
         baseline_model = ResNetForImageClassification.from_pretrained(model_name)
 
         batch_size, image_size = 8, 224
