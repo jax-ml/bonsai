@@ -39,19 +39,19 @@ def run_model():
     dummy_input = jnp.ones((batch_size, image_size, image_size, channels), dtype=jnp.float32)
 
     # Warmup (triggers compilation)
-    _ = model_lib.forward(graphdef, flat_state, dummy_input).block_until_ready()
+    _ = model_lib.forward(graphdef, flat_state, dummy_input, None).block_until_ready()
 
     # Profile a few steps
     jax.profiler.start_trace("/tmp/profile-vit")
     for _ in range(5):
-        logits = model_lib.forward(graphdef, flat_state, dummy_input)
+        logits = model_lib.forward(graphdef, flat_state, dummy_input, None)
         jax.block_until_ready(logits)
     jax.profiler.stop_trace()
 
     # Timed execution
     t0 = time.perf_counter()
     for _ in range(10):
-        logits = model_lib.forward(graphdef, flat_state, dummy_input).block_until_ready()
+        logits = model_lib.forward(graphdef, flat_state, dummy_input, None).block_until_ready()
     print(f"Step time: {(time.perf_counter() - t0) / 10:.4f} s")
 
     # Show top-1 predicted class
