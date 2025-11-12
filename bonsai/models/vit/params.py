@@ -16,7 +16,6 @@ import logging
 import re
 from enum import Enum
 
-import jax
 import jax.numpy as jnp
 import safetensors.flax as safetensors
 from etils import epath
@@ -50,60 +49,42 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
         r"^vit.embeddings.patch_embeddings.projection.weight$": (r"pos_embeddings.projection.kernel", Transform.CONV2D),
         r"^vit.embeddings.position_embeddings$": (r"pos_embeddings.pos_embeddings", Transform.EMBED),
         r"^vit.encoder.layer.([0-9]+).attention.attention.key.bias$": (
-            r"layers.layers.\1.attention.key.bias",
+            r"layers.\1.attention.key.bias",
             Transform.ATTN_KQV_BIAS,
         ),
         r"^vit.encoder.layer.([0-9]+).attention.attention.key.weight$": (
-            r"layers.layers.\1.attention.key.kernel",
+            r"layers.\1.attention.key.kernel",
             Transform.ATTN_KQV_KERNEL,
         ),
         r"^vit.encoder.layer.([0-9]+).attention.attention.query.bias$": (
-            r"layers.layers.\1.attention.query.bias",
+            r"layers.\1.attention.query.bias",
             Transform.ATTN_KQV_BIAS,
         ),
         r"^vit.encoder.layer.([0-9]+).attention.attention.query.weight$": (
-            r"layers.layers.\1.attention.query.kernel",
+            r"layers.\1.attention.query.kernel",
             Transform.ATTN_KQV_KERNEL,
         ),
         r"^vit.encoder.layer.([0-9]+).attention.attention.value.bias$": (
-            r"layers.layers.\1.attention.value.bias",
+            r"layers.\1.attention.value.bias",
             Transform.ATTN_KQV_BIAS,
         ),
         r"^vit.encoder.layer.([0-9]+).attention.attention.value.weight$": (
-            r"layers.layers.\1.attention.value.kernel",
+            r"layers.\1.attention.value.kernel",
             Transform.ATTN_KQV_KERNEL,
         ),
-        r"^vit.encoder.layer.([0-9]+).attention.output.dense.bias$": (
-            r"layers.layers.\1.attention.out.bias",
-            Transform.BIAS,
-        ),
+        r"^vit.encoder.layer.([0-9]+).attention.output.dense.bias$": (r"layers.\1.attention.out.bias", Transform.BIAS),
         r"^vit.encoder.layer.([0-9]+).attention.output.dense.weight$": (
-            r"layers.layers.\1.attention.out.kernel",
+            r"layers.\1.attention.out.kernel",
             Transform.ATTN_OUT,
         ),
-        r"^vit.encoder.layer.([0-9]+).intermediate.dense.bias$": (r"layers.layers.\1.linear1.bias", Transform.BIAS),
-        r"^vit.encoder.layer.([0-9]+).intermediate.dense.weight$": (
-            r"layers.layers.\1.linear1.kernel",
-            Transform.LINEAR,
-        ),
-        r"^vit.encoder.layer.([0-9]+).layernorm_after.bias$": (
-            r"layers.layers.\1.layernorm_after.bias",
-            Transform.BIAS,
-        ),
-        r"^vit.encoder.layer.([0-9]+).layernorm_after.weight$": (
-            r"layers.layers.\1.layernorm_after.scale",
-            Transform.SCALE,
-        ),
-        r"^vit.encoder.layer.([0-9]+).layernorm_before.bias$": (
-            r"layers.layers.\1.layernorm_before.bias",
-            Transform.BIAS,
-        ),
-        r"^vit.encoder.layer.([0-9]+).layernorm_before.weight$": (
-            r"layers.layers.\1.layernorm_before.scale",
-            Transform.SCALE,
-        ),
-        r"^vit.encoder.layer.([0-9]+).output.dense.bias$": (r"layers.layers.\1.linear2.bias", Transform.BIAS),
-        r"^vit.encoder.layer.([0-9]+).output.dense.weight$": (r"layers.layers.\1.linear2.kernel", Transform.LINEAR),
+        r"^vit.encoder.layer.([0-9]+).intermediate.dense.bias$": (r"layers.\1.linear1.bias", Transform.BIAS),
+        r"^vit.encoder.layer.([0-9]+).intermediate.dense.weight$": (r"layers.\1.linear1.kernel", Transform.LINEAR),
+        r"^vit.encoder.layer.([0-9]+).layernorm_after.bias$": (r"layers.\1.layernorm_after.bias", Transform.BIAS),
+        r"^vit.encoder.layer.([0-9]+).layernorm_after.weight$": (r"layers.\1.layernorm_after.scale", Transform.SCALE),
+        r"^vit.encoder.layer.([0-9]+).layernorm_before.bias$": (r"layers.\1.layernorm_before.bias", Transform.BIAS),
+        r"^vit.encoder.layer.([0-9]+).layernorm_before.weight$": (r"layers.\1.layernorm_before.scale", Transform.SCALE),
+        r"^vit.encoder.layer.([0-9]+).output.dense.bias$": (r"layers.\1.linear2.bias", Transform.BIAS),
+        r"^vit.encoder.layer.([0-9]+).output.dense.weight$": (r"layers.\1.linear2.kernel", Transform.LINEAR),
         r"^vit.layernorm.bias$": (r"ln.bias", Transform.BIAS),
         r"^vit.layernorm.weight$": (r"ln.scale", Transform.SCALE),
     }
@@ -149,12 +130,7 @@ def _stoi(s):
         return s
 
 
-def create_vit_from_pretrained(
-    file_dir: str,
-    config: model_lib.ModelConfig,
-    *,
-    mesh: jax.sharding.Mesh | None = None,
-):
+def create_vit_from_pretrained(file_dir: str, config: model_lib.ModelConfig):
     """
     Load safetensor weights from a file, then convert & merge into a flax.nnx ViT model.
 
