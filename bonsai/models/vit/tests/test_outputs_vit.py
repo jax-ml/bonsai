@@ -32,13 +32,13 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         with torch.no_grad():
             ty = torch_emb(tx)
-        jy = nnx_emb(jx)
+        jy = nnx_emb(jx, rngs=None)
 
         torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-5, atol=1e-5)
 
     def test_first_layer(self):
         torch_layer = self.baseline_model.vit.encoder.layer[0]
-        nnx_layer = self.bonsai_model.layers.layers[0]
+        nnx_layer = self.bonsai_model.layers[0]
 
         hidden_shape = (self.batch_size, 197, 768)
         jx = jax.random.normal(jax.random.key(0), hidden_shape, dtype=jnp.float32)
@@ -46,7 +46,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         with torch.no_grad():
             ty = torch_layer(tx)
-        jy = nnx_layer(jx)
+        jy = nnx_layer(jx, rngs=None)
 
         torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-5, atol=1e-2)
 
@@ -56,7 +56,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         with torch.no_grad():
             ty = self.baseline_model(tx).logits
-        jy = self.bonsai_model(jx)
+        jy = self.bonsai_model(jx, rngs=None)
 
         torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-5, atol=5e-2)
 
@@ -68,7 +68,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         with torch.no_grad():
             ty = self.baseline_model(tx, interpolate_pos_encoding=True).logits
-        jy = self.bonsai_model(jx)
+        jy = self.bonsai_model(jx, rngs=None)
 
         torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-5, atol=1e-1)
 

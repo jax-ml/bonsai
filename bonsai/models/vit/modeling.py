@@ -11,6 +11,7 @@ class ModelConfig:
     patch_size: tuple[int, int]
     num_channels: int
     hidden_dim: int
+    attn_dropout_prob: float
     dropout_prob: float
     num_heads: int
     mlp_dim: int
@@ -25,6 +26,7 @@ class ModelConfig:
             patch_size=(16, 16),
             num_channels=3,
             hidden_dim=768,
+            attn_dropout_prob=0.0,
             dropout_prob=0.0,
             num_heads=12,
             mlp_dim=3072,
@@ -66,9 +68,9 @@ class Embeddings(nnx.Module):
         )
         self.cls_token = nnx.Variable(jax.random.normal(rngs.params(), (1, 1, cfg.hidden_dim)))
         self.pos_embeddings = nnx.Variable(jax.random.normal(rngs.params(), (1, num_patches + 1, cfg.hidden_dim)))
-        self.dropout = nnx.Dropout(cfg.dropout_prob, rngs=rngs)
+        self.dropout = nnx.Dropout(cfg.dropout_prob)
 
-    def __call__(self, pixel_values: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, pixel_values: jnp.ndarray, *, rngs: nnx.Rngs | None) -> jnp.ndarray:
         embeddings = self.projection(pixel_values)
         b, h, w, c = embeddings.shape
         embeddings = embeddings.reshape(b, h * w, c)
@@ -89,29 +91,33 @@ class Embeddings(nnx.Module):
         embeddings = jnp.concatenate((cls_tokens, embeddings), axis=1)
 
         embeddings = embeddings + current_pos_embeddings
-        embeddings = self.dropout(embeddings)
+        embeddings = self.dropout(embeddings, rngs=rngs)
         return embeddings
 
 
 class TransformerEncoder(nnx.Module):
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.attention = nnx.MultiHeadAttention(
-            num_heads=cfg.num_heads, in_features=cfg.hidden_dim, decode=False, rngs=rngs
+            num_heads=cfg.num_heads,
+            in_features=cfg.hidden_dim,
+            dropout_rate=cfg.attn_dropout_prob,
+            decode=False,
+            rngs=rngs,
         )
         self.linear1 = nnx.Linear(cfg.hidden_dim, cfg.mlp_dim, rngs=rngs)
         self.linear2 = nnx.Linear(cfg.mlp_dim, cfg.hidden_dim, rngs=rngs)
-        self.dropout = nnx.Dropout(cfg.dropout_prob, rngs=rngs)
+        self.dropout = nnx.Dropout(cfg.dropout_prob)
         self.layernorm_before = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)
         self.layernorm_after = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)
 
-    def __call__(self, hidden_states, head_mask=None):
+    def __call__(self, hidden_states, head_mask=None, *, rngs: nnx.Rngs | None):
         hidden_states_norm = self.layernorm_before(hidden_states)
-        attention_output = self.attention(hidden_states_norm, head_mask)
+        attention_output = self.attention(hidden_states_norm, head_mask, rngs=rngs)
         hidden_states = attention_output + hidden_states
         layer_output = self.layernorm_after(hidden_states)
         layer_output = jax.nn.gelu(self.linear1(layer_output))
         layer_output = self.linear2(layer_output)
-        layer_output = self.dropout(layer_output)
+        layer_output = self.dropout(layer_output, rngs=rngs)
         layer_output += hidden_states
         return layer_output
 
@@ -119,19 +125,20 @@ class TransformerEncoder(nnx.Module):
 class ViTClassificationModel(nnx.Module):
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.pos_embeddings = Embeddings(cfg, rngs=rngs)
-        self.layers = nnx.Sequential(*[TransformerEncoder(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
+        self.layers = nnx.List([TransformerEncoder(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
         self.ln = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)
         self.classifier = nnx.Linear(cfg.hidden_dim, cfg.num_labels, rngs=rngs)
 
-    def __call__(self, x):
-        x = self.pos_embeddings(x)
-        x = self.layers(x)
+    def __call__(self, x, *, rngs: nnx.Rngs | None):
+        x = self.pos_embeddings(x, rngs=rngs)
+        for layer in self.layers:
+            x = layer(x, rngs=rngs)
         x = self.ln(x)
         x = self.classifier(x[:, 0, :])
         return x
 
 
 @jax.jit
-def forward(graphdef: nnx.GraphDef[nnx.Module], state: nnx.State, x: jax.Array) -> jax.Array:
+def forward(graphdef: nnx.GraphDef[nnx.Module], state: nnx.State, x: jax.Array, rngs: nnx.Rngs) -> jax.Array:
     model = nnx.merge(graphdef, state)
-    return model(x)
+    return model(x, rngs=rngs)
