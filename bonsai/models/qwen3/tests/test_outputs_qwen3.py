@@ -85,7 +85,7 @@ class TestModuleForwardPasses(absltest.TestCase):
     def _nnx_forward_logits(self, cache: modeling.Cache, tokens: jax.Array, dtype: DTypeLike = jnp.float32):
         """Forward pass for the nnx model"""
         segment_ids = 1 * (tokens != self.tokenizer.pad_token_id)
-        x = self.nnx_model.embedder.encode(tokens).astype(dtype)
+        x = self.nnx_model.embedder.embedding.value.at[(tokens,)].get().astype(jnp.float32)
         for i, layer in enumerate(self.nnx_model.layers):
             x = layer(x, cache[i], segment_ids).astype(dtype)
         nnx_logits = self.nnx_model.lm_head(self.nnx_model.final_norm(x))
@@ -110,7 +110,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         return model_inputs
 
     def _init_nnx_cache(self, batch_size: int):
-        return modeling.init_cache(
+        return self.nnx_model.init_cache(
             cfg=self.bonsai_config, batch_size=batch_size, token_len=10, generate_steps=32, dtype=jnp.float32
         )
 
@@ -121,7 +121,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         tx = torch.randint(0, self.torch_model.config.vocab_size, size=(self.batch_size, self.num_input_tokens))
         jx = jnp.array(tx.cpu().detach().numpy())
 
-        jy, ty = nm.encode(jx), tm(tx)
+        jy, ty = nm.embedding.value.at[(jx,)].get(), tm(tx)
         torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_decoder_layer(self):

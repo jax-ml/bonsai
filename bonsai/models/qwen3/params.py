@@ -38,7 +38,7 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
 
     # Mapping of torch_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     return {
-        r"model\.embed_tokens\.weight": ("embedder.input_emb", Transform.EMBED),
+        r"model\.embed_tokens\.weight": ("embedder.embedding", Transform.EMBED),
         r"model\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (r"layers.\1.attn.q_proj.w", Transform.ATTN_Q),
         r"model\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (r"layers.\1.attn.k_proj.w", Transform.ATTN_KV),
         r"model\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (r"layers.\1.attn.v_proj.w", Transform.ATTN_KV),
@@ -86,9 +86,14 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
                 tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
             raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = jax.device_put(tensor, sharding_dict[key])
+        # Only apply sharding if sharding_dict is provided
+        if sharding_dict is not None:
+            state_dict[key] = jax.device_put(tensor, sharding_dict[key])
+        else:
+            state_dict[key] = jax.device_put(tensor)
     else:
-        _assign_weights(rest, tensor, state_dict[key], st_key, transform, sharding_dict[key])
+        next_sharding = sharding_dict[key] if sharding_dict is not None else None
+        _assign_weights(rest, tensor, state_dict[key], st_key, transform, next_sharding)
 
 
 def _stoi(s):
@@ -99,7 +104,7 @@ def _stoi(s):
 
 
 def create_model_from_safe_tensors(
-    file_dir: str, cfg: model_lib.ModelConfig, mesh: jax.sharding.Mesh
+    file_dir: str, cfg: model_lib.ModelConfig, mesh: jax.sharding.Mesh | None = None
 ) -> model_lib.Qwen3:
     """Load tensors from the safetensors file and create a Qwen3 model (memory-optimized)."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
@@ -109,7 +114,8 @@ def create_model_from_safe_tensors(
     qwen3 = nnx.eval_shape(lambda: model_lib.Qwen3(cfg, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(qwen3)
     state_dict = abs_state.to_pure_dict()
-    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
+    # Only use sharding if mesh is provided
+    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
     key_mapping = _get_key_and_transform_mapping(cfg)
     conversion_errors = []
@@ -136,6 +142,6 @@ def create_model_from_safe_tensors(
         raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
 
     if cfg.tie_word_embeddings:
-        state_dict["lm_head"]["w"] = state_dict["embedder"]["input_emb"].T
+        state_dict["lm_head"]["w"] = state_dict["embedder"]["embedding"].T
     gc.collect()
     return nnx.merge(graph_def, state_dict)
