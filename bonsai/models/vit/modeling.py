@@ -66,8 +66,8 @@ class Embeddings(nnx.Module):
         self.projection = nnx.Conv(
             cfg.num_channels, cfg.hidden_dim, kernel_size=cfg.patch_size, strides=cfg.patch_size, rngs=rngs
         )
-        self.cls_token = nnx.Variable(jax.random.normal(rngs.params(), (1, 1, cfg.hidden_dim)))
-        self.pos_embeddings = nnx.Variable(jax.random.normal(rngs.params(), (1, num_patches + 1, cfg.hidden_dim)))
+        self.cls_token = nnx.Param(jax.random.normal(rngs.params(), (1, 1, cfg.hidden_dim)))
+        self.pos_embeddings = nnx.Param(jax.random.normal(rngs.params(), (1, num_patches + 1, cfg.hidden_dim)))
         self.dropout = nnx.Dropout(cfg.dropout_prob)
 
     def __call__(self, pixel_values: jnp.ndarray, *, rngs: nnx.Rngs | None) -> jnp.ndarray:
