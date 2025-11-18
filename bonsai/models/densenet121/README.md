@@ -2,10 +2,11 @@
 
 This directory contains a pure JAX implementation of the [DenseNet-121](https://huggingface.co/keras/densenet_121_imagenet) model, using the Flax NNX API. 
 
-## Tested on
-| Model Name                                              | Config | CPU | GPU A100 (1x) | GPU H100 (1x) | GPU A100 (8x) | GPU H100 (8x) | TPU v2 (8x) | TPU v5e (1x) |
-|:--------------------------------------------------------| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| [DenseNet-121](https://huggingface.co/keras/densenet_121_imagenet) | ✅ Supported | ✅ Runs |  ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check   | ❔ Needs check  | ❔ Needs check  |
+## Model Configuration Support Status
+
+| Model Name | Config Support Status |
+| :--- | :--- |
+| [DenseNet-121](https://huggingface.co/keras/densenet_121_imagenet) | **✅ Supported** |
 
 ### Running this model
 
