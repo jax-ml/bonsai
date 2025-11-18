@@ -289,14 +289,15 @@ class Attention(nnx.Module):
         self.q_norm = RMSNorm(cfg.head_dim, cfg, rngs=rngs)
         self.k_norm = RMSNorm(cfg.head_dim, cfg, rngs=rngs)
         self.n_rep = cfg.num_heads // cfg.num_kv_heads
-        self.scale = self.head_dim**-0.5
+        self.scale = cfg.head_dim**-0.5
 
     @jax.named_scope("attention")
     def __call__(self, x: Array, cache: LayerCache | None, segment_ids: Array) -> Array:
-        query_proj = shard(self.q_norm(self.q_proj(x)), self.shd_cfg.act_btnh)
-        key_proj = shard(self.k_norm(self.k_proj(x)), self.shd_cfg.act_btnh)
-        value_proj = shard(self.v_proj(x), self.shd_cfg.act_btnh)
+        query_proj = shard(self.q_norm(self.q_proj(x)), self.shd_cfg.act_btnh)  # [B, T, N, H]
+        key_proj = shard(self.k_norm(self.k_proj(x)), self.shd_cfg.act_btnh)  # [B, T, K, H]
+        value_proj = shard(self.v_proj(x), self.shd_cfg.act_btnh)  # [B, T, K, H]
 
+        # RoPE and Cache Logic
         left_pads = count_left_pads(segment_ids)
         left_pads = shard(left_pads, P(self.shd_cfg.act_btnh[0]))
         cache.start_ind.value = jnp.where(cache.start_ind.value < 0, left_pads, cache.start_ind.value)
@@ -305,25 +306,32 @@ class Attention(nnx.Module):
         query_proj = apply_rope(query_proj, sin, cos)
         key_proj = apply_rope(key_proj, sin, cos)
 
+        # Update K/V cache [B, S, K, H]
         slice_indices = (0, cache.cur_ind.value, 0, 0)
         cache.v_cache.value = jax.lax.dynamic_update_slice(cache.v_cache.value, value_proj, slice_indices)
         cache.k_cache.value = jax.lax.dynamic_update_slice(cache.k_cache.value, key_proj, slice_indices)
-        b, t, qh, d = query_proj.shape
 
-        # GQA
-        query_proj = query_proj.reshape((b, t, self.num_kv_heads, qh // self.num_kv_heads, d))
-        attn_logits = jnp.einsum("BTHGD,BSHD->BHGTS", query_proj, cache.k_cache.value) * self.scale
+        b, t, n, h = query_proj.shape
+
+        # GQA reshape and attention logits
+        query_proj_gqa = query_proj.reshape((b, t, self.num_kv_heads, self.n_rep, h))
+        attn_logits = jnp.einsum("BTKGH,BSKH->BTSKG", query_proj_gqa, cache.k_cache.value) * self.scale
+
+        # Masking and Softmax
         q_pos = cache.cur_ind.value + jnp.arange(t, dtype=jnp.int32)[None, :] - cache.start_ind.value[:, None]
-        ts = jnp.arange(cache.size, dtype=jnp.int32)  # (b, cache.size)
-
+        ts = jnp.arange(cache.size, dtype=jnp.int32)  # (cache.size,)
         kv_segment_ids = (ts[None, :] >= cache.start_ind.value[:, None]) & (ts[None, :] < cache.cur_ind.value + t)
         k_pos = ts[None, :] - cache.start_ind.value[:, None]  # (b, cache.size)
         causal_mask = k_pos[:, None, :] <= q_pos[:, :, None]
         segment_mask = kv_segment_ids[:, None, :] == segment_ids[:, :, None]
-        final_mask = causal_mask & segment_mask  # (b, q_len, k_len)
-        attn_logits = jnp.where(final_mask[:, None, None, :, :], attn_logits, _K_MASK)
-        attn_weights = jax.nn.softmax(attn_logits.astype(jnp.float32), axis=-1).astype(attn_logits.dtype)
-        qkv = jnp.einsum("BHGTS,BSHD->BTHGD", attn_weights, cache.v_cache.value).reshape((b, t, qh, d))
+        final_mask = causal_mask & segment_mask  # (B, T, S)
+        attn_mask = final_mask[:, :, :, None, None]
+        attn_logits = jnp.where(attn_mask, attn_logits, _K_MASK)
+
+        # Softmax
+        attn_weights = jax.nn.softmax(attn_logits.astype(jnp.float32), axis=2).astype(attn_logits.dtype)
+        qkv = jnp.einsum("BTSKG,BSKH->BTKGH", attn_weights, cache.v_cache.value)
+        qkv = qkv.reshape((b, t, n, h))
 
         cache.cur_ind.value = cache.cur_ind.value + t
         return shard(self.o_proj(qkv), self.shd_cfg.act_btd)
