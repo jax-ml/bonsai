@@ -8,7 +8,7 @@ We're committed to making popular models accessible in JAX through simple, hacka
 
 
 > [!TIP]
-> For large-scale or industry use on Google Cloud, see [MaxText](https://github.com/AI-Hypercomputer/maxtext) and [MaxDiffusion](https://github.com/AI-Hypercomputer/maxdiffusion).
+> For large-scale or industry use on Google Cloud, see [MaxText](https://github.com/AI-Hypercomputer/maxtext), [MaxDiffusion](https://github.com/AI-Hypercomputer/maxdiffusion) and [SGLang-JAX](https://github.com/sgl-project/sglang-jax).
 
 
 ## Models
