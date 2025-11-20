@@ -1,12 +1,15 @@
+from typing import Optional, Sequence
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from typing import Sequence, Optional
+
 
 class DropPath(nnx.Module):
     """
     Stochastic depth (DropPath) module, compatible with JAX jit.
     """
+
     def __init__(self, drop_prob: float = 0.0):
         self.drop_prob = drop_prob
 
@@ -30,7 +33,6 @@ class DropPath(nnx.Module):
 
 
 class Block(nnx.Module):
-
     def __init__(self, dim: int, drop_path: float = 0.0, layer_scale_init_value=1e-6, *, rngs: nnx.Rngs):
         self.dwconv = nnx.Conv(
             in_features=dim,
@@ -42,14 +44,14 @@ class Block(nnx.Module):
         )
         self.norm = nnx.LayerNorm(dim, epsilon=1e-6, rngs=rngs)
         self.pwconv1 = nnx.Linear(dim, 4 * dim, rngs=rngs)
-        self.activation = nnx.gelu
+        # Use exact GELU to match PyTorch
+        self.activation = lambda x: jax.nn.gelu(x, approximate=False)
         self.pwconv2 = nnx.Linear(4 * dim, dim, rngs=rngs)
 
         self.gamma = nnx.Param(layer_scale_init_value * jnp.ones((dim))) if layer_scale_init_value > 0 else None
         self.drop_path = DropPath(drop_path)
 
     def __call__(self, x, rng: Optional[jax.Array] = None, train: bool = True):
-
         if rng is None:
             rng = jax.random.PRNGKey(0)
 
@@ -72,6 +74,7 @@ class EmbeddingsWrapper(nnx.Module):
     Thin wrapper so `embeddings` returns NCHW (PyTorch style) like HF ConvNeXt 'embeddings'.
     Internally uses a provided `stem` module (which expects NHWC input and returns NHWC).
     """
+
     def __init__(self, stem: nnx.Module):
         self.stem = stem
 
@@ -102,8 +105,8 @@ class ConvNeXt(nnx.Module):
         stem = nnx.Sequential(
             nnx.Conv(in_features=in_chans, out_features=dims[0], kernel_size=(4, 4), strides=(4, 4), rngs=rngs),
             nnx.LayerNorm(dims[0], epsilon=1e-6, rngs=rngs),
-        )        
-        
+        )
+
         self.embeddings = EmbeddingsWrapper(stem)
 
         self.downsample_layers.append(stem)
@@ -163,6 +166,7 @@ class ConvNeXt(nnx.Module):
         x = self.norm(x)
         x = self.head(x)
         return x
+
 
 @jax.jit
 def forward(
