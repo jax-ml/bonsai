@@ -2,11 +2,11 @@
 
 This directory contains a pure JAX implementation of the [ViT](https://huggingface.co/google/vit-base-patch16-224) model, using the Flax NNX API.
 
-## Tested on
+## Model Configuration Support Status
 
-| Model Name | Config | CPU | GPU A100 (1x) | GPU H100 (1x) | GPU A100 (8x) | GPU H100 (8x) | TPU v2 (8x) | TPU v5e (1x) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| [ViT](https://huggingface.co/google/vit-base-patch16-224) | ✅ Supported | ✅ Runs |  ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check   | ❔ Needs check  | ❔ Needs check  |
+| Model Name | Config Support Status |
+| :--- | :--- |
+| [vit-base-patch16-224](https://huggingface.co/google/vit-base-patch16-224) | **✅ Supported** |
 
 ### Running this model
 
