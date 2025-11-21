@@ -3,15 +3,12 @@
 This directory contains a pure JAX implementation of the [VAE - Variational Autoencoder](https://arxiv.org/abs/1312.6114), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API, including procedures to train, save and load weights, and make inference.
 
 
-## Tested on:  
-*(Last Updated: 2025-09-19)*
+## Model Configuration Support Status
 
- 
-
-| Model Name | Config | CPU | GPU A100 (1x) | GPU H100 (1x) | GPU A100 (8x) | GPU H100 (8x) | TPU v2 (8x) | TPU v5e (1x) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Model** | | | | | | | | |
-| [VAE - Variational Autoencoder](https://arxiv.org/abs/1312.6114) | ✅ Supported | ✅ Runs | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |❔ Needs check | ❔ Needs check |
+| Model Name | Config Support Status |
+| :--- | :--- |
+| **Model** | |
+| [VAE - Variational Autoencoder](https://arxiv.org/abs/1312.6114) | **✅ Supported** |
 
 
 ### Running this model

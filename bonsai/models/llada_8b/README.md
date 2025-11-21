@@ -2,13 +2,12 @@
 
 This directory contains a pure JAX implementation of the [LLaDA diffusion model](https://huggingface.co/GSAI-ML/LLaDA-8B-Instruct), using the [Flax NNX](flax.readthedocs.io/en/stable/index.html) API.
 
-## Tested on:
-*(Last Updated: 2025-10-20)*
+## Model Configuration Support Status
 
-| Model Name | Config | CPU | GPU A100 (1x) | GPU H100 (1x) | GPU A100 (8x) | GPU H100 (8x) | TPU v2 (8x) | TPU v5e (1x) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Dense Models** | | | | | | | | |
-| [LLaDA-8B-Instruct](https://huggingface.co/GSAI-ML/LLaDA-8B-Instruct) | ✅ Supported | ✅ Runs | ❔ Needs check  | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ✅ Runs |
+| Model Name | Config Support Status |
+| :--- | :--- |
+| **Dense Models** | |
+| [LLaDA-8B-Instruct](https://huggingface.co/GSAI-ML/LLaDA-8B-Instruct) | **✅ Supported** |
 
 ## How to contribute to this model
 
