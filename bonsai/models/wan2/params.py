@@ -31,6 +31,7 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
 
     class Transform(Enum):
         """Transformations for model parameters"""
+
         NONE = None
         TRANSPOSE = ((1, 0), None, False)  # Simple transpose for linear layers
 
@@ -40,16 +41,13 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
         # Input projection
         r"transformer\.pos_embed\.proj\.weight": ("input_proj.kernel", Transform.TRANSPOSE),
         r"transformer\.pos_embed\.proj\.bias": ("input_proj.bias", Transform.NONE),
-
         # Time embedding
         r"transformer\.time_embed\.linear_1\.weight": ("time_embed.linear1.kernel", Transform.TRANSPOSE),
         r"transformer\.time_embed\.linear_1\.bias": ("time_embed.linear1.bias", Transform.NONE),
         r"transformer\.time_embed\.linear_2\.weight": ("time_embed.linear2.kernel", Transform.TRANSPOSE),
         r"transformer\.time_embed\.linear_2\.bias": ("time_embed.linear2.bias", Transform.NONE),
-
         # Positional embeddings
         r"transformer\.pos_embed\.pos_embed": ("pos_embed.pos_embed", Transform.NONE),
-
         # Transformer blocks
         r"transformer\.blocks\.([0-9]+)\.norm1\.weight": (r"blocks.\1.norm1.scale", Transform.NONE),
         r"transformer\.blocks\.([0-9]+)\.norm1\.bias": (r"blocks.\1.norm1.bias", Transform.NONE),
@@ -57,38 +55,60 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
         r"transformer\.blocks\.([0-9]+)\.norm2\.bias": (r"blocks.\1.norm2.bias", Transform.NONE),
         r"transformer\.blocks\.([0-9]+)\.norm3\.weight": (r"blocks.\1.norm3.scale", Transform.NONE),
         r"transformer\.blocks\.([0-9]+)\.norm3\.bias": (r"blocks.\1.norm3.bias", Transform.NONE),
-
         # Self-attention
         r"transformer\.blocks\.([0-9]+)\.attn\.qkv\.weight": (r"blocks.\1.self_attn.qkv.kernel", Transform.TRANSPOSE),
         r"transformer\.blocks\.([0-9]+)\.attn\.qkv\.bias": (r"blocks.\1.self_attn.qkv.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.attn\.proj\.weight": (r"blocks.\1.self_attn.out_proj.kernel", Transform.TRANSPOSE),
+        r"transformer\.blocks\.([0-9]+)\.attn\.proj\.weight": (
+            r"blocks.\1.self_attn.out_proj.kernel",
+            Transform.TRANSPOSE,
+        ),
         r"transformer\.blocks\.([0-9]+)\.attn\.proj\.bias": (r"blocks.\1.self_attn.out_proj.bias", Transform.NONE),
-
         # Cross-attention
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.q\.weight": (r"blocks.\1.cross_attn.q_proj.kernel", Transform.TRANSPOSE),
+        r"transformer\.blocks\.([0-9]+)\.cross_attn\.q\.weight": (
+            r"blocks.\1.cross_attn.q_proj.kernel",
+            Transform.TRANSPOSE,
+        ),
         r"transformer\.blocks\.([0-9]+)\.cross_attn\.q\.bias": (r"blocks.\1.cross_attn.q_proj.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.kv\.weight": (r"blocks.\1.cross_attn.kv_proj.kernel", Transform.TRANSPOSE),
+        r"transformer\.blocks\.([0-9]+)\.cross_attn\.kv\.weight": (
+            r"blocks.\1.cross_attn.kv_proj.kernel",
+            Transform.TRANSPOSE,
+        ),
         r"transformer\.blocks\.([0-9]+)\.cross_attn\.kv\.bias": (r"blocks.\1.cross_attn.kv_proj.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.proj\.weight": (r"blocks.\1.cross_attn.out_proj.kernel", Transform.TRANSPOSE),
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.proj\.bias": (r"blocks.\1.cross_attn.out_proj.bias", Transform.NONE),
-
+        r"transformer\.blocks\.([0-9]+)\.cross_attn\.proj\.weight": (
+            r"blocks.\1.cross_attn.out_proj.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"transformer\.blocks\.([0-9]+)\.cross_attn\.proj\.bias": (
+            r"blocks.\1.cross_attn.out_proj.bias",
+            Transform.NONE,
+        ),
         # MLP
         r"transformer\.blocks\.([0-9]+)\.mlp\.fc1\.weight": (r"blocks.\1.mlp.fc1.kernel", Transform.TRANSPOSE),
         r"transformer\.blocks\.([0-9]+)\.mlp\.fc1\.bias": (r"blocks.\1.mlp.fc1.bias", Transform.NONE),
         r"transformer\.blocks\.([0-9]+)\.mlp\.fc2\.weight": (r"blocks.\1.mlp.fc2.kernel", Transform.TRANSPOSE),
         r"transformer\.blocks\.([0-9]+)\.mlp\.fc2\.bias": (r"blocks.\1.mlp.fc2.bias", Transform.NONE),
-
         # AdaLN modulation
-        r"transformer\.blocks\.([0-9]+)\.adaLN_modulation\.1\.weight": (r"blocks.\1.adaLN_modulation.layers_1.kernel", Transform.TRANSPOSE),
-        r"transformer\.blocks\.([0-9]+)\.adaLN_modulation\.1\.bias": (r"blocks.\1.adaLN_modulation.layers_1.bias", Transform.NONE),
-
+        r"transformer\.blocks\.([0-9]+)\.adaLN_modulation\.1\.weight": (
+            r"blocks.\1.adaLN_modulation.layers_1.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"transformer\.blocks\.([0-9]+)\.adaLN_modulation\.1\.bias": (
+            r"blocks.\1.adaLN_modulation.layers_1.bias",
+            Transform.NONE,
+        ),
         # Final layer
         r"transformer\.final_layer\.norm\.weight": ("final_layer.norm.scale", Transform.NONE),
         r"transformer\.final_layer\.norm\.bias": ("final_layer.norm.bias", Transform.NONE),
         r"transformer\.final_layer\.linear\.weight": ("final_layer.linear.kernel", Transform.TRANSPOSE),
         r"transformer\.final_layer\.linear\.bias": ("final_layer.linear.bias", Transform.NONE),
-        r"transformer\.final_layer\.adaLN_modulation\.1\.weight": ("final_layer.adaLN_modulation.layers_1.kernel", Transform.TRANSPOSE),
-        r"transformer\.final_layer\.adaLN_modulation\.1\.bias": ("final_layer.adaLN_modulation.layers_1.bias", Transform.NONE),
+        r"transformer\.final_layer\.adaLN_modulation\.1\.weight": (
+            "final_layer.adaLN_modulation.layers_1.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"transformer\.final_layer\.adaLN_modulation\.1\.bias": (
+            "final_layer.adaLN_modulation.layers_1.bias",
+            Transform.NONE,
+        ),
     }
 
     return mapping

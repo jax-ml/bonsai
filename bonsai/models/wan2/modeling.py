@@ -36,6 +36,20 @@ from flax import nnx
 from jaxtyping import Array
 
 
+class WanLayerNorm(nnx.LayerNorm):
+    # disable use_bias and use_scale because for AdaLN modulation
+
+    def __init__(self, dim: int, eps: float = 1e-6, use_scale: bool = False, use_bias: bool = False, *, rngs: nnx.Rngs):
+        super().__init__(dim, epsilon=eps, use_scale=use_scale, use_bias=use_bias, rngs=rngs)
+
+    @jax.named_scope("wan_layer_norm")
+    def __call__(self, x: Array) -> Array:
+        original_dtype = x.dtype
+        x_float = x.astype(jnp.float32)
+        x_normed = super().__call__(x_float)
+        return x_normed.astype(original_dtype)
+
+
 @dataclasses.dataclass(frozen=True)
 class ModelConfig:
     """Configuration for Wan2.1-T2V-1.3B Diffusion Transformer."""
@@ -72,19 +86,7 @@ class ModelConfig:
         return cls()
 
 
-def get_timestep_embedding(timesteps: Array, embedding_dim: int,
-                           max_period: int = 10000) -> Array:
-    """
-    Create sinusoidal timestep embeddings.
-
-    Args:
-        timesteps: [B] array of timesteps
-        embedding_dim: Dimension of the embedding
-        max_period: Controls the minimum frequency
-
-    Returns:
-        Embedding of shape [B, embedding_dim]
-    """
+def sinusoidal_embedding_1d(timesteps: Array, embedding_dim: int, max_period: int = 10000) -> Array:
     half_dim = embedding_dim // 2
     freqs = jnp.exp(-math.log(max_period) * jnp.arange(0, half_dim) / half_dim)
     args = timesteps[:, None] * freqs[None, :]
@@ -110,14 +112,11 @@ class TimestepEmbedding(nnx.Module):
         self.time_embedding = nnx.Sequential(
             nnx.Linear(cfg.freq_dim, cfg.hidden_dim, rngs=rngs),
             nnx.silu,
-            nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
+            nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs),
         )
 
         # time_projection: projects to 6D for AdaLN
-        self.time_projection = nnx.Sequential(
-            nnx.silu,
-            nnx.Linear(cfg.hidden_dim, 6 * cfg.hidden_dim, rngs=rngs)
-        )
+        self.time_projection = nnx.Sequential(nnx.silu, nnx.Linear(cfg.hidden_dim, 6 * cfg.hidden_dim, rngs=rngs))
 
     @jax.named_scope("timestep_embedding")
     def __call__(self, t: Array) -> tuple[Array, Array]:
@@ -129,7 +128,7 @@ class TimestepEmbedding(nnx.Module):
             time_proj: [B, 6 * hidden_dim] projected for AdaLN modulation
         """
         # Generate sinusoidal embeddings
-        t_freq = get_timestep_embedding(t, self.cfg.freq_dim)
+        t_freq = sinusoidal_embedding_1d(t, self.cfg.freq_dim)
 
         # Process through time_embedding MLP
         time_emb = self.time_embedding(t_freq)  # [B, D]
@@ -141,22 +140,8 @@ class TimestepEmbedding(nnx.Module):
 
 
 def rope_params(max_seq_len: int, dim: int, theta: float = 10000.0) -> Array:
-    """
-    Create RoPE frequency parameters matching Wan2 implementation.
-
-    Args:
-        max_seq_len: Maximum sequence length (usually 1024)
-        dim: Dimension for this component
-        theta: Base frequency (10000)
-
-    Returns:
-        [max_seq_len, dim // 2, 2] complex frequencies as [cos, sin]
-    """
     # Create frequency schedule: 1 / theta^(2i/dim)
-    freqs = 1.0 / jnp.power(
-        theta,
-        jnp.arange(0, dim, 2, dtype=jnp.float32) / dim
-    )
+    freqs = 1.0 / jnp.power(theta, jnp.arange(0, dim, 2, dtype=jnp.float32) / dim)
 
     # Outer product with positions
     positions = jnp.arange(max_seq_len, dtype=jnp.float32)
@@ -165,45 +150,29 @@ def rope_params(max_seq_len: int, dim: int, theta: float = 10000.0) -> Array:
     # Convert to complex representation [cos, sin]
     freqs_cos = jnp.cos(freqs)
     freqs_sin = jnp.sin(freqs)
-    freqs_cis = jnp.stack([freqs_cos, freqs_sin], axis=-1)  # [max_seq_len, dim // 2, 2]
+    freqs_cis = jnp.stack([freqs_cos, freqs_sin], axis=-1)
 
     return freqs_cis
 
 
 def precompute_freqs_cis_3d(
     dim: int,
-    num_frames: int,
-    height: int,
-    width: int,
     theta: float = 10000.0,
     max_seq_len: int = 1024,
 ) -> tuple[Array, Array, Array]:
     """
     Precompute RoPE frequencies for 3D video (temporal + spatial).
 
-    Matches Wan2 implementation where dimensions are split as:
+    dimensions are split as:
     - Temporal: dim - 4*(dim//6)
     - Height: 2*(dim//6)
     - Width: 2*(dim//6)
-
-    For dim=128: 128 - 84 = 44, 42, 42 dims
-
-    Args:
-        dim: Head dimension (e.g., 128)
-        num_frames: Number of temporal positions
-        height: Spatial height
-        width: Spatial width
-        theta: Base frequency
-        max_seq_len: Maximum sequence length (1024)
-
-    Returns:
-        Tuple of (freqs_t, freqs_h, freqs_w) each with shape [max_seq_len, dim_component // 2, 2]
     """
     # Split dimension according to Wan2 formula
     dim_base = dim // 6
     dim_t = dim - 4 * dim_base  # Temporal gets more dims
-    dim_h = 2 * dim_base        # Height
-    dim_w = 2 * dim_base        # Width
+    dim_h = 2 * dim_base  # Height
+    dim_w = 2 * dim_base  # Width
 
     # Verify the split is correct
     assert dim_t + dim_h + dim_w == dim, f"Dimension split error: {dim_t} + {dim_h} + {dim_w} != {dim}"
@@ -221,22 +190,11 @@ def rope_apply(
     grid_sizes: tuple[int, int, int],
     freqs: tuple[Array, Array, Array],
 ) -> Array:
-    """
-    Apply 3D RoPE to input matching Wan2 implementation.
-
-    Args:
-        x: [B, seq_len, num_heads, head_dim] input
-        grid_sizes: (num_frames, height, width) for the video grid
-        freqs: Tuple of (freqs_t, freqs_h, freqs_w) each [1024, dim_component // 2, 2]
-
-    Returns:
-        [B, seq_len, num_heads, head_dim] with RoPE applied
-    """
     b, seq_len, num_heads, head_dim = x.shape
     f, h, w = grid_sizes
 
     # Verify sequence length matches grid
-    assert f * h * w == seq_len, f"Grid size {f}x{h}x{w}={f*h*w} != seq_len {seq_len}"
+    assert f * h * w == seq_len, f"Grid size {f}x{h}x{w}={f * h * w} != seq_len {seq_len}"
 
     # Split freqs into temporal, height, width components
     freqs_t, freqs_h, freqs_w = freqs
@@ -249,23 +207,17 @@ def rope_apply(
 
     # Build 3D positional grid by concatenating T, H, W frequencies
     # Shape: [f, h, w, head_dim // 2, 2]
-    freqs_grid = jnp.concatenate([
-        # Temporal: [f, 1, 1, dim_t // 2, 2] → [f, h, w, dim_t // 2, 2]
-        jnp.broadcast_to(
-            freqs_t[:f, None, None, :, :],
-            (f, h, w, dim_t // 2, 2)
-        ),
-        # Height: [1, h, 1, dim_h // 2, 2] → [f, h, w, dim_h // 2, 2]
-        jnp.broadcast_to(
-            freqs_h[None, :h, None, :, :],
-            (f, h, w, dim_h // 2, 2)
-        ),
-        # Width: [1, 1, w, dim_w // 2, 2] → [f, h, w, dim_w // 2, 2]
-        jnp.broadcast_to(
-            freqs_w[None, None, :w, :, :],
-            (f, h, w, dim_w // 2, 2)
-        ),
-    ], axis=3)  # [f, h, w, head_dim // 2, 2]
+    freqs_grid = jnp.concatenate(
+        [
+            # Temporal: [f, 1, 1, dim_t // 2, 2] → [f, h, w, dim_t // 2, 2]
+            jnp.broadcast_to(freqs_t[:f, None, None, :, :], (f, h, w, dim_t // 2, 2)),
+            # Height: [1, h, 1, dim_h // 2, 2] → [f, h, w, dim_h // 2, 2]
+            jnp.broadcast_to(freqs_h[None, :h, None, :, :], (f, h, w, dim_h // 2, 2)),
+            # Width: [1, 1, w, dim_w // 2, 2] → [f, h, w, dim_w // 2, 2]
+            jnp.broadcast_to(freqs_w[None, None, :w, :, :], (f, h, w, dim_w // 2, 2)),
+        ],
+        axis=3,
+    )  # [f, h, w, head_dim // 2, 2]
 
     # Reshape to sequence: [seq_len, head_dim // 2, 2]
     freqs_grid = freqs_grid.reshape(seq_len, head_dim // 2, 2)
@@ -279,10 +231,13 @@ def rope_apply(
     # Complex multiplication: (x_r + i*x_i) * (cos + i*sin)
     # Real part: x_r * cos - x_i * sin
     # Imag part: x_r * sin + x_i * cos
-    x_out = jnp.stack([
-        x_complex[..., 0] * freqs_grid[..., 0] - x_complex[..., 1] * freqs_grid[..., 1],  # Real
-        x_complex[..., 0] * freqs_grid[..., 1] + x_complex[..., 1] * freqs_grid[..., 0],  # Imag
-    ], axis=-1)
+    x_out = jnp.stack(
+        [
+            x_complex[..., 0] * freqs_grid[..., 0] - x_complex[..., 1] * freqs_grid[..., 1],  # Real
+            x_complex[..., 0] * freqs_grid[..., 1] + x_complex[..., 1] * freqs_grid[..., 0],  # Imag
+        ],
+        axis=-1,
+    )
 
     # Reshape back to original shape
     x_out = x_out.reshape(b, seq_len, num_heads, head_dim)
@@ -292,38 +247,19 @@ def rope_apply(
 class PositionalEmbedding3D(nnx.Module):
     """
     3D RoPE (Rotary Position Embeddings) for video (temporal + spatial).
-    Matches Wan2 implementation with separate T/H/W frequency components.
     """
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
-        # After patchify: spatial dims are reduced by 2x
-        self.patch_h = cfg.latent_size[0] // 2  # 60 -> 30
-        self.patch_w = cfg.latent_size[1] // 2  # 104 -> 52
 
         # Precompute RoPE frequency components for head_dim
         self.freqs_t, self.freqs_h, self.freqs_w = precompute_freqs_cis_3d(
             dim=cfg.head_dim,
-            num_frames=cfg.num_frames,
-            height=self.patch_h,
-            width=self.patch_w,
             theta=10000.0,
         )
 
     @jax.named_scope("positional_embedding_3d")
     def get_freqs_and_grid(self, num_frames: int, height: int, width: int):
-        """
-        Get RoPE frequencies and grid sizes for the current input.
-
-        Args:
-            num_frames: Number of frames in current input
-            height: Height after patchify
-            width: Width after patchify
-
-        Returns:
-            freqs: Tuple of (freqs_t, freqs_h, freqs_w)
-            grid_sizes: Tuple of (num_frames, height, width)
-        """
         freqs = (self.freqs_t, self.freqs_h, self.freqs_w)
         grid_sizes = (num_frames, height, width)
         return freqs, grid_sizes
@@ -350,7 +286,7 @@ class MultiHeadAttention(nnx.Module):
         self.dropout = nnx.Dropout(cfg.attention_dropout, rngs=rngs)
 
     @jax.named_scope("multi_head_attention")
-    def __call__(self, x: Array, rope_state: tuple = None, deterministic: bool = True) -> Array:
+    def __call__(self, x: Array, rope_state: tuple | None = None, deterministic: bool = True) -> Array:
         """
         Args:
             x: [B, N, D] input tokens
@@ -359,7 +295,7 @@ class MultiHeadAttention(nnx.Module):
         Returns:
             [B, N, D] attended features
         """
-        b, n, d = x.shape
+        b, n, _d = x.shape
 
         # Compute Q, K, V
         q = self.q_proj(x).reshape(b, n, self.num_heads, self.head_dim)
@@ -391,12 +327,12 @@ class MultiHeadAttention(nnx.Module):
 
         # Scaled dot-product attention
         scale = 1.0 / math.sqrt(self.head_dim)
-        attn_weights = jnp.einsum('bhid,bhjd->bhij', q, k) * scale
+        attn_weights = jnp.einsum("bhid,bhjd->bhij", q, k) * scale
         attn_weights = jax.nn.softmax(attn_weights, axis=-1)
         attn_weights = self.dropout(attn_weights, deterministic=deterministic)
 
         # Apply attention to values
-        attn_output = jnp.einsum('bhij,bhjd->bhid', attn_weights, v)
+        attn_output = jnp.einsum("bhij,bhjd->bhid", attn_weights, v)
         attn_output = jnp.transpose(attn_output, (0, 2, 1, 3))  # [B, N, H, D]
         attn_output = attn_output.reshape(b, n, -1)  # [B, N, H*D]
 
@@ -431,7 +367,7 @@ class CrossAttention(nnx.Module):
         Returns:
             [B, N, D] cross-attended features
         """
-        b, n, d = x.shape
+        b, n, _d = x.shape
         _, m, _ = context.shape
 
         # Query from video
@@ -450,12 +386,12 @@ class CrossAttention(nnx.Module):
 
         # Scaled dot-product attention
         scale = 1.0 / math.sqrt(self.head_dim)
-        attn_weights = jnp.einsum('bhid,bhjd->bhij', q, k) * scale
+        attn_weights = jnp.einsum("bhid,bhjd->bhij", q, k) * scale
         attn_weights = jax.nn.softmax(attn_weights, axis=-1)
         attn_weights = self.dropout(attn_weights, deterministic=deterministic)
 
         # Apply attention to values
-        attn_output = jnp.einsum('bhij,bhjd->bhid', attn_weights, v)
+        attn_output = jnp.einsum("bhij,bhjd->bhid", attn_weights, v)
         attn_output = jnp.transpose(attn_output, (0, 2, 1, 3))  # [B, N, H, D]
         attn_output = attn_output.reshape(b, n, -1)  # [B, N, H*D]
 
@@ -511,13 +447,12 @@ class WanAttentionBlock(nnx.Module):
         self.mlp = MLP(cfg, rngs=rngs)
 
         # Learnable modulation parameter
-        self.modulation = nnx.Param(
-            jax.random.normal(rngs.params(), (1, 6, cfg.hidden_dim)) / (cfg.hidden_dim**0.5)
-        )
+        self.modulation = nnx.Param(jax.random.normal(rngs.params(), (1, 6, cfg.hidden_dim)) / (cfg.hidden_dim**0.5))
 
     @jax.named_scope("wan_attention_block")
-    def __call__(self, x: Array, text_embeds: Array,
-                 time_emb: Array, rope_state: tuple = None, deterministic: bool = True) -> Array:
+    def __call__(
+        self, x: Array, text_embeds: Array, time_emb: Array, rope_state: tuple | None = None, deterministic: bool = True
+    ) -> Array:
         """
         Args:
             x: [B, N, D] video tokens
@@ -537,11 +472,10 @@ class WanAttentionBlock(nnx.Module):
         modulation = nnx.silu(reshaped_time_emb + self.modulation.value)
         modulation = modulation.reshape(b, -1)  # [B, 6*D]
 
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = \
-            jnp.split(modulation, 6, axis=-1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
 
         # Self-attention with AdaLN modulation and RoPE
-        print("video tokens:",x.shape)
+        print("video tokens:", x.shape)
         norm_x = self.norm1(x)
         norm_x = modulate(norm_x, shift_msa[:, None, :], scale_msa[:, None, :])
         attn_out = self.self_attn(norm_x, rope_state=rope_state, deterministic=deterministic)
@@ -562,10 +496,7 @@ class WanAttentionBlock(nnx.Module):
 
 
 class FinalLayer(nnx.Module):
-    """Final layer that predicts noise from DiT output.
-
-    Matches HuggingFace Wan Head implementation.
-    """
+    """Final layer that predicts noise from DiT output."""
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
@@ -573,9 +504,7 @@ class FinalLayer(nnx.Module):
         self.linear = nnx.Linear(cfg.hidden_dim, cfg.output_dim, rngs=rngs)
 
         # Learnable modulation parameter (matches HF: torch.randn / dim**0.5)
-        self.modulation = nnx.Param(
-            jax.random.normal(rngs.params(), (1, 2, cfg.hidden_dim)) / (cfg.hidden_dim**0.5)
-        )
+        self.modulation = nnx.Param(jax.random.normal(rngs.params(), (1, 2, cfg.hidden_dim)) / (cfg.hidden_dim**0.5))
 
     @jax.named_scope("final_layer")
     def __call__(self, x: Array, time_emb: Array) -> Array:
@@ -586,8 +515,6 @@ class FinalLayer(nnx.Module):
         Returns:
             [B, N, output_dim] predicted noise
         """
-        b = x.shape[0]
-
         # Add learnable modulation to time embedding and split
         # Matches HF: (self.modulation + e.unsqueeze(1)).chunk(2, dim=1)
         # [B, D] → [B, 1, D] + [1, 2, D] → [B, 2, D]
@@ -604,24 +531,21 @@ class FinalLayer(nnx.Module):
 class Wan2DiT(nnx.Module):
     """
     Wan2.1-T2V-1.3B Diffusion Transformer.
-
-    This is the core denoising model that takes noisy video latents and
-    text embeddings, and predicts the noise to be removed.
     """
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
 
-        #3D Conv to patchify video latents
+        # 3D Conv to patchify video latents
         # (T, H, W) → (T, H/2, W/2)
         self.patch_embed = nnx.Conv(
             in_features=cfg.input_dim,
             out_features=cfg.hidden_dim,
             kernel_size=(1, 2, 2),
             strides=(1, 2, 2),
-            padding='VALID',
+            padding="VALID",
             use_bias=True,
-            rngs=rngs
+            rngs=rngs,
         )
 
         # Text embedding projection: T5 (4096) → DiT (1536)
@@ -629,7 +553,7 @@ class Wan2DiT(nnx.Module):
         self.text_proj = nnx.Sequential(
             nnx.Linear(cfg.text_embed_dim, cfg.hidden_dim, rngs=rngs),
             nnx.gelu,
-            nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
+            nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs),
         )
 
         # Time embedding
@@ -639,15 +563,13 @@ class Wan2DiT(nnx.Module):
         self.pos_embed = PositionalEmbedding3D(cfg, rngs=rngs)
 
         # 30 transformer blocks
-        self.blocks = nnx.List([WanAttentionBlock(cfg, rngs=rngs)
-                                for _ in range(cfg.num_layers)])
+        self.blocks = nnx.List([WanAttentionBlock(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
 
         # Final layer
         self.final_layer = FinalLayer(cfg, rngs=rngs)
 
     @jax.named_scope("wan2_dit")
-    def __call__(self, latents: Array, text_embeds: Array,
-                 timestep: Array, deterministic: bool = True) -> Array:
+    def __call__(self, latents: Array, text_embeds: Array, timestep: Array, deterministic: bool = True) -> Array:
         """
         Forward pass of the Diffusion Transformer.
 
@@ -660,7 +582,7 @@ class Wan2DiT(nnx.Module):
         Returns:
             predicted_noise: [B, T, H, W, C] predicted noise
         """
-        b, t, h, w, c = latents.shape
+        b, t, h, w, _c = latents.shape
 
         # Project text embeddings: [B, 512, 4096] → [B, 512, 1536]
         text_embeds = self.text_proj(text_embeds)
@@ -672,7 +594,7 @@ class Wan2DiT(nnx.Module):
         # Flatten spatial-temporal dimensions to sequence
         # [B, T, H/2, W/2, 1536] → [B, T*H/2*W/2, 1536]
         b, t_out, h_out, w_out, d = x.shape
-        x = x.reshape(b, t_out * h_out * w_out,d)
+        x = x.reshape(b, t_out * h_out * w_out, d)
 
         # Get RoPE frequencies and grid sizes for 3D position encoding
         rope_state = self.pos_embed.get_freqs_and_grid(t_out, h_out, w_out)
@@ -785,8 +707,8 @@ def generate_video(
 
 
 __all__ = [
+    "FlowMatchingScheduler",
     "ModelConfig",
     "Wan2DiT",
-    "FlowMatchingScheduler",
     "generate_video",
 ]

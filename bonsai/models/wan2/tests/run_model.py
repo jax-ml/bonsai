@@ -47,7 +47,7 @@ def get_t5_text_embeddings(prompt: str, max_length: int = 512):
         )
 
         # Get embeddings
-        outputs = model(**inputs) 
+        outputs = model(**inputs)
         embeddings = outputs.last_hidden_state  # [1, seq_len, 4096]
 
         return embeddings
@@ -70,7 +70,7 @@ def decode_video_latents(latents: jax.Array):
     For now, we return a placeholder video.
     """
     print("⚠ VAE decoder not implemented, returning dummy video")
-    b, t, h, w, c = latents.shape
+    b, t, _h, _w, _c = latents.shape
     # Upsample from latent size (60x60) to 480p
     video_h, video_w = 480, 480
     video = jnp.zeros((b, t, video_h, video_w, 3))
@@ -110,16 +110,11 @@ def run_model():
     # Step 2: Load DiT model
     print("\n[2/4] Loading Diffusion Transformer weights...")
     try:
-        model = params.create_model_from_safe_tensors(
-            model_ckpt_path,
-            config,
-            mesh=None,
-            load_transformer_only=True
-        )
-        print(f"      Model loaded successfully")
+        model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None, load_transformer_only=True)
+        print("      Model loaded successfully")
     except Exception as e:
         print(f"      Could not load weights: {e}")
-        print(f"      Creating model from scratch (random weights)...")
+        print("      Creating model from scratch (random weights)...")
         model = modeling.Wan2DiT(config, rngs=nnx.Rngs(params=0))
 
     # Step 3: Generate video latents
@@ -155,9 +150,9 @@ def run_model():
     print("=" * 60)
     print(f"Total time: {generation_time:.2f}s")
     print(f"FPS: {config.num_frames / generation_time:.2f}")
-    print(f"\nTo save the video, implement VAE decoder and use:")
-    print(f"  import imageio")
-    print(f"  imageio.mimsave('output.mp4', video[0], fps=30)")
+    print("\nTo save the video, implement VAE decoder and use:")
+    print("  import imageio")
+    print("  imageio.mimsave('output.mp4', video[0], fps=30)")
     print()
 
     return video
@@ -178,21 +173,17 @@ def run_simple_forward_pass():
     # Create model
     print("\n[1/2] Creating model...")
     model = modeling.Wan2DiT(config, rngs=nnx.Rngs(params=0, dropout=0))
-    print(f"      Model created")
+    print("      Model created")
 
     # Create dummy inputs
     batch_size = 1
-    latents = jnp.zeros((
-        batch_size,
-        config.num_frames,
-        config.latent_size[0],
-        config.latent_size[1],
-        config.input_dim
-    )) # [B, T, H, W, C]
+    latents = jnp.zeros(
+        (batch_size, config.num_frames, config.latent_size[0], config.latent_size[1], config.input_dim)
+    )  # [B, T, H, W, C]
     text_embeds = jnp.zeros((batch_size, config.max_text_len, config.text_embed_dim))
     timestep = jnp.array([25])  # Middle of diffusion process
 
-    print(f"\n[2/2] Running forward pass...")
+    print("\n[2/2] Running forward pass...")
     print(f"      Latents: {latents.shape}")
     print(f"      Text embeds: {text_embeds.shape}")
     print(f"      Timestep: {timestep}")
@@ -202,7 +193,7 @@ def run_simple_forward_pass():
     predicted_noise = model(latents, text_embeds, timestep, deterministic=True)
     forward_time = time.time() - start_time
 
-    print(f"\n✓ Forward pass complete!")
+    print("\n✓ Forward pass complete!")
     print(f"  Output shape: {predicted_noise.shape}")
     print(f"  Time: {forward_time:.3f}s")
     print(f"  Output range: [{predicted_noise.min():.3f}, {predicted_noise.max():.3f}]")
