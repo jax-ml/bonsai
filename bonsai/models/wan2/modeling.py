@@ -37,49 +37,34 @@ from jaxtyping import Array
 
 
 class WanLayerNorm(nnx.LayerNorm):
-    # disable use_bias and use_scale because for AdaLN modulation
+    """LayerNorm with float32 conversion for numerical stability."""
 
     def __init__(self, dim: int, eps: float = 1e-6, use_scale: bool = False, use_bias: bool = False, *, rngs: nnx.Rngs):
         super().__init__(dim, epsilon=eps, use_scale=use_scale, use_bias=use_bias, rngs=rngs)
 
-    @jax.named_scope("wan_layer_norm")
     def __call__(self, x: Array) -> Array:
-        original_dtype = x.dtype
-        x_float = x.astype(jnp.float32)
-        x_normed = super().__call__(x_float)
-        return x_normed.astype(original_dtype)
+        dtype = x.dtype
+        return super().__call__(x.astype(jnp.float32)).astype(dtype)
 
 
 @dataclasses.dataclass(frozen=True)
 class ModelConfig:
     """Configuration for Wan2.1-T2V-1.3B Diffusion Transformer."""
 
-    # Model architecture
     num_layers: int = 5
     hidden_dim: int = 1536
-    input_dim: int = 16  # VAE latent channels
-    output_dim: int = 16  # Predicted noise channels
+    input_dim: int = 16
+    output_dim: int = 16
     ffn_dim: int = 8960
-    freq_dim: int = 256  # Frequency embedding dimension
+    freq_dim: int = 256
     num_heads: int = 12
-    head_dim: int = 128  # hidden_dim / num_heads
-
-    # Text encoder
-    text_embed_dim: int = 4096  # T5-XXL embedding dimension (before projection)
-    max_text_len: int = 512  # Maximum text sequence length
-
-    # Video generation specs
-    num_frames: int = 21  # Default frames (5 seconds)
-    latent_size: Tuple[int, int] = (32, 32)  # Latent spatial size for 480p
-
-    # Diffusion parameters
+    head_dim: int = 128
+    text_embed_dim: int = 4096
+    max_text_len: int = 512
+    num_frames: int = 21
+    latent_size: Tuple[int, int] = (32, 32)
     num_inference_steps: int = 50
     guidance_scale: float = 5.0
-
-    @classmethod
-    def wan2_1_1_3b(cls, use_sharding: bool = False):
-        """Default Wan2.1-T2V-1.3B configuration."""
-        return cls()
 
 
 def sinusoidal_embedding_1d(timesteps: Array, embedding_dim: int, max_period: int = 10000) -> Array:
@@ -93,278 +78,124 @@ def sinusoidal_embedding_1d(timesteps: Array, embedding_dim: int, max_period: in
 
 
 class TimestepEmbedding(nnx.Module):
-    """
-    Timestep embedding matching HuggingFace Wan implementation.
-
-    Consists of two parts:
-    1. time_embedding: Linear → SiLU → Linear (freq_dim → dim → dim)
-    2. time_projection: SiLU → Linear (dim → 6*dim) for AdaLN modulation
-    """
+    """Timestep embedding: sinusoidal -> MLP -> projection for AdaLN."""
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
-
-        # time_embedding: processes sinusoidal timestep
         self.time_embedding = nnx.Sequential(
             nnx.Linear(cfg.freq_dim, cfg.hidden_dim, rngs=rngs),
             nnx.silu,
             nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs),
         )
+        self.time_projection = nnx.Sequential(
+            nnx.silu,
+            nnx.Linear(cfg.hidden_dim, 6 * cfg.hidden_dim, rngs=rngs),
+        )
 
-        # time_projection: projects to 6D for AdaLN
-        self.time_projection = nnx.Sequential(nnx.silu, nnx.Linear(cfg.hidden_dim, 6 * cfg.hidden_dim, rngs=rngs))
-
-    @jax.named_scope("timestep_embedding")
     def __call__(self, t: Array) -> tuple[Array, Array]:
-        """
-        Args:
-            t: [B] timestep indices
-        Returns:
-            time_emb: [B, hidden_dim] base time embedding
-            time_proj: [B, 6 * hidden_dim] projected for AdaLN modulation
-        """
-        # Generate sinusoidal embeddings
         t_freq = sinusoidal_embedding_1d(t, self.cfg.freq_dim)
-
-        # Process through time_embedding MLP
-        time_emb = self.time_embedding(t_freq)  # [B, D]
-
-        # Project for AdaLN modulation
-        time_proj = self.time_projection(time_emb)  # [B, 6*D]
-
+        time_emb = self.time_embedding(t_freq)
+        time_proj = self.time_projection(time_emb)
         return time_emb, time_proj
 
 
 def rope_params(max_seq_len: int, dim: int, theta: float = 10000.0) -> Array:
-    # Create frequency schedule: 1 / theta^(2i/dim)
     freqs = 1.0 / jnp.power(theta, jnp.arange(0, dim, 2, dtype=jnp.float32) / dim)
-
-    # Outer product with positions
     positions = jnp.arange(max_seq_len, dtype=jnp.float32)
-    freqs = jnp.outer(positions, freqs)  # [max_seq_len, dim // 2]
-
-    # Convert to complex representation [cos, sin]
-    freqs_cos = jnp.cos(freqs)
-    freqs_sin = jnp.sin(freqs)
-    freqs_cis = jnp.stack([freqs_cos, freqs_sin], axis=-1)
-
-    return freqs_cis
+    freqs = jnp.outer(positions, freqs)
+    return jnp.stack([jnp.cos(freqs), jnp.sin(freqs)], axis=-1)
 
 
-def precompute_freqs_cis_3d(
-    dim: int,
-    theta: float = 10000.0,
-    max_seq_len: int = 1024,
-) -> tuple[Array, Array, Array]:
-    """
-    Precompute RoPE frequencies for 3D video (temporal + spatial).
-
-    dimensions are split as:
-    - Temporal: dim - 4*(dim//6)
-    - Height: 2*(dim//6)
-    - Width: 2*(dim//6)
-    """
-    # Split dimension according to Wan2 formula
+def precompute_freqs_cis_3d(dim: int, theta: float = 10000.0, max_seq_len: int = 1024) -> tuple[Array, Array, Array]:
+    """Precompute 3D RoPE frequencies split as T: dim-4*(dim//6), H: 2*(dim//6), W: 2*(dim//6)."""
     dim_base = dim // 6
-    dim_t = dim - 4 * dim_base  # Temporal gets more dims
-    dim_h = 2 * dim_base  # Height
-    dim_w = 2 * dim_base  # Width
-
-    # Verify the split is correct
-    assert dim_t + dim_h + dim_w == dim, f"Dimension split error: {dim_t} + {dim_h} + {dim_w} != {dim}"
-
-    # Create frequency parameters for each dimension
-    freqs_t = rope_params(max_seq_len, dim_t, theta)  # [1024, dim_t // 2, 2]
-    freqs_h = rope_params(max_seq_len, dim_h, theta)  # [1024, dim_h // 2, 2]
-    freqs_w = rope_params(max_seq_len, dim_w, theta)  # [1024, dim_w // 2, 2]
-
-    return freqs_t, freqs_h, freqs_w
+    dim_t, dim_h, dim_w = dim - 4 * dim_base, 2 * dim_base, 2 * dim_base
+    assert dim_t + dim_h + dim_w == dim
+    return (
+        rope_params(max_seq_len, dim_t, theta),
+        rope_params(max_seq_len, dim_h, theta),
+        rope_params(max_seq_len, dim_w, theta),
+    )
 
 
-def rope_apply(
-    x: Array,
-    grid_sizes: tuple[int, int, int],
-    freqs: tuple[Array, Array, Array],
-) -> Array:
+def rope_apply(x: Array, grid_sizes: tuple[int, int, int], freqs: tuple[Array, Array, Array]) -> Array:
+    """Apply 3D RoPE to input tensor."""
     b, seq_len, num_heads, head_dim = x.shape
     f, h, w = grid_sizes
-
-    # Verify sequence length matches grid
-    assert f * h * w == seq_len, f"Grid size {f}x{h}x{w}={f * h * w} != seq_len {seq_len}"
-
-    # Split freqs into temporal, height, width components
     freqs_t, freqs_h, freqs_w = freqs
 
-    # Get dimension splits
     dim_base = head_dim // 6
-    dim_t = head_dim - 4 * dim_base
-    dim_h = 2 * dim_base
-    dim_w = 2 * dim_base
+    dim_t, dim_h, dim_w = head_dim - 4 * dim_base, 2 * dim_base, 2 * dim_base
 
-    # Build 3D positional grid by concatenating T, H, W frequencies
-    # Shape: [f, h, w, head_dim // 2, 2]
     freqs_grid = jnp.concatenate(
         [
-            # Temporal: [f, 1, 1, dim_t // 2, 2] → [f, h, w, dim_t // 2, 2]
             jnp.broadcast_to(freqs_t[:f, None, None, :, :], (f, h, w, dim_t // 2, 2)),
-            # Height: [1, h, 1, dim_h // 2, 2] → [f, h, w, dim_h // 2, 2]
             jnp.broadcast_to(freqs_h[None, :h, None, :, :], (f, h, w, dim_h // 2, 2)),
-            # Width: [1, 1, w, dim_w // 2, 2] → [f, h, w, dim_w // 2, 2]
             jnp.broadcast_to(freqs_w[None, None, :w, :, :], (f, h, w, dim_w // 2, 2)),
         ],
         axis=3,
-    )  # [f, h, w, head_dim // 2, 2]
+    ).reshape(seq_len, head_dim // 2, 2)[None, :, None, :, :]
 
-    # Reshape to sequence: [seq_len, head_dim // 2, 2]
-    freqs_grid = freqs_grid.reshape(seq_len, head_dim // 2, 2)
-
-    # Reshape x to complex pairs: [B, seq_len, num_heads, head_dim // 2, 2]
     x_complex = x.reshape(b, seq_len, num_heads, head_dim // 2, 2)
-
-    # Expand freqs for broadcasting: [1, seq_len, 1, head_dim // 2, 2]
-    freqs_grid = freqs_grid[None, :, None, :, :]
-
-    # Complex multiplication: (x_r + i*x_i) * (cos + i*sin)
-    # Real part: x_r * cos - x_i * sin
-    # Imag part: x_r * sin + x_i * cos
     x_out = jnp.stack(
         [
-            x_complex[..., 0] * freqs_grid[..., 0] - x_complex[..., 1] * freqs_grid[..., 1],  # Real
-            x_complex[..., 0] * freqs_grid[..., 1] + x_complex[..., 1] * freqs_grid[..., 0],  # Imag
+            x_complex[..., 0] * freqs_grid[..., 0] - x_complex[..., 1] * freqs_grid[..., 1],
+            x_complex[..., 0] * freqs_grid[..., 1] + x_complex[..., 1] * freqs_grid[..., 0],
         ],
         axis=-1,
     )
 
-    # Reshape back to original shape
-    x_out = x_out.reshape(b, seq_len, num_heads, head_dim)
-    return x_out
+    return x_out.reshape(b, seq_len, num_heads, head_dim)
 
 
 class MultiHeadAttention(nnx.Module):
     """Multi-head self-attention with RoPE position embeddings."""
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
-        self.cfg = cfg
-        self.num_heads = cfg.num_heads
-        self.head_dim = cfg.head_dim
-
-        # Q, K, V projections
+        self.num_heads, self.head_dim = cfg.num_heads, cfg.head_dim
         self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
         self.k_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
         self.v_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
         self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
-
-        # RMSNorm for Q and K
         self.q_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
         self.k_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
 
-    @jax.named_scope("multi_head_attention")
     def __call__(self, x: Array, rope_state: tuple | None = None, deterministic: bool = True) -> Array:
-        """
-        Args:
-            x: [B, N, D] input tokens
-            rope_state: Optional tuple of (freqs, grid_sizes) for RoPE
-            deterministic: Whether to apply dropout
-        Returns:
-            [B, N, D] attended features
-        """
-        b, n, _d = x.shape
+        b, n = x.shape[:2]
+        q = self.q_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        k = self.k_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        v = self.v_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
 
-        # Compute Q, K, V
-        q = self.q_proj(x).reshape(b, n, self.num_heads, self.head_dim)
-        k = self.k_proj(x).reshape(b, n, self.num_heads, self.head_dim)
-        v = self.v_proj(x).reshape(b, n, self.num_heads, self.head_dim)
+        q, k = self.q_norm(q), self.k_norm(k)
 
-        q = jnp.transpose(q, (0, 2, 1, 3))  # [B, H, N, D_head]
-        k = jnp.transpose(k, (0, 2, 1, 3))  # [B, H, N, D_head]
-        v = jnp.transpose(v, (0, 2, 1, 3))  # [B, H, N, D_head]
-
-        # Apply RMSNorm to Q and K
-        q = self.q_norm(q)
-        k = self.k_norm(k)
-
-        # Apply RoPE to Q and K
         if rope_state is not None:
             freqs, grid_sizes = rope_state
-            # Reshape for RoPE: [B, H, N, D] → [B, N, H, D]
-            q = jnp.transpose(q, (0, 2, 1, 3))
-            k = jnp.transpose(k, (0, 2, 1, 3))
+            q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
+            q, k = rope_apply(q, grid_sizes, freqs), rope_apply(k, grid_sizes, freqs)
+            q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
 
-            # Apply rotary embeddings with 3D grid
-            q = rope_apply(q, grid_sizes, freqs)
-            k = rope_apply(k, grid_sizes, freqs)
-
-            # Reshape back: [B, N, H, D] → [B, H, N, D]
-            q = jnp.transpose(q, (0, 2, 1, 3))
-            k = jnp.transpose(k, (0, 2, 1, 3))
-
-        # Scaled dot-product attention
-        scale = 1.0 / math.sqrt(self.head_dim)
-        attn_weights = jnp.einsum("bhid,bhjd->bhij", q, k) * scale
-        attn_weights = jax.nn.softmax(attn_weights, axis=-1)
-
-        # Apply attention to values
-        attn_output = jnp.einsum("bhij,bhjd->bhid", attn_weights, v)
-        attn_output = jnp.transpose(attn_output, (0, 2, 1, 3))  # [B, N, H, D]
-        attn_output = attn_output.reshape(b, n, -1)  # [B, N, H*D]
-
-        return self.out_proj(attn_output)
+        attn = jax.nn.softmax(jnp.einsum("bhid,bhjd->bhij", q, k) / math.sqrt(self.head_dim), axis=-1)
+        out = jnp.einsum("bhij,bhjd->bhid", attn, v).transpose(0, 2, 1, 3).reshape(b, n, -1)
+        return self.out_proj(out)
 
 
 class CrossAttention(nnx.Module):
     """Cross-attention from video tokens to text embeddings."""
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
-        self.cfg = cfg
-        self.num_heads = cfg.num_heads
-        self.head_dim = cfg.head_dim
-
-        # Q from video, K,V from text (text already projected to hidden_dim)
+        self.num_heads, self.head_dim = cfg.num_heads, cfg.head_dim
         self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
         self.kv_proj = nnx.Linear(cfg.hidden_dim, 2 * cfg.hidden_dim, rngs=rngs)
         self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
-
-        # RMSNorm for Q
         self.q_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
 
-    @jax.named_scope("cross_attention")
     def __call__(self, x: Array, context: Array, deterministic: bool = True) -> Array:
-        """
-        Args:
-            x: [B, N, D] video tokens (query)
-            context: [B, M, text_dim] text embeddings (key, value)
-            deterministic: Whether to apply dropout
-        Returns:
-            [B, N, D] cross-attended features
-        """
-        b, n, _d = x.shape
-        _, m, _ = context.shape
-
-        # Query from video
-        q = self.q_proj(x)  # [B, N, D]
-        q = q.reshape(b, n, self.num_heads, self.head_dim)
-        q = jnp.transpose(q, (0, 2, 1, 3))  # [B, H, N, D]
-
-        # Apply RMSNorm to Q
-        q = self.q_norm(q)
-
-        # Key, Value from text
-        kv = self.kv_proj(context)  # [B, M, 2*D]
-        kv = kv.reshape(b, m, 2, self.num_heads, self.head_dim)
-        kv = jnp.transpose(kv, (2, 0, 3, 1, 4))  # [2, B, H, M, D]
-        k, v = kv[0], kv[1]
-
-        # Scaled dot-product attention
-        scale = 1.0 / math.sqrt(self.head_dim)
-        attn_weights = jnp.einsum("bhid,bhjd->bhij", q, k) * scale
-        attn_weights = jax.nn.softmax(attn_weights, axis=-1)
-
-        # Apply attention to values
-        attn_output = jnp.einsum("bhij,bhjd->bhid", attn_weights, v)
-        attn_output = jnp.transpose(attn_output, (0, 2, 1, 3))  # [B, N, H, D]
-        attn_output = attn_output.reshape(b, n, -1)  # [B, N, H*D]
-
-        return self.out_proj(attn_output)
+        b, n, m = x.shape[0], x.shape[1], context.shape[1]
+        q = self.q_norm(self.q_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3))
+        k, v = self.kv_proj(context).reshape(b, m, 2, self.num_heads, self.head_dim).transpose(2, 0, 3, 1, 4)
+        attn = jax.nn.softmax(jnp.einsum("bhid,bhjd->bhij", q, k) / math.sqrt(self.head_dim), axis=-1)
+        out = jnp.einsum("bhij,bhjd->bhid", attn, v).transpose(0, 2, 1, 3).reshape(b, n, -1)
+        return self.out_proj(out)
 
 
 def modulate(x: Array, shift: Array, scale: Array) -> Array:
