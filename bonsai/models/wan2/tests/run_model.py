@@ -167,7 +167,7 @@ def run_simple_forward_pass():
     print("Wan2.1-T2V-1.3B Simple Forward Pass Test")
     print("=" * 60)
 
-    config = modeling.ModelConfig.wan2_1_1_3b()
+    config = modeling.ModelConfig()
     print(f"\nConfig: {config.num_layers} layers, {config.hidden_dim} dim")
 
     # Create model
