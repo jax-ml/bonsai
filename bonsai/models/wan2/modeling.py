@@ -76,10 +76,6 @@ class ModelConfig:
     num_inference_steps: int = 50
     guidance_scale: float = 5.0
 
-    # Regularization
-    dropout_rate: float = 0.0
-    attention_dropout: float = 0.0
-
     @classmethod
     def wan2_1_1_3b(cls, use_sharding: bool = False):
         """Default Wan2.1-T2V-1.3B configuration."""
@@ -244,27 +240,6 @@ def rope_apply(
     return x_out
 
 
-class PositionalEmbedding3D(nnx.Module):
-    """
-    3D RoPE (Rotary Position Embeddings) for video (temporal + spatial).
-    """
-
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
-        self.cfg = cfg
-
-        # Precompute RoPE frequency components for head_dim
-        self.freqs_t, self.freqs_h, self.freqs_w = precompute_freqs_cis_3d(
-            dim=cfg.head_dim,
-            theta=10000.0,
-        )
-
-    @jax.named_scope("positional_embedding_3d")
-    def get_freqs_and_grid(self, num_frames: int, height: int, width: int):
-        freqs = (self.freqs_t, self.freqs_h, self.freqs_w)
-        grid_sizes = (num_frames, height, width)
-        return freqs, grid_sizes
-
-
 class MultiHeadAttention(nnx.Module):
     """Multi-head self-attention with RoPE position embeddings."""
 
@@ -282,8 +257,6 @@ class MultiHeadAttention(nnx.Module):
         # RMSNorm for Q and K
         self.q_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
         self.k_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
-
-        self.dropout = nnx.Dropout(cfg.attention_dropout, rngs=rngs)
 
     @jax.named_scope("multi_head_attention")
     def __call__(self, x: Array, rope_state: tuple | None = None, deterministic: bool = True) -> Array:
@@ -329,7 +302,6 @@ class MultiHeadAttention(nnx.Module):
         scale = 1.0 / math.sqrt(self.head_dim)
         attn_weights = jnp.einsum("bhid,bhjd->bhij", q, k) * scale
         attn_weights = jax.nn.softmax(attn_weights, axis=-1)
-        attn_weights = self.dropout(attn_weights, deterministic=deterministic)
 
         # Apply attention to values
         attn_output = jnp.einsum("bhij,bhjd->bhid", attn_weights, v)
@@ -354,8 +326,6 @@ class CrossAttention(nnx.Module):
 
         # RMSNorm for Q
         self.q_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
-
-        self.dropout = nnx.Dropout(cfg.attention_dropout, rngs=rngs)
 
     @jax.named_scope("cross_attention")
     def __call__(self, x: Array, context: Array, deterministic: bool = True) -> Array:
@@ -388,7 +358,6 @@ class CrossAttention(nnx.Module):
         scale = 1.0 / math.sqrt(self.head_dim)
         attn_weights = jnp.einsum("bhid,bhjd->bhij", q, k) * scale
         attn_weights = jax.nn.softmax(attn_weights, axis=-1)
-        attn_weights = self.dropout(attn_weights, deterministic=deterministic)
 
         # Apply attention to values
         attn_output = jnp.einsum("bhij,bhjd->bhid", attn_weights, v)
@@ -396,24 +365,6 @@ class CrossAttention(nnx.Module):
         attn_output = attn_output.reshape(b, n, -1)  # [B, N, H*D]
 
         return self.out_proj(attn_output)
-
-
-class MLP(nnx.Module):
-    """Feed-forward network with GELU activation."""
-
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
-        self.fc1 = nnx.Linear(cfg.hidden_dim, cfg.ffn_dim, rngs=rngs)
-        self.fc2 = nnx.Linear(cfg.ffn_dim, cfg.hidden_dim, rngs=rngs)
-        self.dropout = nnx.Dropout(cfg.dropout_rate, rngs=rngs)
-
-    @jax.named_scope("mlp")
-    def __call__(self, x: Array, deterministic: bool = True) -> Array:
-        x = self.fc1(x)
-        x = nnx.gelu(x)
-        x = self.dropout(x, deterministic=deterministic)
-        x = self.fc2(x)
-        x = self.dropout(x, deterministic=deterministic)
-        return x
 
 
 def modulate(x: Array, shift: Array, scale: Array) -> Array:
@@ -435,16 +386,20 @@ class WanAttentionBlock(nnx.Module):
         self.cfg = cfg
 
         #  Layer norms
-        self.norm1 = nnx.LayerNorm(cfg.hidden_dim, rngs=rngs)
-        self.norm2 = nnx.LayerNorm(cfg.hidden_dim, rngs=rngs)
-        self.norm3 = nnx.LayerNorm(cfg.hidden_dim, rngs=rngs)
+        self.norm1 = WanLayerNorm(cfg.hidden_dim, rngs=rngs)
+        self.norm2 = WanLayerNorm(cfg.hidden_dim, rngs=rngs, use_scale=True, use_bias=True)
+        self.norm3 = WanLayerNorm(cfg.hidden_dim, rngs=rngs)
 
         # Attention layers
         self.self_attn = MultiHeadAttention(cfg, rngs=rngs)
         self.cross_attn = CrossAttention(cfg, rngs=rngs)
 
-        # Feed-forward
-        self.mlp = MLP(cfg, rngs=rngs)
+        # Feed-forward MLP: Linear -> GELU -> Linear
+        self.mlp = nnx.Sequential(
+            nnx.Linear(cfg.hidden_dim, cfg.ffn_dim, rngs=rngs),
+            nnx.gelu,
+            nnx.Linear(cfg.ffn_dim, cfg.hidden_dim, rngs=rngs),
+        )
 
         # Learnable modulation parameter
         self.modulation = nnx.Param(jax.random.normal(rngs.params(), (1, 6, cfg.hidden_dim)) / (cfg.hidden_dim**0.5))
@@ -489,7 +444,7 @@ class WanAttentionBlock(nnx.Module):
         # MLP with AdaLN modulation
         norm_x = self.norm3(x)
         norm_x = modulate(norm_x, shift_mlp[:, None, :], scale_mlp[:, None, :])
-        mlp_out = self.mlp(norm_x, deterministic=deterministic)
+        mlp_out = self.mlp(norm_x)
         x = x + gate_mlp[:, None, :] * mlp_out
 
         return x
@@ -498,10 +453,11 @@ class WanAttentionBlock(nnx.Module):
 class FinalLayer(nnx.Module):
     """Final layer that predicts noise from DiT output."""
 
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, patch_size, *, rngs: nnx.Rngs):
         self.cfg = cfg
-        self.norm = nnx.LayerNorm(cfg.hidden_dim, rngs=rngs)
-        self.linear = nnx.Linear(cfg.hidden_dim, cfg.output_dim, rngs=rngs)
+        self.norm = WanLayerNorm(cfg.hidden_dim, rngs=rngs)
+        out_dim = math.prod(patch_size) * cfg.output_dim  # expand out_dim here for unpatchify
+        self.linear = nnx.Linear(cfg.hidden_dim, out_dim, rngs=rngs)
 
         # Learnable modulation parameter (matches HF: torch.randn / dim**0.5)
         self.modulation = nnx.Param(jax.random.normal(rngs.params(), (1, 2, cfg.hidden_dim)) / (cfg.hidden_dim**0.5))
@@ -515,14 +471,10 @@ class FinalLayer(nnx.Module):
         Returns:
             [B, N, output_dim] predicted noise
         """
-        # Add learnable modulation to time embedding and split
-        # Matches HF: (self.modulation + e.unsqueeze(1)).chunk(2, dim=1)
         # [B, D] → [B, 1, D] + [1, 2, D] → [B, 2, D]
-        e = self.modulation.value + time_emb[:, None, :]  # [1, 2, D] + [B, 1, D] broadcast
-        shift, scale = e[:, 0, :], e[:, 1, :]  # Split: [B, D], [B, D]
+        e = self.modulation.value + time_emb[:, None, :]
+        shift, scale = e[:, 0, :], e[:, 1, :]
 
-        # Apply modulation: norm(x) * (1 + scale) + shift
-        # Matches HF: self.norm(x) * (1 + e[1]) + e[0]
         x = self.norm(x) * (1 + scale[:, None, :]) + shift[:, None, :]
         x = self.linear(x)
         return x
@@ -559,14 +511,17 @@ class Wan2DiT(nnx.Module):
         # Time embedding
         self.time_embed = TimestepEmbedding(cfg, rngs=rngs)
 
-        # Positional embeddings (spatial + temporal)
-        self.pos_embed = PositionalEmbedding3D(cfg, rngs=rngs)
+        # Precompute RoPE frequencies for 3D position encoding
+        self.freqs_t, self.freqs_h, self.freqs_w = precompute_freqs_cis_3d(
+            dim=cfg.head_dim,
+            theta=10000.0,
+        )
 
-        # 30 transformer blocks
+        # Transformer blocks
         self.blocks = nnx.List([WanAttentionBlock(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
 
         # Final layer
-        self.final_layer = FinalLayer(cfg, rngs=rngs)
+        self.final_layer = FinalLayer(cfg, patch_size=(1, 2, 2), rngs=rngs)
 
     @jax.named_scope("wan2_dit")
     def __call__(self, latents: Array, text_embeds: Array, timestep: Array, deterministic: bool = True) -> Array:
@@ -582,7 +537,7 @@ class Wan2DiT(nnx.Module):
         Returns:
             predicted_noise: [B, T, H, W, C] predicted noise
         """
-        b, t, h, w, _c = latents.shape
+        b, _t, _h, _w, _c = latents.shape
 
         # Project text embeddings: [B, 512, 4096] → [B, 512, 1536]
         text_embeds = self.text_proj(text_embeds)
@@ -596,8 +551,11 @@ class Wan2DiT(nnx.Module):
         b, t_out, h_out, w_out, d = x.shape
         x = x.reshape(b, t_out * h_out * w_out, d)
 
-        # Get RoPE frequencies and grid sizes for 3D position encoding
-        rope_state = self.pos_embed.get_freqs_and_grid(t_out, h_out, w_out)
+        # Grid sizes for unpatchify later
+        grid_sizes = (t_out, h_out, w_out)
+
+        # RoPE frequencies for 3D position encoding
+        rope_freqs = (self.freqs_t, self.freqs_h, self.freqs_w)
 
         # Get time embeddings
         # time_emb: [B, D] for FinalLayer
@@ -606,15 +564,62 @@ class Wan2DiT(nnx.Module):
 
         # Process through transformer blocks with RoPE
         for block in self.blocks:
-            x = block(x, text_embeds, time_proj, rope_state=rope_state, deterministic=deterministic)
+            x = block(x, text_embeds, time_proj, rope_state=(rope_freqs, grid_sizes), deterministic=deterministic)
 
         # Final projection to noise space
         x = self.final_layer(x, time_emb)  # [B, T*H*W, output_dim]
 
         # Reshape back to video format
-        predicted_noise = x.reshape(b, t, h, w, -1)
+        predicted_noise = self.unpatchify(x, grid_sizes)
 
         return predicted_noise
+
+    def unpatchify(self, x: Array, grid_sizes: tuple[int, int, int]) -> Array:
+        """
+        Reconstruct video tensors from patch embeddings.
+
+        Args:
+            x: [B, T*H*W, C] flattened patch embeddings
+            grid_sizes: (T_patches, H_patches, W_patches) grid dimensions
+
+        Returns:
+            [B, T, H, W, C] reconstructed video tensor (channel-last)
+        """
+        b, _seq_len, _c = x.shape
+        t_patches, h_patches, w_patches = grid_sizes
+        patch_size = (1, 2, 2)  # Patch size from the 3D Conv kernel
+        c = self.cfg.output_dim
+
+        # Reshape from sequence to grid: [B, T*H*W, C] -> [B, T, H, W, C]
+        x = x.reshape(b, t_patches, h_patches, w_patches, c * math.prod(patch_size))
+
+        # Rearrange dimensions for unpatchify
+        # [B, T, H, W, C] -> [B, T, H, W, patch_t, patch_h, patch_w, C]
+        x = x.reshape(
+            b,
+            t_patches,
+            h_patches,
+            w_patches,
+            patch_size[0],
+            patch_size[1],
+            patch_size[2],
+            c,
+        )
+
+        # Merge patches: einsum 'bthwpqrc->btphqwrc'
+        # This interleaves the patch dimensions with the grid dimensions
+        x = jnp.einsum("bthwpqrc->btphqwrc", x)
+
+        # Reshape to final video format: [B, T*patch_t, H*patch_h, W*patch_w, C]
+        x = x.reshape(
+            b,
+            t_patches * patch_size[0],
+            h_patches * patch_size[1],
+            w_patches * patch_size[2],
+            c,
+        )
+
+        return x
 
 
 # Flow Matching Scheduler (simplified version)
