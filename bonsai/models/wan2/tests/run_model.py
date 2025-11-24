@@ -21,7 +21,7 @@ import jax.numpy as jnp
 from flax import nnx
 from huggingface_hub import snapshot_download
 
-from bonsai.models.wan2 import modeling, params
+from bonsai.models.wan2 import modeling, params, vae
 
 
 def get_t5_text_embeddings(prompt: str, max_length: int = 512):
@@ -59,21 +59,19 @@ def get_t5_text_embeddings(prompt: str, max_length: int = 512):
         return jnp.zeros((1, max_length, 4096))
 
 
-def decode_video_latents(latents: jax.Array):
+def decode_video_latents(latents: jax.Array, vae_decoder: vae.WanVAEDecoder):
     """
     Decode video latents to RGB frames using Wan-VAE.
 
-    NOTE: This is a placeholder. In a real implementation, you would:
-    1. Load the Wan-VAE decoder from the checkpoint
-    2. Decode latents to RGB video
+    Args:
+        latents: [B, T, H, W, C] video latents
+        vae_decoder: Optional WanVAEDecoder instance. If None, returns dummy video.
 
-    For now, we return a placeholder video.
+    Returns:
+        video: [B, T, H_out, W_out, 3] RGB video (uint8)
     """
-    print("⚠ VAE decoder not implemented, returning dummy video")
-    b, t, _h, _w, _c = latents.shape
-    # Upsample from latent size (60x60) to 480p
-    video_h, video_w = 480, 480
-    video = jnp.zeros((b, t, video_h, video_w, 3))
+    # Decode using VAE
+    video = vae.decode_latents_to_video(vae_decoder, latents, normalize=True)
     return video
 
 
@@ -86,7 +84,7 @@ def run_model():
 
     # Configuration
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    config = modeling.ModelConfig.wan2_1_1_3b(use_sharding=False)
+    config = modeling.ModelConfig()
 
     # For sharding (multi-GPU), uncomment:
     # from jax.sharding import AxisType
@@ -108,7 +106,7 @@ def run_model():
     print(f"      Text embeddings shape: {text_embeds.shape}")
 
     # Step 2: Load DiT model
-    print("\n[2/4] Loading Diffusion Transformer weights...")
+    print("\n[2/5] Loading Diffusion Transformer weights...")
     try:
         model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None, load_transformer_only=True)
         print("      Model loaded successfully")
@@ -116,6 +114,16 @@ def run_model():
         print(f"      Could not load weights: {e}")
         print("      Creating model from scratch (random weights)...")
         model = modeling.Wan2DiT(config, rngs=nnx.Rngs(params=0))
+
+    # Step 2.5: Load VAE decoder
+    print("\n[2.5/5] Loading VAE decoder...")
+    try:
+        vae_decoder = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
+        print("      VAE decoder loaded")
+    except Exception as e:
+        print(f"      Could not load VAE: {e}")
+        print("      VAE decoder will not be used (dummy video output)")
+        vae_decoder = None
 
     # Step 3: Generate video latents
     print("\n[3/4] Generating video latents...")
@@ -140,8 +148,8 @@ def run_model():
     print(f"      Latents shape: {latents.shape}")
 
     # Step 4: Decode to video
-    print("\n[4/4] Decoding latents to video...")
-    video = decode_video_latents(latents)
+    print("\n[4/5] Decoding latents to video...")
+    video = decode_video_latents(latents, vae_decoder)
     print(f"      Video shape: {video.shape}")
 
     # Summary
@@ -190,7 +198,7 @@ def run_simple_forward_pass():
 
     # Forward pass
     start_time = time.time()
-    predicted_noise = model(latents, text_embeds, timestep, deterministic=True)
+    predicted_noise = model.forward(latents, text_embeds, timestep, deterministic=True)
     forward_time = time.time() - start_time
 
     print("\n✓ Forward pass complete!")
@@ -202,14 +210,73 @@ def run_simple_forward_pass():
     return predicted_noise
 
 
+def run_vae_decoder_test():
+    """
+    Simple VAE decoder forward pass test.
+    Tests the decoder architecture without loading weights.
+    """
+    print("=" * 60)
+    print("Wan-VAE Decoder Forward Pass Test")
+    print("=" * 60)
+
+    # Create VAE decoder
+    print("\n[1/3] Creating VAE decoder...")
+    vae_decoder = vae.WanVAEDecoder(rngs=nnx.Rngs(params=0))
+    print("      VAE decoder created")
+
+    # Create dummy latent inputs
+    # Expected input: [B, T, H, W, C] = [1, 21, 104, 60, 16]
+    batch_size = 1
+    num_frames = 21
+    latent_h, latent_w = 104, 60
+    latent_channels = 16
+
+    latents = jnp.zeros((batch_size, num_frames, latent_h, latent_w, latent_channels))
+
+    print("\n[2/3] Running VAE decoder...")
+    print(f"      Input latents: {latents.shape}")
+    print("      Expected output: [1, 84, 832, 480, 3]")
+
+    # Decode
+    start_time = time.time()
+    video = vae_decoder.decode(latents)
+    decode_time = time.time() - start_time
+
+    print("\n[3/3] Decoder output:")
+    print(f"  ✓ Output shape: {video.shape}")
+    print(f"  ✓ Time: {decode_time:.3f}s")
+    # print(f"  ✓ Output range: [{video.min():.3f}, {video.max():.3f}]")
+    print(f"  ✓ Output dtype: {video.dtype}")
+
+    # Verify output shape
+    expected_t = num_frames * 4  # Each input frame generates 4 output frames
+    expected_h, expected_w = 832, 480
+    expected_c = 3
+
+    print("\n" + "=" * 60)
+    if video.shape == (batch_size, expected_t, expected_h, expected_w, expected_c):
+        print("✓ Decoder test PASSED!")
+    else:
+        print("✗ Decoder test FAILED!")
+        print(f"  Expected: [{batch_size}, {expected_t}, {expected_h}, {expected_w}, {expected_c}]")
+        print(f"  Got: {list(video.shape)}")
+    print("=" * 60)
+    print()
+
+    return video
+
+
 if __name__ == "__main__":
     # Choose which demo to run:
 
     # Option 1: Full generation pipeline (requires checkpoint download)
-    # run_model()
+    run_model()
 
-    # Option 2: Simple forward pass test (no checkpoint required)
-    run_simple_forward_pass()
+    # Option 2: Simple DiT forward pass test (no checkpoint required)
+    # run_simple_forward_pass()
+
+    # Option 3: Simple VAE decoder test (no checkpoint required)
+    # run_vae_decoder_test()
 
 
-__all__ = ["run_model", "run_simple_forward_pass"]
+__all__ = ["run_model", "run_simple_forward_pass", "run_vae_decoder_test"]
