@@ -19,11 +19,12 @@ import re
 from enum import Enum
 
 import jax
-import modeling as model_lib
 import safetensors
-import vae as vae_lib
 from etils import epath
 from flax import nnx
+
+from bonsai.models.wan2 import modeling as model_lib
+from bonsai.models.wan2 import vae as vae_lib
 
 
 def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
