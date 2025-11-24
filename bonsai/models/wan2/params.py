@@ -24,6 +24,7 @@ from etils import epath
 from flax import nnx
 
 from bonsai.models.wan2 import modeling as model_lib
+from bonsai.models.wan2 import vae as vae_lib
 
 
 def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
@@ -246,4 +247,71 @@ def create_model_from_safe_tensors(
     return nnx.merge(graph_def, state_dict)
 
 
-__all__ = ["create_model_from_safe_tensors"]
+def create_vae_decoder_from_safe_tensors(
+    file_dir: str,
+    mesh: jax.sharding.Mesh | None = None,
+) -> vae_lib.WanVAEDecoder:
+    """
+    Load Wan-VAE decoder from safetensors checkpoint.
+
+    Args:
+        file_dir: Directory containing .safetensors files
+        mesh: Optional JAX mesh for sharding
+
+    Returns:
+        WanVAEDecoder with loaded weights
+    """
+    files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
+    if not files:
+        raise ValueError(f"No safetensors found in {file_dir}")
+
+    # Filter to VAE-specific files
+    vae_files = [f for f in files if "vae" in f.name.lower()]
+    if not vae_files:
+        print("Warning: No VAE-specific files found, trying all safetensors files")
+        vae_files = files
+
+    # Create VAE decoder structure
+    vae_decoder = nnx.eval_shape(lambda: vae_lib.WanVAEDecoder(rngs=nnx.Rngs(params=0)))
+    graph_def, abs_state = nnx.split(vae_decoder)
+    state_dict = abs_state.to_pure_dict()
+
+    # Setup sharding if mesh provided
+    _sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
+
+    # TODO: Add proper VAE key mapping
+    # For now, this is a placeholder that will need to be filled in
+    # with the actual mapping from PyTorch VAE keys to JAX keys
+    loaded_keys = []
+    skipped_keys = []
+
+    for f in vae_files:
+        print(f"Loading VAE weights from {f.name}...")
+        with safetensors.safe_open(f, framework="numpy") as sf:
+            for torch_key in sf.keys():
+                # Skip non-VAE keys
+                if not any(prefix in torch_key for prefix in ["vae", "decoder", "post_quant"]):
+                    skipped_keys.append(torch_key)
+                    continue
+
+                # TODO: Implement actual key mapping for VAE
+                # This requires knowing the exact structure of the checkpoint
+                skipped_keys.append(torch_key)
+
+        gc.collect()
+
+    print(f"Loaded {len(loaded_keys)} VAE weight tensors")
+    print(f"Skipped {len(skipped_keys)} weight tensors")
+
+    if len(loaded_keys) == 0:
+        print("\nWarning: No VAE weights were loaded!")
+        print("The VAE decoder has random weights and will not produce meaningful output.")
+        print("You may need to:")
+        print("  1. Check the checkpoint structure with: safetensors.safe_open(file, 'numpy').keys()")
+        print("  2. Implement the VAE key mapping in params.py")
+
+    gc.collect()
+    return nnx.merge(graph_def, state_dict)
+
+
+__all__ = ["create_model_from_safe_tensors", "create_vae_decoder_from_safe_tensors"]

@@ -355,7 +355,8 @@ class Wan2DiT(nnx.Module):
         self.final_layer = FinalLayer(cfg, patch_size=(1, 2, 2), rngs=rngs)
 
     @jax.named_scope("wan2_dit")
-    def __call__(self, latents: Array, text_embeds: Array, timestep: Array, deterministic: bool = True) -> Array:
+    @jax.jit
+    def forward(self, latents: Array, text_embeds: Array, timestep: Array, deterministic: bool = True) -> Array:
         """
         Forward pass of the Diffusion Transformer.
 
@@ -525,16 +526,16 @@ def generate_video(
         # Classifier-free guidance
         if guidance_scale != 1.0:
             # Predict with text conditioning
-            noise_pred_cond = model(latents, text_embeds, t, deterministic=True)
+            noise_pred_cond = model.forward(latents, text_embeds, t, deterministic=True)
 
             # Predict without text (null text)
             null_embeds = jnp.zeros_like(text_embeds)
-            noise_pred_uncond = model(latents, null_embeds, t, deterministic=True)
+            noise_pred_uncond = model.forward(latents, null_embeds, t, deterministic=True)
 
             # Apply guidance
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
         else:
-            noise_pred = model(latents, text_embeds, t, deterministic=True)
+            noise_pred = model.forward(latents, text_embeds, t, deterministic=True)
 
         # Update latents
         latents = scheduler.step(noise_pred, latents, t_idx)
