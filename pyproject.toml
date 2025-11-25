@@ -28,6 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+convnext = ["h5py", "keras_hub", "tensorflow"]
 densenet121 = ["h5py", "keras_hub", "tensorflow"]
 efficientnet = ["timm"]
 whisper = ["librosa"]
@@ -46,6 +47,7 @@ testing = [
   "pytest-xdist",
   "torch",
   "timm",
+  "h5py",
 ]
 
 models = [
