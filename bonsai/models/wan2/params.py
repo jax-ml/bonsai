@@ -28,88 +28,92 @@ from bonsai.models.wan2 import vae as vae_lib
 
 
 def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
-    """Define mapping from HuggingFace diffusers keys to our JAX model keys."""
+    """Define mapping from checkpoint keys to JAX model keys.
+
+    Checkpoint structure (from Wan2.1-T2V-1.3B-Diffusers):
+    - patch_embedding: Input patch projection
+    - condition_embedder: Text and time embedders
+    - blocks.N: Transformer blocks with attn1 (self), attn2 (cross), ffn, norm2, scale_shift_table
+    - scale_shift_table: Global modulation table
+    - proj_out: Output projection
+    """
 
     class Transform(Enum):
         """Transformations for model parameters"""
 
         NONE = None
-        TRANSPOSE = ((1, 0), None, False)  # Simple transpose for linear layers
+        TRANSPOSE = ((1, 0), None, False)  # For linear layers: (out, in) -> (in, out)
+        TRANSPOSE_CONV = ((2, 3, 4, 1, 0), None, False)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
 
-    # Mapping of diffusers_keys -> (nnx_keys, Transform)
-    # This is a simplified version - you'll need to adjust based on actual checkpoint structure
     mapping = {
-        # Input projection
-        r"transformer\.pos_embed\.proj\.weight": ("input_proj.kernel", Transform.TRANSPOSE),
-        r"transformer\.pos_embed\.proj\.bias": ("input_proj.bias", Transform.NONE),
-        # Time embedding
-        r"transformer\.time_embed\.linear_1\.weight": ("time_embed.linear1.kernel", Transform.TRANSPOSE),
-        r"transformer\.time_embed\.linear_1\.bias": ("time_embed.linear1.bias", Transform.NONE),
-        r"transformer\.time_embed\.linear_2\.weight": ("time_embed.linear2.kernel", Transform.TRANSPOSE),
-        r"transformer\.time_embed\.linear_2\.bias": ("time_embed.linear2.bias", Transform.NONE),
-        # Positional embeddings
-        r"transformer\.pos_embed\.pos_embed": ("pos_embed.pos_embed", Transform.NONE),
-        # Transformer blocks
-        r"transformer\.blocks\.([0-9]+)\.norm1\.weight": (r"blocks.\1.norm1.scale", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.norm1\.bias": (r"blocks.\1.norm1.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.norm2\.weight": (r"blocks.\1.norm2.scale", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.norm2\.bias": (r"blocks.\1.norm2.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.norm3\.weight": (r"blocks.\1.norm3.scale", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.norm3\.bias": (r"blocks.\1.norm3.bias", Transform.NONE),
-        # Self-attention
-        r"transformer\.blocks\.([0-9]+)\.attn\.qkv\.weight": (r"blocks.\1.self_attn.qkv.kernel", Transform.TRANSPOSE),
-        r"transformer\.blocks\.([0-9]+)\.attn\.qkv\.bias": (r"blocks.\1.self_attn.qkv.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.attn\.proj\.weight": (
-            r"blocks.\1.self_attn.out_proj.kernel",
+        # Patch embedding (input projection)
+        r"patch_embedding\.weight": ("patch_embed.kernel", Transform.TRANSPOSE_CONV),
+        r"patch_embedding\.bias": ("patch_embed.bias", Transform.NONE),
+        # Time embedder
+        r"condition_embedder\.time_embedder\.linear_1\.weight": (
+            "time_embed.time_embedding.layers_0.kernel",
             Transform.TRANSPOSE,
         ),
-        r"transformer\.blocks\.([0-9]+)\.attn\.proj\.bias": (r"blocks.\1.self_attn.out_proj.bias", Transform.NONE),
-        # Cross-attention
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.q\.weight": (
-            r"blocks.\1.cross_attn.q_proj.kernel",
-            Transform.TRANSPOSE,
-        ),
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.q\.bias": (r"blocks.\1.cross_attn.q_proj.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.kv\.weight": (
-            r"blocks.\1.cross_attn.kv_proj.kernel",
-            Transform.TRANSPOSE,
-        ),
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.kv\.bias": (r"blocks.\1.cross_attn.kv_proj.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.proj\.weight": (
-            r"blocks.\1.cross_attn.out_proj.kernel",
-            Transform.TRANSPOSE,
-        ),
-        r"transformer\.blocks\.([0-9]+)\.cross_attn\.proj\.bias": (
-            r"blocks.\1.cross_attn.out_proj.bias",
+        r"condition_embedder\.time_embedder\.linear_1\.bias": (
+            "time_embed.time_embedding.layers_0.bias",
             Transform.NONE,
         ),
-        # MLP
-        r"transformer\.blocks\.([0-9]+)\.mlp\.fc1\.weight": (r"blocks.\1.mlp.fc1.kernel", Transform.TRANSPOSE),
-        r"transformer\.blocks\.([0-9]+)\.mlp\.fc1\.bias": (r"blocks.\1.mlp.fc1.bias", Transform.NONE),
-        r"transformer\.blocks\.([0-9]+)\.mlp\.fc2\.weight": (r"blocks.\1.mlp.fc2.kernel", Transform.TRANSPOSE),
-        r"transformer\.blocks\.([0-9]+)\.mlp\.fc2\.bias": (r"blocks.\1.mlp.fc2.bias", Transform.NONE),
-        # AdaLN modulation
-        r"transformer\.blocks\.([0-9]+)\.adaLN_modulation\.1\.weight": (
-            r"blocks.\1.adaLN_modulation.layers_1.kernel",
+        r"condition_embedder\.time_embedder\.linear_2\.weight": (
+            "time_embed.time_embedding.layers_2.kernel",
             Transform.TRANSPOSE,
         ),
-        r"transformer\.blocks\.([0-9]+)\.adaLN_modulation\.1\.bias": (
-            r"blocks.\1.adaLN_modulation.layers_1.bias",
+        r"condition_embedder\.time_embedder\.linear_2\.bias": (
+            "time_embed.time_embedding.layers_2.bias",
             Transform.NONE,
         ),
-        # Final layer
-        r"transformer\.final_layer\.norm\.weight": ("final_layer.norm.scale", Transform.NONE),
-        r"transformer\.final_layer\.norm\.bias": ("final_layer.norm.bias", Transform.NONE),
-        r"transformer\.final_layer\.linear\.weight": ("final_layer.linear.kernel", Transform.TRANSPOSE),
-        r"transformer\.final_layer\.linear\.bias": ("final_layer.linear.bias", Transform.NONE),
-        r"transformer\.final_layer\.adaLN_modulation\.1\.weight": (
-            "final_layer.adaLN_modulation.layers_1.kernel",
+        r"condition_embedder\.time_proj\.weight": ("time_embed.time_projection.layers_1.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.time_proj\.bias": ("time_embed.time_projection.layers_1.bias", Transform.NONE),
+        # Text embedder (projects T5 embeddings to hidden dim)
+        r"condition_embedder\.text_embedder\.linear_1\.weight": ("text_proj.layers_0.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.text_embedder\.linear_1\.bias": ("text_proj.layers_0.bias", Transform.NONE),
+        r"condition_embedder\.text_embedder\.linear_2\.weight": ("text_proj.layers_1.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.text_embedder\.linear_2\.bias": ("text_proj.layers_1.bias", Transform.NONE),
+        # Transformer blocks - Self attention (attn1)
+        r"blocks\.([0-9]+)\.attn1\.norm_q\.weight": (r"blocks.\1.self_attn.norm_q.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.norm_k\.weight": (r"blocks.\1.self_attn.norm_k.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.to_q\.weight": (r"blocks.\1.self_attn.to_q.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn1\.to_q\.bias": (r"blocks.\1.self_attn.to_q.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.to_k\.weight": (r"blocks.\1.self_attn.to_k.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn1\.to_k\.bias": (r"blocks.\1.self_attn.to_k.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.to_v\.weight": (r"blocks.\1.self_attn.to_v.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn1\.to_v\.bias": (r"blocks.\1.self_attn.to_v.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.to_out\.0\.weight": (
+            r"blocks.\1.self_attn.to_out.layers_0.kernel",
             Transform.TRANSPOSE,
         ),
-        r"transformer\.final_layer\.adaLN_modulation\.1\.bias": (
-            "final_layer.adaLN_modulation.layers_1.bias",
-            Transform.NONE,
+        r"blocks\.([0-9]+)\.attn1\.to_out\.0\.bias": (r"blocks.\1.self_attn.to_out.layers_0.bias", Transform.NONE),
+        # Transformer blocks - Cross attention (attn2)
+        r"blocks\.([0-9]+)\.attn2\.norm_q\.weight": (r"blocks.\1.cross_attn.norm_q.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.norm_k\.weight": (r"blocks.\1.cross_attn.norm_k.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.to_q\.weight": (r"blocks.\1.cross_attn.to_q.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn2\.to_q\.bias": (r"blocks.\1.cross_attn.to_q.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.to_k\.weight": (r"blocks.\1.cross_attn.to_k.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn2\.to_k\.bias": (r"blocks.\1.cross_attn.to_k.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.to_v\.weight": (r"blocks.\1.cross_attn.to_v.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn2\.to_v\.bias": (r"blocks.\1.cross_attn.to_v.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.to_out\.0\.weight": (
+            r"blocks.\1.cross_attn.to_out.layers_0.kernel",
+            Transform.TRANSPOSE,
         ),
+        r"blocks\.([0-9]+)\.attn2\.to_out\.0\.bias": (r"blocks.\1.cross_attn.to_out.layers_0.bias", Transform.NONE),
+        # Transformer blocks - Feed forward
+        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.weight": (r"blocks.\1.ffn.fc1.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.bias": (r"blocks.\1.ffn.fc1.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.ffn\.net\.2\.weight": (r"blocks.\1.ffn.fc2.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.ffn\.net\.2\.bias": (r"blocks.\1.ffn.fc2.bias", Transform.NONE),
+        # Transformer blocks - Norm and modulation
+        r"blocks\.([0-9]+)\.norm2\.weight": (r"blocks.\1.norm2.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.norm2\.bias": (r"blocks.\1.norm2.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.scale_shift_table": (r"blocks.\1.scale_shift_table", Transform.NONE),
+        # Output projection
+        r"scale_shift_table": ("final_scale_shift_table", Transform.NONE),
+        r"proj_out\.weight": ("proj_out.kernel", Transform.TRANSPOSE),
+        r"proj_out\.bias": ("proj_out.bias", Transform.NONE),
     }
 
     return mapping
@@ -299,7 +303,7 @@ def create_model_from_safe_tensors(
     Load Wan2.1-T2V-1.3B DiT model from safetensors checkpoint.
 
     Args:
-        file_dir: Directory containing .safetensors files
+        file_dir: Directory containing .safetensors files or path to transformer directory
         cfg: Model configuration
         mesh: Optional JAX mesh for sharding
         load_transformer_only: If True, only load transformer weights (not VAE/text encoder)
@@ -307,16 +311,23 @@ def create_model_from_safe_tensors(
     Returns:
         Wan2DiT model with loaded weights
     """
-    files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
-    if not files:
-        raise ValueError(f"No safetensors found in {file_dir}")
+    # Check if file_dir is the model root or transformer subdirectory
+    file_path = epath.Path(file_dir).expanduser()
+    transformer_path = file_path / "transformer"
 
-    # Filter to transformer-only files if requested
-    if load_transformer_only:
-        files = [f for f in files if "transformer" in f.name.lower() or "dit" in f.name.lower()]
+    if transformer_path.exists():
+        # Look in transformer subdirectory
+        files = sorted(list(transformer_path.glob("diffusion_pytorch_model-*.safetensors")))
+    else:
+        # Look in provided directory
+        files = sorted(list(file_path.glob("diffusion_pytorch_model-*.safetensors")))
         if not files:
-            # If no specific transformer files, use all files
-            files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
+            files = sorted(list(file_path.glob("*.safetensors")))
+
+    if not files:
+        raise ValueError(f"No safetensors found in {file_dir} or {file_dir}/transformer")
+
+    print(f"Found {len(files)} DiT transformer safetensors file(s)")
 
     # Create model structure
     wan2_dit = nnx.eval_shape(lambda: model_lib.Wan2DiT(cfg, rngs=nnx.Rngs(params=0)))
@@ -341,6 +352,7 @@ def create_model_from_safe_tensors(
 
                 if jax_key is None:
                     # Skip keys not in our mapping (e.g., VAE, text encoder)
+                    print(f"{torch_key} is not mapped")
                     skipped_keys.append(torch_key)
                     continue
 
@@ -423,6 +435,7 @@ def create_vae_decoder_from_safe_tensors(
                 if jax_key is None:
                     # Skip keys not in our mapping (e.g., spatial upsamplers we don't use)
                     skipped_keys.append(torch_key)
+                    print(f"{torch_key} is not mapped")
                     continue
 
                 keys = [_stoi(k) for k in jax_key.split(".")]
@@ -453,4 +466,151 @@ def create_vae_decoder_from_safe_tensors(
     return nnx.merge(graph_def, state_dict)
 
 
-__all__ = ["create_model_from_safe_tensors", "create_vae_decoder_from_safe_tensors"]
+def _get_t5_key_mapping():
+    """Define mapping from HuggingFace T5 keys to JAX T5 keys."""
+
+    class Transform(Enum):
+        """Transformations for T5 parameters"""
+
+        NONE = None
+        TRANSPOSE = ((1, 0), None, False)  # For linear layers: (out, in) -> (in, out)
+
+    # T5/UMT5 uses standard HuggingFace naming
+    mapping = {
+        # Shared token embeddings
+        r"shared\.weight": ("encoder.token_embedding.embedding", Transform.NONE),
+        # Encoder blocks - Self attention
+        r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.q\.weight": (
+            r"encoder.blocks.\1.attn.q.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.k\.weight": (
+            r"encoder.blocks.\1.attn.k.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.v\.weight": (
+            r"encoder.blocks.\1.attn.v.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.o\.weight": (
+            r"encoder.blocks.\1.attn.o.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.relative_attention_bias\.weight": (
+            r"encoder.blocks.\1.pos_embedding.embedding.embedding",
+            Transform.TRANSPOSE,
+        ),
+        r"encoder\.block\.([0-9]+)\.layer\.0\.layer_norm\.weight": (r"encoder.blocks.\1.norm1.weight", Transform.NONE),
+        # Encoder blocks - Feed forward
+        r"encoder\.block\.([0-9]+)\.layer\.1\.DenseReluDense\.wi_0\.weight": (
+            r"encoder.blocks.\1.ffn.gate.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"encoder\.block\.([0-9]+)\.layer\.1\.DenseReluDense\.wi_1\.weight": (
+            r"encoder.blocks.\1.ffn.fc1.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"encoder\.block\.([0-9]+)\.layer\.1\.DenseReluDense\.wo\.weight": (
+            r"encoder.blocks.\1.ffn.fc2.kernel",
+            Transform.TRANSPOSE,
+        ),
+        r"encoder\.block\.([0-9]+)\.layer\.1\.layer_norm\.weight": (r"encoder.blocks.\1.norm2.weight", Transform.NONE),
+        # Final layer norm
+        r"encoder\.final_layer_norm\.weight": ("encoder.norm.weight", Transform.NONE),
+    }
+
+    return mapping
+
+
+def create_t5_encoder_from_safe_tensors(
+    file_dir: str,
+    mesh: jax.sharding.Mesh | None = None,
+):
+    """
+    Load T5 encoder from safetensors checkpoint.
+
+    Args:
+        file_dir: Directory containing .safetensors files or path to text_encoder directory
+        mesh: Optional JAX mesh for sharding
+
+    Returns:
+        T5EncoderModel with loaded weights
+    """
+    from bonsai.models.wan2 import t5_jax
+
+    # Check if file_dir is the model root or text_encoder subdirectory
+    file_path = epath.Path(file_dir).expanduser()
+    text_encoder_path = file_path / "text_encoder"
+
+    if text_encoder_path.exists():
+        # Look in text_encoder subdirectory
+        files = sorted(list(text_encoder_path.glob("model-*.safetensors")))
+    else:
+        # Look in provided directory
+        files = sorted(list(file_path.glob("model-*.safetensors")))
+
+    if not files:
+        raise ValueError(f"No safetensors found in {file_dir} or {file_dir}/text_encoder")
+
+    print(f"Found {len(files)} T5 encoder safetensors file(s)")
+
+    # Create T5 encoder structure
+    t5_encoder = nnx.eval_shape(lambda: t5_jax.T5EncoderModel(rngs=nnx.Rngs(params=0)))
+    graph_def, abs_state = nnx.split(t5_encoder)
+    state_dict = abs_state.to_pure_dict()
+
+    # Setup sharding if mesh provided
+    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
+
+    key_mapping = _get_t5_key_mapping()
+    conversion_errors = []
+    loaded_keys = []
+    skipped_keys = []
+
+    for f in files:
+        print(f"Loading T5 weights from {f.name}...")
+        with safetensors.safe_open(f, framework="numpy") as sf:
+            for torch_key in sf.keys():
+                tensor = sf.get_tensor(torch_key)
+
+                jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+
+                if jax_key is None:
+                    # Skip keys not in our mapping
+                    skipped_keys.append(torch_key)
+                    print(f"{torch_key} is not mapped")
+                    continue
+
+                keys = [_stoi(k) for k in jax_key.split(".")]
+                try:
+                    _assign_weights(keys, tensor, state_dict, torch_key, transform, sharding)
+                    loaded_keys.append(torch_key)
+                except Exception as e:
+                    full_jax_key = ".".join([str(k) for k in keys])
+                    conversion_errors.append(
+                        f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}"
+                    )
+        gc.collect()
+
+    print(f"Loaded {len(loaded_keys)} T5 weight tensors")
+    print(f"Skipped {len(skipped_keys)} weight tensors")
+
+    if conversion_errors:
+        print(f"\nWarning: {len(conversion_errors)} conversion errors occurred:")
+        for err in conversion_errors[:10]:  # Show first 10 errors
+            print(f"  {err}")
+        if len(conversion_errors) > 10:
+            print(f"  ... and {len(conversion_errors) - 10} more")
+
+    if len(loaded_keys) == 0:
+        raise ValueError("No T5 weights were loaded! Check the checkpoint structure and key mapping.")
+
+    gc.collect()
+    return nnx.merge(graph_def, state_dict)
+
+
+__all__ = [
+    "create_model_from_safe_tensors",
+    "create_t5_encoder_from_safe_tensors",
+    "create_vae_decoder_from_safe_tensors",
+]
