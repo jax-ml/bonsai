@@ -386,10 +386,10 @@ def create_model_from_safe_tensors(
 
     if conversion_errors:
         print(f"\n Warning: {len(conversion_errors)} conversion errors occurred:")
-        for err in conversion_errors[:5]:  # Show first 5 errors
+        for err in conversion_errors:  # Show first 5 errors
             print(f"  {err}")
-        if len(conversion_errors) > 5:
-            print(f"  ... and {len(conversion_errors) - 5} more")
+        # if len(conversion_errors) > 5:
+        #     print(f"  ... and {len(conversion_errors) - 5} more")
 
     gc.collect()
     return nnx.merge(graph_def, state_dict)
