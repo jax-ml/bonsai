@@ -266,10 +266,12 @@ class T5Encoder(nnx.Module):
         else:
             self.pos_embedding = None
         self.dropout = nnx.Dropout(dropout, rngs=rngs)
-        self.blocks = [
-            T5SelfAttention(dim, dim_attn, dim_ffn, num_heads, num_buckets, shared_pos, dropout, rngs=rngs)
-            for _ in range(num_layers)
-        ]
+        self.blocks = nnx.List(
+            [
+                T5SelfAttention(dim, dim_attn, dim_ffn, num_heads, num_buckets, shared_pos, dropout, rngs=rngs)
+                for _ in range(num_layers)
+            ]
+        )
         self.norm = T5LayerNorm(dim, rngs=rngs)
 
     def __call__(self, ids: Array, mask: Optional[Array] = None, deterministic: bool = True) -> Array:
