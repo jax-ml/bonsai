@@ -20,28 +20,18 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 from huggingface_hub import snapshot_download
+from transformers import AutoTokenizer
 
-from bonsai.models.wan2 import modeling, params, vae
+from bonsai.models.wan2 import modeling, params, t5, vae
 
 
-def get_t5_text_embeddings(prompt: str, max_length: int = 512):
-    """
-    Get text embeddings from T5 encoder.
-
-    Uses JAX implementation of UMT5-XXL encoder.
-
-    Args:
-        prompt: Text prompt to encode
-        max_length: Maximum sequence length (default 512)
-
-    Returns:
-        embeddings: [1, seq_len, 4096] text embeddings
-    """
+def get_t5_text_embeddings(
+    prompt: str,
+    model_ckpt_path: str,
+    max_length: int = 512,
+):
+    """Get text embeddings from T5 encoder with loaded weights."""
     try:
-        from transformers import AutoTokenizer
-
-        from bonsai.models.wan2 import t5_jax
-
         print("Loading UMT5-XXL tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
 
@@ -54,10 +44,9 @@ def get_t5_text_embeddings(prompt: str, max_length: int = 512):
             return_tensors="np",  # Return numpy arrays
         )
 
-        # Note: Model weights need to be loaded separately
-        # For now, create model with random weights
-        print("Creating T5 encoder (random weights - load checkpoint for real use)...")
-        model = t5_jax.T5EncoderModel(rngs=nnx.Rngs(params=0))
+        print("Loading T5 encoder weights...")
+        model = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
+        print("✓ T5 encoder loaded successfully")
 
         # Get embeddings
         input_ids = jnp.array(inputs["input_ids"])
@@ -74,6 +63,9 @@ def get_t5_text_embeddings(prompt: str, max_length: int = 512):
         return jnp.zeros((1, max_length, 4096))
     except Exception as e:
         print(f"Error in text encoding: {e}")
+        import traceback
+
+        traceback.print_exc()
         print("Using dummy embeddings")
         return jnp.zeros((1, max_length, 4096))
 
@@ -121,7 +113,7 @@ def run_model():
 
     # Step 1: Get text embeddings
     print("\n[1/4] Encoding text with T5...")
-    text_embeds = get_t5_text_embeddings(prompts[0], max_length=config.max_text_len)
+    text_embeds = get_t5_text_embeddings(prompts[0], max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
     print(f"      Text embeddings shape: {text_embeds.shape}")
 
     # Step 2: Load DiT model
