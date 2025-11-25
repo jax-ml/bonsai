@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-import numpy as np
 import torch
 from absl.testing import absltest
 from huggingface_hub import snapshot_download
@@ -123,7 +122,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         jx = jnp.array(tx.cpu().detach().numpy())
 
         jy, ty = nm.embedding.value.at[(jx,)].get(), tm(tx)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_decoder_layer(self):
         nm = self.nnx_model.layers[0]
@@ -131,12 +130,12 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.emb_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
         nnx_cache = self._init_nnx_cache(self.batch_size)
         torch_inputs = self._setup_torch_attn(tx)
 
         jy, ty = nm(jx, nnx_cache[0], jnp.ones((self.batch_size, self.num_input_tokens))), tm(**torch_inputs)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_all_decoder_layers(self):
         nnx_cache = self._init_nnx_cache(self.batch_size)
@@ -144,17 +143,12 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         for nm, tm, nc in zip(self.nnx_model.layers, self.torch_model.model.layers, nnx_cache):
             jx = jax.random.normal(jax.random.key(0), shape=shape)
-            tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+            tx = torch.tensor(jx)
 
             jy = nm(jx, nc, jnp.ones((self.batch_size, self.num_input_tokens)))
             torch_inputs = self._setup_torch_attn(tx)
             ty = tm.to(torch.float32)(**torch_inputs)
-            torch.testing.assert_close(
-                torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16),
-                ty,
-                atol=self.relaxed_tol,
-                rtol=self.relaxed_tol,
-            )
+            torch.testing.assert_close(torch.tensor(jy), ty, atol=self.relaxed_tol, rtol=self.relaxed_tol)
 
     def test_rms_norm(self):
         nm = self.nnx_model.layers[0].input_layernorm
@@ -162,10 +156,10 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.emb_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape, dtype=jnp.bfloat16)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
 
         jy, ty = nm(jx), tm(tx)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_self_attn(self):
         nm = self.nnx_model.layers[0].attn
@@ -173,13 +167,13 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.emb_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
         torch_inputs = self._setup_torch_attn(tx)
         nnx_cache = self._init_nnx_cache(self.batch_size)
 
         jy = nm(jx, nnx_cache[0], jnp.ones((self.batch_size, self.num_input_tokens), dtype=jnp.float32))
         ty = tm(**torch_inputs)[0]
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_q_norm(self):
         nm = self.nnx_model.layers[0].attn.q_norm
@@ -187,10 +181,10 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.num_heads, self.bonsai_config.head_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape, dtype=jnp.bfloat16)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
 
         jy, ty = nm(jx), tm(tx)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_k_norm(self):
         nm = self.nnx_model.layers[0].attn.q_norm
@@ -198,10 +192,10 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.num_kv_heads, self.bonsai_config.head_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape, dtype=jnp.bfloat16)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
 
         jy, ty = nm(jx), tm(tx)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_q_proj(self):
         nm = self.nnx_model.layers[0].attn.q_proj
@@ -209,11 +203,11 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.emb_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape, dtype=jnp.bfloat16)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.num_heads, self.bonsai_config.head_dim)
         jy, ty = nm(jx), tm(tx).reshape(shape)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_k_proj(self):
         nm = self.nnx_model.layers[0].attn.k_proj
@@ -221,11 +215,11 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.emb_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape, dtype=jnp.bfloat16)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.num_kv_heads, self.bonsai_config.head_dim)
         jy, ty = nm(jx), tm(tx).reshape(shape)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_o_proj(self):
         nm = self.nnx_model.layers[0].attn.o_proj
@@ -233,14 +227,10 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.num_heads, self.bonsai_config.head_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape, dtype=jnp.bfloat16)
-        tx = (
-            torch.tensor(np.array(jx, dtype=np.float32))
-            .to(torch.bfloat16)
-            .reshape(self.batch_size, self.num_input_tokens, -1)
-        )
+        tx = torch.tensor(jx).reshape(self.batch_size, self.num_input_tokens, -1)
 
         jy, ty = nm(jx), tm(tx)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_mlp(self):
         nm = self.nnx_model.layers[0].mlp
@@ -248,15 +238,10 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.emb_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
 
         jy, ty = nm(jx), tm(tx)
-        torch.testing.assert_close(
-            torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16),
-            ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-        )
+        torch.testing.assert_close(torch.tensor(jy), ty, rtol=self.relaxed_tol, atol=self.relaxed_tol)
 
     def test_lm_head(self):
         nm = self.nnx_model.lm_head
@@ -264,22 +249,20 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.emb_dim)
         jx = jax.random.normal(jax.random.key(0), shape=shape)
-        tx = torch.tensor(np.array(jx, dtype=np.float32)).to(torch.bfloat16)
+        tx = torch.tensor(jx)
 
         jy, ty = nm(jx), tm(tx)
-        torch.testing.assert_close(torch.tensor(np.array(jy, dtype=np.float32)).to(torch.bfloat16), ty)
+        torch.testing.assert_close(torch.tensor(jy), ty)
 
     def test_sin_cos(self):
         batch_size, seq_len, dim = 2, 10, 128
         hidden_states = torch.ones((batch_size, seq_len, dim))
         jp = jnp.stack([jnp.arange(seq_len), jnp.arange(seq_len)])
         js, jc = modeling._generate_pos_embeddings(jp, dim)
-        tc, ts = self.torch_model.model.rotary_emb(
-            hidden_states, torch.tensor(np.array(jp, dtype=np.float32)).to(torch.bfloat16)
-        )
+        tc, ts = self.torch_model.model.rotary_emb(hidden_states, torch.tensor(jp))
         tc, ts = tc[:, :, : dim // 2], ts[:, :, : dim // 2]
-        torch.testing.assert_close(torch.tensor(np.array(js, dtype=np.float32)).to(torch.bfloat16), ts)
-        torch.testing.assert_close(torch.tensor(np.array(jc, dtype=np.float32)).to(torch.bfloat16), tc)
+        torch.testing.assert_close(torch.tensor(js), ts)
+        torch.testing.assert_close(torch.tensor(jc), tc)
 
     def test_full(self):
         query = ["Why is the sky blue instead of any other color like purple?"]
