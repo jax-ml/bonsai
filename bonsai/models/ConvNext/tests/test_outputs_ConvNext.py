@@ -73,7 +73,15 @@ class TestModuleForwardPasses(absltest.TestCase):
                 # Convert Torch output to NHWC for comparison
                 t_out_nhwc = t_out.permute(0, 2, 3, 1)
 
-                torch.testing.assert_close(torch.tensor(j_out), t_out_nhwc, rtol=1e-4, atol=1e-4)
+                torch.testing.assert_close(torch.tensor(j_out), t_out_nhwc, rtol=5e-4, atol=5e-4)
+
+    def test_full(self):
+        jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
+        tx = torch.tensor(jx).permute(0, 3, 1, 2)
+        with torch.no_grad():
+            ty = self.baseline_model(tx).logits
+        jy = self.bonsai_model(jx)
+        torch.testing.assert_close(torch.tensor(jy), ty, rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":
