@@ -157,16 +157,15 @@ class MultiHeadAttention(nnx.Module):
         self.k_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
         self.v_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
         self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
-        self.q_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
-        self.k_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
+        self.q_norm = nnx.RMSNorm(cfg.hidden_dim, rngs=rngs)
+        self.k_norm = nnx.RMSNorm(cfg.hidden_dim, rngs=rngs)
 
     def __call__(self, x: Array, rope_state: tuple | None = None, deterministic: bool = True) -> Array:
         b, n = x.shape[:2]
-        q = self.q_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        k = self.k_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        # Apply normalization BEFORE reshaping to heads
+        q = self.q_norm(self.q_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        k = self.k_norm(self.k_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
         v = self.v_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-
-        q, k = self.q_norm(q), self.k_norm(k)
 
         if rope_state is not None:
             freqs, grid_sizes = rope_state
@@ -187,11 +186,12 @@ class CrossAttention(nnx.Module):
         self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
         self.kv_proj = nnx.Linear(cfg.hidden_dim, 2 * cfg.hidden_dim, rngs=rngs)
         self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
-        self.q_norm = nnx.RMSNorm(cfg.head_dim, rngs=rngs)
+        self.q_norm = nnx.RMSNorm(cfg.hidden_dim, rngs=rngs)
 
     def __call__(self, x: Array, context: Array, deterministic: bool = True) -> Array:
         b, n, m = x.shape[0], x.shape[1], context.shape[1]
-        q = self.q_norm(self.q_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3))
+        # Apply normalization BEFORE reshaping to heads
+        q = self.q_norm(self.q_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
         k, v = self.kv_proj(context).reshape(b, m, 2, self.num_heads, self.head_dim).transpose(2, 0, 3, 1, 4)
         attn = jax.nn.softmax(jnp.einsum("bhid,bhjd->bhij", q, k) / math.sqrt(self.head_dim), axis=-1)
         out = jnp.einsum("bhij,bhjd->bhid", attn, v).transpose(0, 2, 1, 3).reshape(b, n, -1)
