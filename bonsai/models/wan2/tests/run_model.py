@@ -28,15 +28,22 @@ def get_t5_text_embeddings(prompt: str, max_length: int = 512):
     """
     Get text embeddings from T5 encoder.
 
-    1. Load a pretrained T5 model (e.g., google-t5/t5-base or UMT5)
-    2. Tokenize the prompt
-    3. Encode to get embeddings
+    Uses JAX implementation of UMT5-XXL encoder.
+
+    Args:
+        prompt: Text prompt to encode
+        max_length: Maximum sequence length (default 512)
+
+    Returns:
+        embeddings: [1, seq_len, 4096] text embeddings
     """
     try:
-        from transformers import AutoTokenizer, FlaxAutoModel
+        from transformers import AutoTokenizer
 
+        from bonsai.models.wan2 import t5_jax
+
+        print("Loading UMT5-XXL tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
-        model = FlaxAutoModel.from_pretrained("google/umt5-xxl")
 
         # Tokenize with padding
         inputs = tokenizer(
@@ -44,18 +51,30 @@ def get_t5_text_embeddings(prompt: str, max_length: int = 512):
             max_length=max_length,
             padding="max_length",
             truncation=True,
+            return_tensors="np",  # Return numpy arrays
         )
 
-        # Get embeddings
-        outputs = model(**inputs)
-        embeddings = outputs.last_hidden_state  # [1, seq_len, 4096]
+        # Note: Model weights need to be loaded separately
+        # For now, create model with random weights
+        print("Creating T5 encoder (random weights - load checkpoint for real use)...")
+        model = t5_jax.T5EncoderModel(rngs=nnx.Rngs(params=0))
 
+        # Get embeddings
+        input_ids = jnp.array(inputs["input_ids"])
+        attention_mask = jnp.array(inputs["attention_mask"])
+        embeddings = model(input_ids, attention_mask, deterministic=True)
+
+        print(f"Text embeddings shape: {embeddings.shape}")
         return embeddings
 
-    except ImportError:
-        print("transformers not installed, using dummy embeddings")
+    except ImportError as e:
+        print(f"Error loading dependencies: {e}")
         print("Install with: pip install transformers")
         # Return dummy embeddings
+        return jnp.zeros((1, max_length, 4096))
+    except Exception as e:
+        print(f"Error in text encoding: {e}")
+        print("Using dummy embeddings")
         return jnp.zeros((1, max_length, 4096))
 
 
