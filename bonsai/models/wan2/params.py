@@ -27,17 +27,7 @@ from bonsai.models.wan2 import modeling as model_lib
 from bonsai.models.wan2 import vae as vae_lib
 
 
-def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
-    """Define mapping from checkpoint keys to JAX model keys.
-
-    Checkpoint structure (from Wan2.1-T2V-1.3B-Diffusers):
-    - patch_embedding: Input patch projection
-    - condition_embedder: Text and time embedders
-    - blocks.N: Transformer blocks with attn1 (self), attn2 (cross), ffn, norm2, scale_shift_table
-    - scale_shift_table: Global modulation table
-    - proj_out: Output projection
-    """
-
+def _get_dit_mapping(cfg: model_lib.ModelConfig):
     class Transform(Enum):
         """Transformations for model parameters"""
 
@@ -74,46 +64,46 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
         r"condition_embedder\.text_embedder\.linear_2\.weight": ("text_proj.layers_1.kernel", Transform.TRANSPOSE),
         r"condition_embedder\.text_embedder\.linear_2\.bias": ("text_proj.layers_1.bias", Transform.NONE),
         # Transformer blocks - Self attention (attn1)
-        r"blocks\.([0-9]+)\.attn1\.norm_q\.weight": (r"blocks.\1.self_attn.norm_q.scale", Transform.NONE),
-        r"blocks\.([0-9]+)\.attn1\.norm_k\.weight": (r"blocks.\1.self_attn.norm_k.scale", Transform.NONE),
-        r"blocks\.([0-9]+)\.attn1\.to_q\.weight": (r"blocks.\1.self_attn.to_q.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.attn1\.to_q\.bias": (r"blocks.\1.self_attn.to_q.bias", Transform.NONE),
-        r"blocks\.([0-9]+)\.attn1\.to_k\.weight": (r"blocks.\1.self_attn.to_k.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.attn1\.to_k\.bias": (r"blocks.\1.self_attn.to_k.bias", Transform.NONE),
-        r"blocks\.([0-9]+)\.attn1\.to_v\.weight": (r"blocks.\1.self_attn.to_v.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.attn1\.to_v\.bias": (r"blocks.\1.self_attn.to_v.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.norm_q\.weight": (r"blocks.\1.self_attn.q_norm.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.norm_k\.weight": (r"blocks.\1.self_attn.k_norm.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.to_q\.weight": (r"blocks.\1.self_attn.q_proj.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn1\.to_q\.bias": (r"blocks.\1.self_attn.q_proj.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.to_k\.weight": (r"blocks.\1.self_attn.k_proj.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn1\.to_k\.bias": (r"blocks.\1.self_attn.k_proj.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.to_v\.weight": (r"blocks.\1.self_attn.v_proj.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn1\.to_v\.bias": (r"blocks.\1.self_attn.v_proj.bias", Transform.NONE),
         r"blocks\.([0-9]+)\.attn1\.to_out\.0\.weight": (
             r"blocks.\1.self_attn.to_out.layers_0.kernel",
             Transform.TRANSPOSE,
         ),
-        r"blocks\.([0-9]+)\.attn1\.to_out\.0\.bias": (r"blocks.\1.self_attn.to_out.layers_0.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn1\.to_out\.0\.bias": (r"blocks.\1.self_attn.out_proj.layers_0.bias", Transform.NONE),
         # Transformer blocks - Cross attention (attn2)
-        r"blocks\.([0-9]+)\.attn2\.norm_q\.weight": (r"blocks.\1.cross_attn.norm_q.scale", Transform.NONE),
-        r"blocks\.([0-9]+)\.attn2\.norm_k\.weight": (r"blocks.\1.cross_attn.norm_k.scale", Transform.NONE),
-        r"blocks\.([0-9]+)\.attn2\.to_q\.weight": (r"blocks.\1.cross_attn.to_q.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.attn2\.to_q\.bias": (r"blocks.\1.cross_attn.to_q.bias", Transform.NONE),
-        r"blocks\.([0-9]+)\.attn2\.to_k\.weight": (r"blocks.\1.cross_attn.to_k.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.attn2\.to_k\.bias": (r"blocks.\1.cross_attn.to_k.bias", Transform.NONE),
-        r"blocks\.([0-9]+)\.attn2\.to_v\.weight": (r"blocks.\1.cross_attn.to_v.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.attn2\.to_v\.bias": (r"blocks.\1.cross_attn.to_v.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.norm_q\.weight": (r"blocks.\1.cross_attn.q_norm.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.norm_k\.weight": (r"blocks.\1.cross_attn.k_norm.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.to_q\.weight": (r"blocks.\1.cross_attn.q_proj.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn2\.to_q\.bias": (r"blocks.\1.cross_attn.q_proj.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.to_k\.weight": (r"blocks.\1.cross_attn.k_proj.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn2\.to_k\.bias": (r"blocks.\1.cross_attn.k_proj.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.to_v\.weight": (r"blocks.\1.cross_attn.v_proj.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.attn2\.to_v\.bias": (r"blocks.\1.cross_attn.v_proj.bias", Transform.NONE),
         r"blocks\.([0-9]+)\.attn2\.to_out\.0\.weight": (
-            r"blocks.\1.cross_attn.to_out.layers_0.kernel",
+            r"blocks.\1.cross_attn.out_proj.layers_0.kernel",
             Transform.TRANSPOSE,
         ),
-        r"blocks\.([0-9]+)\.attn2\.to_out\.0\.bias": (r"blocks.\1.cross_attn.to_out.layers_0.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.to_out\.0\.bias": (r"blocks.\1.cross_attn.out_proj.layers_0.bias", Transform.NONE),
         # Transformer blocks - Feed forward
-        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.weight": (r"blocks.\1.ffn.fc1.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.bias": (r"blocks.\1.ffn.fc1.bias", Transform.NONE),
-        r"blocks\.([0-9]+)\.ffn\.net\.2\.weight": (r"blocks.\1.ffn.fc2.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.ffn\.net\.2\.bias": (r"blocks.\1.ffn.fc2.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.weight": (r"blocks.\1.mlp.layers_0.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.bias": (r"blocks.\1.mlp.layers_0.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.ffn\.net\.2\.weight": (r"blocks.\1.mlp.layers_1.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.ffn\.net\.2\.bias": (r"blocks.\1.mlp.layers_1.bias", Transform.NONE),
         # Transformer blocks - Norm and modulation
         r"blocks\.([0-9]+)\.norm2\.weight": (r"blocks.\1.norm2.scale", Transform.NONE),
         r"blocks\.([0-9]+)\.norm2\.bias": (r"blocks.\1.norm2.bias", Transform.NONE),
         r"blocks\.([0-9]+)\.scale_shift_table": (r"blocks.\1.scale_shift_table", Transform.NONE),
         # Output projection
-        r"scale_shift_table": ("final_scale_shift_table", Transform.NONE),
-        r"proj_out\.weight": ("proj_out.kernel", Transform.TRANSPOSE),
-        r"proj_out\.bias": ("proj_out.bias", Transform.NONE),
+        r"scale_shift_table": ("final_layer.scale_shift_table", Transform.NONE),
+        r"proj_out\.weight": ("out_proj.kernel", Transform.TRANSPOSE),
+        r"proj_out\.bias": ("out_proj.bias", Transform.NONE),
     }
 
     return mapping
@@ -337,7 +327,7 @@ def create_model_from_safe_tensors(
     # Setup sharding if mesh provided
     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
-    key_mapping = _get_key_and_transform_mapping(cfg)
+    key_mapping = _get_dit_mapping(cfg)
     conversion_errors = []
     loaded_keys = []
     skipped_keys = []
@@ -536,7 +526,7 @@ def create_t5_encoder_from_safe_tensors(
     Returns:
         T5EncoderModel with loaded weights
     """
-    from bonsai.models.wan2 import t5_jax
+    from bonsai.models.wan2 import t5
 
     # Check if file_dir is the model root or text_encoder subdirectory
     file_path = epath.Path(file_dir).expanduser()
@@ -555,7 +545,7 @@ def create_t5_encoder_from_safe_tensors(
     print(f"Found {len(files)} T5 encoder safetensors file(s)")
 
     # Create T5 encoder structure
-    t5_encoder = nnx.eval_shape(lambda: t5_jax.T5EncoderModel(rngs=nnx.Rngs(params=0)))
+    t5_encoder = nnx.eval_shape(lambda: t5.T5EncoderModel(rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(t5_encoder)
     state_dict = abs_state.to_pure_dict()
 

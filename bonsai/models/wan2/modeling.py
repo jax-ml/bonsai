@@ -51,7 +51,7 @@ class WanLayerNorm(nnx.LayerNorm):
 class ModelConfig:
     """Configuration for Wan2.1-T2V-1.3B Diffusion Transformer."""
 
-    num_layers: int = 5
+    num_layers: int = 30
     hidden_dim: int = 1536
     input_dim: int = 16
     output_dim: int = 16
@@ -62,7 +62,7 @@ class ModelConfig:
     text_embed_dim: int = 4096
     max_text_len: int = 512
     num_frames: int = 21
-    latent_size: Tuple[int, int] = (32, 32)
+    latent_size: Tuple[int, int] = (480, 480)
     num_inference_steps: int = 50
     guidance_scale: float = 5.0
 
@@ -232,8 +232,10 @@ class WanAttentionBlock(nnx.Module):
             nnx.Linear(cfg.ffn_dim, cfg.hidden_dim, rngs=rngs),
         )
 
-        # Learnable modulation parameter
-        self.modulation = nnx.Param(jax.random.normal(rngs.params(), (1, 6, cfg.hidden_dim)) / (cfg.hidden_dim**0.5))
+        # Learnable AdaLN scale/shift table loaded from checkpoints
+        self.scale_shift_table = nnx.Param(
+            jax.random.normal(rngs.params(), (1, 6, cfg.hidden_dim)) / (cfg.hidden_dim**0.5)
+        )
 
     @jax.named_scope("wan_attention_block")
     def __call__(
@@ -255,7 +257,7 @@ class WanAttentionBlock(nnx.Module):
 
         # Reshape time embedding and add learnable modulation
         reshaped_time_emb = time_emb.reshape(b, 6, d)
-        modulation = nnx.silu(reshaped_time_emb + self.modulation.value)
+        modulation = nnx.silu(reshaped_time_emb + self.scale_shift_table.value)
         modulation = modulation.reshape(b, -1)  # [B, 6*D]
 
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
@@ -291,7 +293,9 @@ class FinalLayer(nnx.Module):
         self.linear = nnx.Linear(cfg.hidden_dim, out_dim, rngs=rngs)
 
         # Learnable modulation parameter (matches HF: torch.randn / dim**0.5)
-        self.modulation = nnx.Param(jax.random.normal(rngs.params(), (1, 2, cfg.hidden_dim)) / (cfg.hidden_dim**0.5))
+        self.scale_shift_table = nnx.Param(
+            jax.random.normal(rngs.params(), (1, 2, cfg.hidden_dim)) / (cfg.hidden_dim**0.5)
+        )
 
     @jax.named_scope("final_layer")
     def __call__(self, x: Array, time_emb: Array) -> Array:
@@ -303,7 +307,7 @@ class FinalLayer(nnx.Module):
             [B, N, output_dim] predicted noise
         """
         # [B, D] → [B, 1, D] + [1, 2, D] → [B, 2, D]
-        e = self.modulation.value + time_emb[:, None, :]
+        e = self.scale_shift_table.value + time_emb[:, None, :]
         shift, scale = e[:, 0, :], e[:, 1, :]
 
         x = self.norm(x) * (1 + scale[:, None, :]) + shift[:, None, :]
