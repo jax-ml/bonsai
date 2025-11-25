@@ -3,20 +3,17 @@ from typing import Literal
 
 @dataclass
 class CLIPConfig:
-    # general
     image_size: int = 224
     encoder_type: Literal["vit", "resnet"] = "vit"
     model_size: Literal["ViT-B/32", "ViT-L/14"] = "ViT-B/32"
-    dtype: str = "float32"   # "float32" or "float16"
+    dtype: str = "float32"   
 
-    # ViT defaults (overwritten by apply_model_size_presets)
     patch_size: int = 32
     image_embed_dim: int = 768
     vit_num_layers: int = 12
     vit_num_heads: int = 12
     vit_mlp_dim: int = 3072
 
-    # ResNet (small config)
     resnet_stem_channels: int = 64
     resnet_block_channels: tuple = (64, 128, 256, 512)
     resnet_block_repeats: tuple = (3, 4, 6, 3)
@@ -29,7 +26,6 @@ class CLIPConfig:
     text_num_heads: int = 8
     text_mlp_dim: int = 2048
 
-    # projection
     proj_dim: int = 512
 
     def apply_model_size_presets(self):
