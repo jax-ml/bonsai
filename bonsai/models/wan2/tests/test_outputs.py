@@ -23,6 +23,7 @@ import jax.numpy as jnp
 import numpy as np
 from flax import nnx
 from huggingface_hub import snapshot_download
+from wan.modules.t5 import T5EncoderModel as WanT5EncoderModel
 
 from bonsai.models.wan2 import modeling, params, vae
 
@@ -95,14 +96,14 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
 
 
 def test_t5_encoder():
-    """Test T5 encoder output against HuggingFace reference."""
+    """Test T5 encoder output against Wan T5 reference implementation."""
     print("\n" + "=" * 80)
     print("TEST 1: T5 Encoder (UMT5-XXL)")
     print("=" * 80)
 
     try:
         import torch
-        from transformers import AutoTokenizer, T5EncoderModel
+        from transformers import AutoTokenizer
     except ImportError:
         print("❌ PyTorch or transformers not installed. Skipping T5 test.")
         return False
@@ -117,35 +118,61 @@ def test_t5_encoder():
     print(f"\nTest prompt: {prompt}")
     print(f"Max length: {max_length}")
 
-    # Tokenize
+    # Tokenize using transformers tokenizer for JAX model
+    print("\nTokenizing for JAX model...")
     tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
     inputs = tokenizer(prompt, max_length=max_length, padding="max_length", truncation=True, return_tensors="np")
 
     # JAX model
     print("\n[1/2] Loading JAX T5 encoder...")
     jax_model = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
+    # PyTorch reference - WanT5EncoderModel
+    print("\n[2/2] Loading Wan T5 encoder reference...")
+    import os
 
-    # PyTorch reference
-    print("[2/2] Loading PyTorch T5 reference...")
-    torch_model = T5EncoderModel.from_pretrained(f"{model_ckpt_path}/text_encoder")
-    torch_model.eval()
+    torch_model = WanT5EncoderModel(
+        text_len=max_length,
+        dtype=torch.float32,  # Use float32 for comparison accuracy
+        device=torch.device("cpu"),  # Use CPU to avoid CUDA issues
+        checkpoint_path=os.path.join(model_ckpt_path, "text_encoder/model.safetensors"),
+        tokenizer_path="google/umt5-xxl",
+        shard_fn=None,
+    )
+    torch_model.model.eval()
+    print("✓ Wan T5 encoder loaded")
 
     # Run JAX
     print("\nRunning JAX model...")
     input_ids_jax = jnp.array(inputs["input_ids"])
     attention_mask_jax = jnp.array(inputs["attention_mask"])
     jax_output = jax_model(input_ids_jax, attention_mask_jax, deterministic=True)
+    print(f"✓ JAX output shape: {jax_output.shape}")
 
-    # Run PyTorch
-    print("Running PyTorch model...")
+    # Run PyTorch (WanT5EncoderModel expects list of texts and handles tokenization internally)
+    print("\nRunning PyTorch Wan T5 model...")
     with torch.no_grad():
-        input_ids_torch = torch.tensor(inputs["input_ids"])
-        attention_mask_torch = torch.tensor(inputs["attention_mask"])
-        torch_output = torch_model(input_ids=input_ids_torch, attention_mask=attention_mask_torch)
-        torch_embeddings = torch_output.last_hidden_state
+        # WanT5EncoderModel.__call__ expects list of texts and device
+        # Returns list of tensors [seq_len, hidden_dim], trimmed to actual length
+        torch_outputs = torch_model([prompt], torch.device("cpu"))
+        torch_embeddings = torch_outputs[0]  # Get first (and only) result
+        actual_seq_len = torch_embeddings.shape[0]
 
-    # Compare
-    return compare_outputs(jax_output, torch_embeddings, "T5 Encoder Output", rtol=1e-3, atol=1e-4)
+        print(f"✓ PyTorch output shape: {torch_embeddings.shape} (actual length: {actual_seq_len})")
+        print(f"  JAX output shape: {jax_output.shape}")
+
+        # Extract only the valid (non-padded) portion from JAX output for comparison
+        # JAX output: [1, max_length, hidden_dim], we want [1, actual_seq_len, hidden_dim]
+        jax_output_trimmed = jax_output[:, :actual_seq_len, :]
+
+        # Add batch dimension to PyTorch output to match JAX format
+        torch_embeddings = torch_embeddings.unsqueeze(0)
+
+        print(f"\nComparing only valid tokens (first {actual_seq_len} tokens):")
+        print(f"  JAX (trimmed): {jax_output_trimmed.shape}")
+        print(f"  PyTorch: {torch_embeddings.shape}")
+
+    # Compare only the valid portion (ignore padding)
+    return compare_outputs(jax_output_trimmed, torch_embeddings, "T5 Encoder Output", rtol=1e-3, atol=1e-4)
 
 
 def test_dit_transformer():
