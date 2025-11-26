@@ -41,28 +41,28 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         r"patch_embedding\.bias": ("patch_embed.bias", Transform.NONE),
         # Time embedder - Sequential uses integer indices (0, 1, 2), not layers_0
         r"condition_embedder\.time_embedder\.linear_1\.weight": (
-            "time_embed.time_embedding.0.kernel",
+            "time_embed.time_embedding.layers.0.kernel",
             Transform.TRANSPOSE,
         ),
         r"condition_embedder\.time_embedder\.linear_1\.bias": (
-            "time_embed.time_embedding.0.bias",
+            "time_embed.time_embedding.layers.0.bias",
             Transform.NONE,
         ),
         r"condition_embedder\.time_embedder\.linear_2\.weight": (
-            "time_embed.time_embedding.2.kernel",
+            "time_embed.time_embedding.layers.2.kernel",
             Transform.TRANSPOSE,
         ),
         r"condition_embedder\.time_embedder\.linear_2\.bias": (
-            "time_embed.time_embedding.2.bias",
+            "time_embed.time_embedding.layers.2.bias",
             Transform.NONE,
         ),
-        r"condition_embedder\.time_proj\.weight": ("time_embed.time_projection.1.kernel", Transform.TRANSPOSE),
-        r"condition_embedder\.time_proj\.bias": ("time_embed.time_projection.1.bias", Transform.NONE),
+        r"condition_embedder\.time_proj\.weight": ("time_embed.time_projection.layers.1.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.time_proj\.bias": ("time_embed.time_projection.layers.1.bias", Transform.NONE),
         # Text embedder (projects T5 embeddings to hidden dim)
-        r"condition_embedder\.text_embedder\.linear_1\.weight": ("text_proj.0.kernel", Transform.TRANSPOSE),
-        r"condition_embedder\.text_embedder\.linear_1\.bias": ("text_proj.0.bias", Transform.NONE),
-        r"condition_embedder\.text_embedder\.linear_2\.weight": ("text_proj.2.kernel", Transform.TRANSPOSE),
-        r"condition_embedder\.text_embedder\.linear_2\.bias": ("text_proj.2.bias", Transform.NONE),
+        r"condition_embedder\.text_embedder\.linear_1\.weight": ("text_proj.layers.0.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.text_embedder\.linear_1\.bias": ("text_proj.layers.0.bias", Transform.NONE),
+        r"condition_embedder\.text_embedder\.linear_2\.weight": ("text_proj.layers.2.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.text_embedder\.linear_2\.bias": ("text_proj.layers.2.bias", Transform.NONE),
         # Transformer blocks - Self attention (attn1)
         r"blocks\.([0-9]+)\.attn1\.norm_q\.weight": (r"blocks.\1.self_attn.q_norm.scale", Transform.NONE),
         r"blocks\.([0-9]+)\.attn1\.norm_k\.weight": (r"blocks.\1.self_attn.k_norm.scale", Transform.NONE),
@@ -83,19 +83,19 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         # See _load_fused_kv_weights() below
         r"blocks\.([0-9]+)\.attn2\.to_out\.0\.weight": (r"blocks.\1.cross_attn.out_proj.kernel", Transform.TRANSPOSE),
         r"blocks\.([0-9]+)\.attn2\.to_out\.0\.bias": (r"blocks.\1.cross_attn.out_proj.bias", Transform.NONE),
-        # Transformer blocks - Feed forward (Sequential: 0=Linear, 1=gelu, 2=Linear)
-        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.weight": (r"blocks.\1.mlp.0.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.bias": (r"blocks.\1.mlp.0.bias", Transform.NONE),
-        r"blocks\.([0-9]+)\.ffn\.net\.2\.weight": (r"blocks.\1.mlp.2.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.ffn\.net\.2\.bias": (r"blocks.\1.mlp.2.bias", Transform.NONE),
+        # Transformer blocks - Feed forward (Sequential creates 'layers' dict with 0, 2 keys)
+        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.weight": (r"blocks.\1.mlp.layers.0.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.bias": (r"blocks.\1.mlp.layers.0.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.ffn\.net\.2\.weight": (r"blocks.\1.mlp.layers.2.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.ffn\.net\.2\.bias": (r"blocks.\1.mlp.layers.2.bias", Transform.NONE),
         # Transformer blocks - Norm and modulation
         r"blocks\.([0-9]+)\.norm2\.weight": (r"blocks.\1.norm2.scale", Transform.NONE),
         r"blocks\.([0-9]+)\.norm2\.bias": (r"blocks.\1.norm2.bias", Transform.NONE),
         r"blocks\.([0-9]+)\.scale_shift_table": (r"blocks.\1.scale_shift_table", Transform.NONE),
         # Output projection
         r"scale_shift_table": ("final_layer.scale_shift_table", Transform.NONE),
-        r"proj_out\.weight": ("out_proj.kernel", Transform.TRANSPOSE),
-        r"proj_out\.bias": ("out_proj.bias", Transform.NONE),
+        r"proj_out\.weight": ("final_layer.linear.kernel", Transform.TRANSPOSE),
+        r"proj_out\.bias": ("final_layer.linear.bias", Transform.NONE),
     }
 
     return mapping
@@ -108,12 +108,9 @@ def _get_vae_key_mapping():
         """Transformations for VAE parameters"""
 
         NONE = None
-        TRANSPOSE_2D = ((1, 0), None, False)  # For 2D conv: (out, in, h, w) -> (h, w, in, out)
+        TRANSPOSE_2D_CONV = ((2, 3, 1, 0), None, False)  # For 2D conv: (out, in, h, w) -> (h, w, in, out)
         TRANSPOSE_3D = ((2, 3, 4, 1, 0), None, False)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
-        TRANSPOSE_LINEAR = ((1, 0), None, False)  # For linear/1x1 conv: (out, in, ...) -> permute first 2
         SQUEEZE = (None, (-1,), False)  # Squeeze to 1D: (C, 1, 1, 1) -> (C,)
-        # For 1x1x1 conv as Linear: (out, in, 1, 1, 1) -> squeeze spatial -> (out, in) -> transpose -> (in, out)
-        SQUEEZE_THEN_TRANSPOSE = (None, None, True)  # Special: reshape first, then will be handled manually
 
     # PyTorch format: (out_channels, in_channels, kernel_size...)
     # JAX format: (kernel_size..., in_channels, out_channels)
@@ -153,12 +150,12 @@ def _get_vae_key_mapping():
         r"decoder\.mid_block\.attentions\.0\.norm\.gamma": ("decoder.mid_attn.norm.scale", Transform.SQUEEZE),
         r"decoder\.mid_block\.attentions\.0\.to_qkv\.weight": (
             "decoder.mid_attn.qkv.kernel",
-            Transform.SQUEEZE_3D_TRANSPOSE,
+            Transform.TRANSPOSE_2D_CONV,
         ),
         r"decoder\.mid_block\.attentions\.0\.to_qkv\.bias": ("decoder.mid_attn.qkv.bias", Transform.NONE),
         r"decoder\.mid_block\.attentions\.0\.proj\.weight": (
             "decoder.mid_attn.proj.kernel",
-            Transform.SQUEEZE_3D_TRANSPOSE,
+            Transform.TRANSPOSE_2D_CONV,
         ),
         r"decoder\.mid_block\.attentions\.0\.proj\.bias": ("decoder.mid_attn.proj.bias", Transform.NONE),
         # Up blocks - resnets (pattern for all 4 stages, 3 resnets each)
@@ -214,7 +211,7 @@ def _get_vae_key_mapping():
         ),
         r"decoder\.up_blocks\.2\.upsamplers\.0\.resample\.1\.weight": (
             "decoder.up_sample_2.conv.kernel",
-            Transform.TRANSPOSE_2D,
+            Transform.TRANSPOSE_2D_CONV,
         ),
         r"decoder\.up_blocks\.2\.upsamplers\.0\.resample\.1\.bias": ("decoder.up_sample_2.conv.bias", Transform.NONE),
         # Output layers
