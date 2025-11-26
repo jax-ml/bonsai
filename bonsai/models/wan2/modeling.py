@@ -343,16 +343,13 @@ class Wan2DiT(nnx.Module):
             nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs),
         )
 
-        # Time embedding
         self.time_embed = TimestepEmbedding(cfg, rngs=rngs)
 
-        # Store config for RoPE generation (computed lazily in forward to avoid ShapeDtypeStructs).
         self.rope_theta = 10000.0
 
-        # Transformer blocks
         self.blocks = nnx.List([WanAttentionBlock(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
         print("final layer")
-        # Final layer
+
         self.final_layer = FinalLayer(cfg, patch_size=(1, 2, 2), rngs=rngs)
 
     @jax.named_scope("wan2_dit")
