@@ -157,51 +157,56 @@ class AttentionBlock(nnx.Module):
 
 
 class Upsample2D(nnx.Module):
-    """2D spatial upsampling (no temporal upsampling)."""
+    """Spatial 2x upsample that also halves channels, mirroring torch Resample."""
 
-    def __init__(self, channels: int, *, rngs: nnx.Rngs):
-        self.conv = nnx.Conv(in_features=channels, out_features=channels, kernel_size=(3, 3), padding=1, rngs=rngs)
-
-    def __call__(self, x: Array) -> Array:
-        # x: [B, T, H, W, C]
-        b, t, h, w, c = x.shape
-        orig_dtype = x.dtype
-        # Treat time dimension as batch, identical to reference Resample implementation.
-        x = x.reshape(b * t, h, w, c)
-        x = jax.image.resize(x.astype(jnp.float32), (b * t, h * 2, w * 2, c), method="nearest").astype(orig_dtype)
-        x = self.conv(x)
-        return x.reshape(b, t, h * 2, w * 2, c)
-
-
-class Upsample3D(nnx.Module):
-    """3D spatio-temporal upsampling."""
-
-    def __init__(self, channels: int, *, rngs: nnx.Rngs):
-        # Temporal upsampling with causal (3, 1, 1) kernel, matching reference Resample.
-        self.time_conv = CausalConv3d(channels, channels * 2, kernel_size=(3, 1, 1), rngs=rngs)
-        # Spatial refinement after nearest-neighbor 2x upscale per frame.
-        self.spatial_conv = nnx.Conv(
-            in_features=channels, out_features=channels // 2, kernel_size=(3, 3), padding=1, rngs=rngs
+    def __init__(self, in_channels: int, out_channels: int, *, rngs: nnx.Rngs):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.conv = nnx.Conv(
+            in_features=in_channels, out_features=out_channels, kernel_size=(3, 3), padding=1, rngs=rngs
         )
 
     def __call__(self, x: Array) -> Array:
-        # x: [B, T, H, W, C]
-        b, t, h, w, c = x.shape
+        # x: [B, T, H, W, Cin]
+        b, t, h, w, _ = x.shape
+        orig_dtype = x.dtype
+        x = x.reshape(b * t, h, w, self.in_channels)
+        x = jax.image.resize(x.astype(jnp.float32), (b * t, h * 2, w * 2, self.in_channels), method="nearest").astype(
+            orig_dtype
+        )
+        x = self.conv(x)
+        return x.reshape(b, t, h * 2, w * 2, self.out_channels)
+
+
+class Upsample3D(nnx.Module):
+    """Temporal+spatial 2x upsample with channel reduction (like torch Resample)."""
+
+    def __init__(self, in_channels: int, out_channels: int, *, rngs: nnx.Rngs):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.time_conv = CausalConv3d(in_channels, in_channels * 2, kernel_size=(3, 1, 1), rngs=rngs)
+        self.spatial_conv = nnx.Conv(
+            in_features=in_channels, out_features=out_channels, kernel_size=(3, 3), padding=1, rngs=rngs
+        )
+
+    def __call__(self, x: Array) -> Array:
+        # x: [B, T, H, W, Cin]
+        b, t, h, w, _ = x.shape
         orig_dtype = x.dtype
 
-        # Temporal 2x upsample via causal conv (similar to reference Resample reshaping logic).
-        x = self.time_conv(x)  # [B, T, H, W, 2C]
-        x = x.reshape(b, t, h, w, 2, c)
-        x = jnp.moveaxis(x, 4, 2)  # -> [B, T, 2, H, W, C]
+        x = self.time_conv(x)  # [B, T, H, W, 2*Cin]
+        x = x.reshape(b, t, h, w, 2, self.in_channels)
+        x = jnp.moveaxis(x, 4, 2)
         t2 = t * 2
-        x = x.reshape(b, t2, h, w, c)
+        x = x.reshape(b, t2, h, w, self.in_channels)
 
-        # Spatial nearest-neighbor upsample per frame (operate on [B*T, H, W, C]).
         bt = b * t2
-        x = x.reshape(bt, h, w, c)
-        x = jax.image.resize(x.astype(jnp.float32), (bt, h * 2, w * 2, c), method="nearest").astype(orig_dtype)
+        x = x.reshape(bt, h, w, self.in_channels)
+        x = jax.image.resize(x.astype(jnp.float32), (bt, h * 2, w * 2, self.in_channels), method="nearest").astype(
+            orig_dtype
+        )
         x = self.spatial_conv(x)
-        return x.reshape(b, t2, h * 2, w * 2, c)
+        return x.reshape(b, t2, h * 2, w * 2, self.out_channels)
 
 
 class Decoder3D(nnx.Module):
@@ -219,8 +224,8 @@ class Decoder3D(nnx.Module):
         self.mid_attn = AttentionBlock(384, rngs=rngs)
         self.mid_block2 = ResidualBlock(384, 384, rngs=rngs)
 
-        # Upsample stages
-        # Stage 0: 384 -> 384, spatio-temporal (2x), [1, 104, 60] -> [2, 208, 120]
+        # Upsample stages (match torch checkpoint shapes)
+        # Stage 0: stay at 384, then upsample to 192 channels
         self.up_blocks_0 = nnx.List(
             [
                 ResidualBlock(384, 384, rngs=rngs),
@@ -228,27 +233,27 @@ class Decoder3D(nnx.Module):
                 ResidualBlock(384, 384, rngs=rngs),
             ]
         )
-        self.up_sample_0 = Upsample3D(384, rngs=rngs)
+        self.up_sample_0 = Upsample3D(384, 192, rngs=rngs)
 
-        # Stage 1: 192 -> 192, spatio-temporal (2x), [2, 208, 120] -> [4, 416, 240]
+        # Stage 1: 192 -> 384 (first block), remain at 384, then upsample to 192
         self.up_blocks_1 = nnx.List(
             [
-                ResidualBlock(192, 192, rngs=rngs),
-                ResidualBlock(192, 192, rngs=rngs),
-                ResidualBlock(192, 192, rngs=rngs),
+                ResidualBlock(192, 384, rngs=rngs),
+                ResidualBlock(384, 384, rngs=rngs),
+                ResidualBlock(384, 384, rngs=rngs),
             ]
         )
-        self.up_sample_1 = Upsample3D(192, rngs=rngs)
+        self.up_sample_1 = Upsample3D(384, 192, rngs=rngs)
 
-        # Stage 2: 192 -> 96, spatial only (2x), [4, 416, 240] -> [4, 832, 480]
+        # Stage 2: stay at 192, then spatial-only upsample to 96
         self.up_blocks_2 = nnx.List(
             [
-                ResidualBlock(192, 96, rngs=rngs),
-                ResidualBlock(96, 96, rngs=rngs),
-                ResidualBlock(96, 96, rngs=rngs),
+                ResidualBlock(192, 192, rngs=rngs),
+                ResidualBlock(192, 192, rngs=rngs),
+                ResidualBlock(192, 192, rngs=rngs),
             ]
         )
-        self.up_sample_2 = Upsample2D(96, rngs=rngs)
+        self.up_sample_2 = Upsample2D(192, 96, rngs=rngs)
 
         # Stage 3: 96 -> 96, no upsample
         self.up_blocks_3 = nnx.List(
