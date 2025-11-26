@@ -346,11 +346,8 @@ class Wan2DiT(nnx.Module):
         # Time embedding
         self.time_embed = TimestepEmbedding(cfg, rngs=rngs)
 
-        # Precompute RoPE frequencies for 3D position encoding
-        self.freqs_t, self.freqs_h, self.freqs_w = precompute_freqs_cis_3d(
-            dim=cfg.head_dim,
-            theta=10000.0,
-        )
+        # Store config for RoPE generation (computed lazily in forward to avoid ShapeDtypeStructs).
+        self.rope_theta = 10000.0
 
         # Transformer blocks
         self.blocks = nnx.List([WanAttentionBlock(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
@@ -390,8 +387,12 @@ class Wan2DiT(nnx.Module):
         # Grid sizes for unpatchify later
         grid_sizes = (t_out, h_out, w_out)
 
-        # RoPE frequencies for 3D position encoding
-        rope_freqs = (self.freqs_t, self.freqs_h, self.freqs_w)
+        # RoPE frequencies for 3D position encoding (compute lazily to keep concrete arrays under jit)
+        max_seq = max(grid_sizes)
+        rope_freqs = tuple(
+            jax.lax.stop_gradient(arr)
+            for arr in precompute_freqs_cis_3d(dim=self.cfg.head_dim, theta=self.rope_theta, max_seq_len=max_seq)
+        )
 
         # Get time embeddings
         # time_emb: [B, D] for FinalLayer
