@@ -422,13 +422,16 @@ class T5EncoderModel:
         self,
         text_len,
         dtype=torch.bfloat16,
-        device=torch.cuda.current_device(),
+        device=None,  # Fixed: default args are evaluated at definition time
         checkpoint_path=None,
         tokenizer_path=None,
         shard_fn=None,
     ):
         self.text_len = text_len
         self.dtype = dtype
+        # Set default device if not provided
+        if device is None:
+            device = torch.cuda.current_device() if torch.cuda.is_available() else torch.device("cpu")
         self.device = device
         self.checkpoint_path = checkpoint_path
         self.tokenizer_path = tokenizer_path
