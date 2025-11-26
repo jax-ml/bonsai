@@ -62,7 +62,7 @@ class ModelConfig:
     text_embed_dim: int = 4096
     max_text_len: int = 512
     num_frames: int = 21
-    latent_size: Tuple[int, int] = (480, 480)
+    latent_size: Tuple[int, int] = (30, 30)
     num_inference_steps: int = 50
     guidance_scale: float = 5.0
 
@@ -354,7 +354,7 @@ class Wan2DiT(nnx.Module):
 
         # Transformer blocks
         self.blocks = nnx.List([WanAttentionBlock(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
-
+        print("final layer")
         # Final layer
         self.final_layer = FinalLayer(cfg, patch_size=(1, 2, 2), rngs=rngs)
 
