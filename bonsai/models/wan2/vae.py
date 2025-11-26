@@ -70,13 +70,13 @@ class RMSNorm(nnx.Module):
     def __init__(self, dim: int, *, rngs: nnx.Rngs):
         self.scale_factor = dim**0.5
         # gamma shape: (dim,) will broadcast to [B, T, H, W, C] or [B, H, W, C]
-        self.gamma = nnx.Param(jnp.ones(dim))
+        self.scale = nnx.Param(jnp.ones(dim))
 
     def __call__(self, x: Array) -> Array:
         # x: [B, T, H, W, C] for 3D or [B, H, W, C] for 2D
         # Normalize to unit L2 norm along channel dimension
         x_normalized = jax.nn.normalize(x, axis=-1)
-        return x_normalized * self.scale_factor * self.gamma.value
+        return x_normalized * self.scale_factor * self.scale.value
 
 
 class ResidualBlock(nnx.Module):
@@ -165,32 +165,43 @@ class Upsample2D(nnx.Module):
     def __call__(self, x: Array) -> Array:
         # x: [B, T, H, W, C]
         b, t, h, w, c = x.shape
-        # Upsample spatially only (nearest neighbor)
-        frames = []
-        for i in range(t):
-            frame = x[:, i, :, :, :]  # [B, H, W, C]
-            # Upsample 2x
-            frame_up = jax.image.resize(frame, (b, h * 2, w * 2, c), method="nearest")
-            # Refine with convolution
-            frame_up = self.conv(frame_up)
-            frames.append(frame_up)
-        return jnp.stack(frames, axis=1)  # [B, T, H*2, W*2, C]
+        orig_dtype = x.dtype
+        # Treat time dimension as batch, identical to reference Resample implementation.
+        x = x.reshape(b * t, h, w, c)
+        x = jax.image.resize(x.astype(jnp.float32), (b * t, h * 2, w * 2, c), method="nearest").astype(orig_dtype)
+        x = self.conv(x)
+        return x.reshape(b, t, h * 2, w * 2, c)
 
 
 class Upsample3D(nnx.Module):
     """3D spatio-temporal upsampling."""
 
     def __init__(self, channels: int, *, rngs: nnx.Rngs):
-        self.conv = CausalConv3d(channels, channels, kernel_size=(3, 3, 3), rngs=rngs)
+        # Temporal upsampling with causal (3, 1, 1) kernel, matching reference Resample.
+        self.time_conv = CausalConv3d(channels, channels * 2, kernel_size=(3, 1, 1), rngs=rngs)
+        # Spatial refinement after nearest-neighbor 2x upscale per frame.
+        self.spatial_conv = nnx.Conv(
+            in_features=channels, out_features=channels, kernel_size=(3, 3), padding=1, rngs=rngs
+        )
 
     def __call__(self, x: Array) -> Array:
         # x: [B, T, H, W, C]
         b, t, h, w, c = x.shape
-        # Upsample temporally (2x) and spatially (2x) - nearest neighbor
-        x = jax.image.resize(x, (b, t * 2, h * 2, w * 2, c), method="nearest")
-        # Refine with convolution
-        x = self.conv(x)
-        return x
+        orig_dtype = x.dtype
+
+        # Temporal 2x upsample via causal conv (similar to reference Resample reshaping logic).
+        x = self.time_conv(x)  # [B, T, H, W, 2C]
+        x = x.reshape(b, t, h, w, 2, c)
+        x = jnp.moveaxis(x, 4, 2)  # -> [B, T, 2, H, W, C]
+        t2 = t * 2
+        x = x.reshape(b, t2, h, w, c)
+
+        # Spatial nearest-neighbor upsample per frame (operate on [B*T, H, W, C]).
+        bt = b * t2
+        x = x.reshape(bt, h, w, c)
+        x = jax.image.resize(x.astype(jnp.float32), (bt, h * 2, w * 2, c), method="nearest").astype(orig_dtype)
+        x = self.spatial_conv(x)
+        return x.reshape(b, t2, h * 2, w * 2, c)
 
 
 class Decoder3D(nnx.Module):
