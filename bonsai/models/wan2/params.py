@@ -39,30 +39,30 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         # Patch embedding (input projection)
         r"patch_embedding\.weight": ("patch_embed.kernel", Transform.TRANSPOSE_CONV),
         r"patch_embedding\.bias": ("patch_embed.bias", Transform.NONE),
-        # Time embedder
+        # Time embedder - Sequential uses integer indices (0, 1, 2), not layers_0
         r"condition_embedder\.time_embedder\.linear_1\.weight": (
-            "time_embed.time_embedding.layers_0.kernel",
+            "time_embed.time_embedding.0.kernel",
             Transform.TRANSPOSE,
         ),
         r"condition_embedder\.time_embedder\.linear_1\.bias": (
-            "time_embed.time_embedding.layers_0.bias",
+            "time_embed.time_embedding.0.bias",
             Transform.NONE,
         ),
         r"condition_embedder\.time_embedder\.linear_2\.weight": (
-            "time_embed.time_embedding.layers_2.kernel",
+            "time_embed.time_embedding.2.kernel",
             Transform.TRANSPOSE,
         ),
         r"condition_embedder\.time_embedder\.linear_2\.bias": (
-            "time_embed.time_embedding.layers_2.bias",
+            "time_embed.time_embedding.2.bias",
             Transform.NONE,
         ),
-        r"condition_embedder\.time_proj\.weight": ("time_embed.time_projection.layers_1.kernel", Transform.TRANSPOSE),
-        r"condition_embedder\.time_proj\.bias": ("time_embed.time_projection.layers_1.bias", Transform.NONE),
+        r"condition_embedder\.time_proj\.weight": ("time_embed.time_projection.1.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.time_proj\.bias": ("time_embed.time_projection.1.bias", Transform.NONE),
         # Text embedder (projects T5 embeddings to hidden dim)
-        r"condition_embedder\.text_embedder\.linear_1\.weight": ("text_proj.layers_0.kernel", Transform.TRANSPOSE),
-        r"condition_embedder\.text_embedder\.linear_1\.bias": ("text_proj.layers_0.bias", Transform.NONE),
-        r"condition_embedder\.text_embedder\.linear_2\.weight": ("text_proj.layers_2.kernel", Transform.TRANSPOSE),
-        r"condition_embedder\.text_embedder\.linear_2\.bias": ("text_proj.layers_2.bias", Transform.NONE),
+        r"condition_embedder\.text_embedder\.linear_1\.weight": ("text_proj.0.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.text_embedder\.linear_1\.bias": ("text_proj.0.bias", Transform.NONE),
+        r"condition_embedder\.text_embedder\.linear_2\.weight": ("text_proj.2.kernel", Transform.TRANSPOSE),
+        r"condition_embedder\.text_embedder\.linear_2\.bias": ("text_proj.2.bias", Transform.NONE),
         # Transformer blocks - Self attention (attn1)
         r"blocks\.([0-9]+)\.attn1\.norm_q\.weight": (r"blocks.\1.self_attn.q_norm.scale", Transform.NONE),
         r"blocks\.([0-9]+)\.attn1\.norm_k\.weight": (r"blocks.\1.self_attn.k_norm.scale", Transform.NONE),
@@ -83,11 +83,11 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         # See _load_fused_kv_weights() below
         r"blocks\.([0-9]+)\.attn2\.to_out\.0\.weight": (r"blocks.\1.cross_attn.out_proj.kernel", Transform.TRANSPOSE),
         r"blocks\.([0-9]+)\.attn2\.to_out\.0\.bias": (r"blocks.\1.cross_attn.out_proj.bias", Transform.NONE),
-        # Transformer blocks - Feed forward
-        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.weight": (r"blocks.\1.mlp.layers_0.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.bias": (r"blocks.\1.mlp.layers_0.bias", Transform.NONE),
-        r"blocks\.([0-9]+)\.ffn\.net\.2\.weight": (r"blocks.\1.mlp.layers_2.kernel", Transform.TRANSPOSE),
-        r"blocks\.([0-9]+)\.ffn\.net\.2\.bias": (r"blocks.\1.mlp.layers_2.bias", Transform.NONE),
+        # Transformer blocks - Feed forward (Sequential: 0=Linear, 1=gelu, 2=Linear)
+        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.weight": (r"blocks.\1.mlp.0.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.ffn\.net\.0\.proj\.bias": (r"blocks.\1.mlp.0.bias", Transform.NONE),
+        r"blocks\.([0-9]+)\.ffn\.net\.2\.weight": (r"blocks.\1.mlp.2.kernel", Transform.TRANSPOSE),
+        r"blocks\.([0-9]+)\.ffn\.net\.2\.bias": (r"blocks.\1.mlp.2.bias", Transform.NONE),
         # Transformer blocks - Norm and modulation
         r"blocks\.([0-9]+)\.norm2\.weight": (r"blocks.\1.norm2.scale", Transform.NONE),
         r"blocks\.([0-9]+)\.norm2\.bias": (r"blocks.\1.norm2.bias", Transform.NONE),
@@ -111,6 +111,9 @@ def _get_vae_key_mapping():
         TRANSPOSE_2D = ((1, 0), None, False)  # For 2D conv: (out, in, h, w) -> (h, w, in, out)
         TRANSPOSE_3D = ((2, 3, 4, 1, 0), None, False)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
         TRANSPOSE_LINEAR = ((1, 0), None, False)  # For linear/1x1 conv: (out, in, ...) -> permute first 2
+        SQUEEZE = (None, (-1,), False)  # Squeeze to 1D: (C, 1, 1, 1) -> (C,)
+        # For 1x1x1 conv as Linear: (out, in, 1, 1, 1) -> squeeze spatial -> (out, in) -> transpose -> (in, out)
+        SQUEEZE_THEN_TRANSPOSE = (None, None, True)  # Special: reshape first, then will be handled manually
 
     # PyTorch format: (out_channels, in_channels, kernel_size...)
     # JAX format: (kernel_size..., in_channels, out_channels)
@@ -122,46 +125,46 @@ def _get_vae_key_mapping():
         r"decoder\.conv_in\.weight": ("decoder.conv_in.conv.kernel", Transform.TRANSPOSE_3D),
         r"decoder\.conv_in\.bias": ("decoder.conv_in.conv.bias", Transform.NONE),
         # Mid block resnets
-        r"decoder\.mid_block\.resnets\.0\.norm1\.gamma": ("decoder.mid_block1.norm1.scale", Transform.NONE),
+        r"decoder\.mid_block\.resnets\.0\.norm1\.gamma": ("decoder.mid_block1.norm1.scale", Transform.SQUEEZE),
         r"decoder\.mid_block\.resnets\.0\.conv1\.weight": (
             "decoder.mid_block1.conv1.conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
         r"decoder\.mid_block\.resnets\.0\.conv1\.bias": ("decoder.mid_block1.conv1.conv.bias", Transform.NONE),
-        r"decoder\.mid_block\.resnets\.0\.norm2\.gamma": ("decoder.mid_block1.norm2.scale", Transform.NONE),
+        r"decoder\.mid_block\.resnets\.0\.norm2\.gamma": ("decoder.mid_block1.norm2.scale", Transform.SQUEEZE),
         r"decoder\.mid_block\.resnets\.0\.conv2\.weight": (
             "decoder.mid_block1.conv2.conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
         r"decoder\.mid_block\.resnets\.0\.conv2\.bias": ("decoder.mid_block1.conv2.conv.bias", Transform.NONE),
-        r"decoder\.mid_block\.resnets\.1\.norm1\.gamma": ("decoder.mid_block2.norm1.scale", Transform.NONE),
+        r"decoder\.mid_block\.resnets\.1\.norm1\.gamma": ("decoder.mid_block2.norm1.scale", Transform.SQUEEZE),
         r"decoder\.mid_block\.resnets\.1\.conv1\.weight": (
             "decoder.mid_block2.conv1.conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
         r"decoder\.mid_block\.resnets\.1\.conv1\.bias": ("decoder.mid_block2.conv1.conv.bias", Transform.NONE),
-        r"decoder\.mid_block\.resnets\.1\.norm2\.gamma": ("decoder.mid_block2.norm2.scale", Transform.NONE),
+        r"decoder\.mid_block\.resnets\.1\.norm2\.gamma": ("decoder.mid_block2.norm2.scale", Transform.SQUEEZE),
         r"decoder\.mid_block\.resnets\.1\.conv2\.weight": (
             "decoder.mid_block2.conv2.conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
         r"decoder\.mid_block\.resnets\.1\.conv2\.bias": ("decoder.mid_block2.conv2.conv.bias", Transform.NONE),
         # Mid attention block
-        r"decoder\.mid_block\.attentions\.0\.norm\.gamma": ("decoder.mid_attn.norm.scale", Transform.NONE),
+        r"decoder\.mid_block\.attentions\.0\.norm\.gamma": ("decoder.mid_attn.norm.scale", Transform.SQUEEZE),
         r"decoder\.mid_block\.attentions\.0\.to_qkv\.weight": (
             "decoder.mid_attn.qkv.kernel",
-            Transform.TRANSPOSE_LINEAR,
+            Transform.SQUEEZE_3D_TRANSPOSE,
         ),
         r"decoder\.mid_block\.attentions\.0\.to_qkv\.bias": ("decoder.mid_attn.qkv.bias", Transform.NONE),
         r"decoder\.mid_block\.attentions\.0\.proj\.weight": (
             "decoder.mid_attn.proj.kernel",
-            Transform.TRANSPOSE_LINEAR,
+            Transform.SQUEEZE_3D_TRANSPOSE,
         ),
         r"decoder\.mid_block\.attentions\.0\.proj\.bias": ("decoder.mid_attn.proj.bias", Transform.NONE),
         # Up blocks - resnets (pattern for all 4 stages, 3 resnets each)
         r"decoder\.up_blocks\.([0-3])\.resnets\.([0-2])\.norm1\.gamma": (
             r"decoder.up_blocks_\1.\2.norm1.scale",
-            Transform.NONE,
+            Transform.SQUEEZE,
         ),
         r"decoder\.up_blocks\.([0-3])\.resnets\.([0-2])\.conv1\.weight": (
             r"decoder.up_blocks_\1.\2.conv1.conv.kernel",
@@ -173,7 +176,7 @@ def _get_vae_key_mapping():
         ),
         r"decoder\.up_blocks\.([0-3])\.resnets\.([0-2])\.norm2\.gamma": (
             r"decoder.up_blocks_\1.\2.norm2.scale",
-            Transform.NONE,
+            Transform.SQUEEZE,
         ),
         r"decoder\.up_blocks\.([0-3])\.resnets\.([0-2])\.conv2\.weight": (
             r"decoder.up_blocks_\1.\2.conv2.conv.kernel",
@@ -215,7 +218,7 @@ def _get_vae_key_mapping():
         ),
         r"decoder\.up_blocks\.2\.upsamplers\.0\.resample\.1\.bias": ("decoder.up_sample_2.conv.bias", Transform.NONE),
         # Output layers
-        r"decoder\.norm_out\.gamma": ("decoder.norm_out.scale", Transform.NONE),
+        r"decoder\.norm_out\.gamma": ("decoder.norm_out.scale", Transform.SQUEEZE),
         r"decoder\.conv_out\.weight": ("decoder.conv_out.conv.kernel", Transform.TRANSPOSE_3D),
         r"decoder\.conv_out\.bias": ("decoder.conv_out.conv.bias", Transform.NONE),
     }
@@ -468,10 +471,10 @@ def create_vae_decoder_from_safe_tensors(
 
     if conversion_errors:
         print(f"\nWarning: {len(conversion_errors)} conversion errors occurred:")
-        for err in conversion_errors[:10]:  # Show first 10 errors
+        for err in conversion_errors:  # Show first 10 errors
             print(f"  {err}")
-        if len(conversion_errors) > 10:
-            print(f"  ... and {len(conversion_errors) - 10} more")
+        # if len(conversion_errors) > 10:
+        #     print(f"  ... and {len(conversion_errors) - 10} more")
 
     if len(loaded_keys) == 0:
         raise ValueError("No VAE weights were loaded! Check the checkpoint structure and key mapping.")
@@ -512,7 +515,7 @@ def _get_t5_key_mapping():
         ),
         r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.relative_attention_bias\.weight": (
             r"encoder.blocks.\1.pos_embedding.embedding.embedding",
-            Transform.TRANSPOSE,
+            Transform.NONE,
         ),
         r"encoder\.block\.([0-9]+)\.layer\.0\.layer_norm\.weight": (r"encoder.blocks.\1.norm1.weight", Transform.NONE),
         # Encoder blocks - Feed forward
@@ -611,10 +614,10 @@ def create_t5_encoder_from_safe_tensors(
 
     if conversion_errors:
         print(f"\nWarning: {len(conversion_errors)} conversion errors occurred:")
-        for err in conversion_errors[:10]:  # Show first 10 errors
+        for err in conversion_errors:  # Show first 10 errors
             print(f"  {err}")
-        if len(conversion_errors) > 10:
-            print(f"  ... and {len(conversion_errors) - 10} more")
+        # if len(conversion_errors) > 10:
+        #     print(f"  ... and {len(conversion_errors) - 10} more")
 
     if len(loaded_keys) == 0:
         raise ValueError("No T5 weights were loaded! Check the checkpoint structure and key mapping.")
