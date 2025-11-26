@@ -181,7 +181,7 @@ class Upsample3D(nnx.Module):
         self.time_conv = CausalConv3d(channels, channels * 2, kernel_size=(3, 1, 1), rngs=rngs)
         # Spatial refinement after nearest-neighbor 2x upscale per frame.
         self.spatial_conv = nnx.Conv(
-            in_features=channels, out_features=channels, kernel_size=(3, 3), padding=1, rngs=rngs
+            in_features=channels, out_features=channels // 2, kernel_size=(3, 3), padding=1, rngs=rngs
         )
 
     def __call__(self, x: Array) -> Array:
@@ -230,10 +230,10 @@ class Decoder3D(nnx.Module):
         )
         self.up_sample_0 = Upsample3D(384, rngs=rngs)
 
-        # Stage 1: 384 -> 192, spatio-temporal (2x), [2, 208, 120] -> [4, 416, 240]
+        # Stage 1: 192 -> 192, spatio-temporal (2x), [2, 208, 120] -> [4, 416, 240]
         self.up_blocks_1 = nnx.List(
             [
-                ResidualBlock(384, 192, rngs=rngs),
+                ResidualBlock(192, 192, rngs=rngs),
                 ResidualBlock(192, 192, rngs=rngs),
                 ResidualBlock(192, 192, rngs=rngs),
             ]
