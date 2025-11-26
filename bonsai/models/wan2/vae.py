@@ -112,7 +112,7 @@ class ResidualBlock(nnx.Module):
 
 
 class AttentionBlock(nnx.Module):
-    """Spatial attention block."""
+    """Spatial attention block with batched frame processing."""
 
     def __init__(self, channels: int, *, rngs: nnx.Rngs):
         self.norm = RMSNorm(channels, rngs=rngs)
@@ -126,33 +126,34 @@ class AttentionBlock(nnx.Module):
         b, t, h, w, c = x.shape
         residual = x
 
-        # Process each frame independently
-        x_frames = []
-        for i in range(t):
-            frame = x[:, i, :, :, :]  # [B, H, W, C]
-            frame = self.norm(frame)
+        # Batch process all frames together: [B, T, H, W, C] -> [B*T, H, W, C]
+        x = x.reshape(b * t, h, w, c)
 
-            # QKV projection
-            qkv = self.qkv(frame)  # [B, H, W, 3*C]
-            q, k, v = jnp.split(qkv, 3, axis=-1)
+        # Normalize
+        x = self.norm(x)
 
-            # Reshape for attention
-            q = q.reshape(b, h * w, c)
-            k = k.reshape(b, h * w, c)
-            v = v.reshape(b, h * w, c)
+        # QKV projection: [B*T, H, W, C] -> [B*T, H, W, 3*C]
+        qkv = self.qkv(x)
 
-            # Scaled dot-product attention
-            scale = c**-0.5
-            attn = jax.nn.softmax(jnp.einsum("bic,bjc->bij", q, k) * scale, axis=-1)
-            out = jnp.einsum("bij,bjc->bic", attn, v)
+        # Reshape for attention: [B*T, H, W, 3*C] -> [B*T, H*W, 3*C] -> split to Q, K, V
+        qkv = qkv.reshape(b * t, h * w, 3 * c)
+        q, k, v = jnp.split(qkv, 3, axis=-1)  # Each: [B*T, H*W, C]
 
-            # Reshape back
-            out = out.reshape(b, h, w, c)
-            out = self.proj(out)
-            x_frames.append(out)
+        # Scaled dot-product attention
+        scale = c**-0.5
+        attn = jax.nn.softmax(jnp.einsum("bic,bjc->bij", q, k) * scale, axis=-1)  # [B*T, H*W, H*W]
+        out = jnp.einsum("bij,bjc->bic", attn, v)  # [B*T, H*W, C]
 
-        x = jnp.stack(x_frames, axis=1)  # [B, T, H, W, C]
-        return x + residual
+        # Reshape back to spatial: [B*T, H*W, C] -> [B*T, H, W, C]
+        out = out.reshape(b * t, h, w, c)
+
+        # Output projection
+        out = self.proj(out)
+
+        # Reshape back to video: [B*T, H, W, C] -> [B, T, H, W, C]
+        out = out.reshape(b, t, h, w, c)
+
+        return out + residual
 
 
 class Upsample2D(nnx.Module):
