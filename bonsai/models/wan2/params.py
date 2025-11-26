@@ -194,19 +194,19 @@ def _get_vae_key_mapping():
         ),
         # Upsamplers for blocks 0, 1, 2 (block 3 has no upsampler)
         r"decoder\.up_blocks\.0\.upsamplers\.0\.time_conv\.weight": (
-            "decoder.up_sample_0.conv.conv.kernel",
+            "decoder.up_sample_0.time_conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
         r"decoder\.up_blocks\.0\.upsamplers\.0\.time_conv\.bias": (
-            "decoder.up_sample_0.conv.conv.bias",
+            "decoder.up_sample_0.time_conv.bias",
             Transform.NONE,
         ),
         r"decoder\.up_blocks\.1\.upsamplers\.0\.time_conv\.weight": (
-            "decoder.up_sample_1.conv.conv.kernel",
+            "decoder.up_sample_1.time_conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
         r"decoder\.up_blocks\.1\.upsamplers\.0\.time_conv\.bias": (
-            "decoder.up_sample_1.conv.conv.bias",
+            "decoder.up_sample_1.time_conv.bias",
             Transform.NONE,
         ),
         r"decoder\.up_blocks\.2\.upsamplers\.0\.resample\.1\.weight": (
