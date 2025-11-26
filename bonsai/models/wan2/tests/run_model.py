@@ -169,9 +169,8 @@ def run_model():
     print("=" * 60)
     print(f"Total time: {generation_time:.2f}s")
     print(f"FPS: {config.num_frames / generation_time:.2f}")
-    print("\nTo save the video, implement VAE decoder and use:")
-    print("  import imageio")
-    print("  imageio.mimsave('output.mp4', video[0], fps=30)")
+    vae.save_video(video, "generated_video.mp4")
+    print("Video saved to generated_video.mp4")
     print()
 
     return video

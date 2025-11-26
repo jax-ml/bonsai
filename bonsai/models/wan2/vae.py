@@ -28,6 +28,7 @@ Architecture (based on reference implementation):
 from dataclasses import dataclass
 from typing import Tuple
 
+import imageio
 import jax
 import jax.numpy as jnp
 from flax import nnx
@@ -475,4 +476,31 @@ def decode_latents_to_video(vae_decoder: WanVAEDecoder, latents: Array, normaliz
     return video
 
 
-__all__ = ["WanVAEDecoder", "decode_latents_to_video", "load_vae_from_checkpoint"]
+def save_video(
+    video: Array,
+    save_path: str,
+    fps: int = 30,
+    codec: str = "libx264",
+    quality: int = 8,
+) -> str | None:
+    try:
+        # Handle batch dimension: take first video if batched
+        assert video.ndim == 5
+        video = video[0]  # [T, H, W, C]
+
+        video_np = jax.device_get(video)
+
+        # Write video
+        writer = imageio.get_writer(save_path, fps=fps, codec=codec, quality=quality)
+        for frame in video_np:
+            writer.append_data(frame)
+        writer.close()
+
+        return save_path
+
+    except Exception as e:
+        print(f"Failed to save video: {e}")
+        return None
+
+
+__all__ = ["VAEConfig", "WanVAEDecoder", "decode_latents_to_video", "load_vae_from_checkpoint", "save_video"]
