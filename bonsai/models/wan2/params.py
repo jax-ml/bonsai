@@ -193,6 +193,7 @@ def _get_vae_key_mapping():
             Transform.NONE,
         ),
         # Upsamplers for blocks 0, 1, 2 (block 3 has no upsampler)
+        # Block 0: Upsample3D (time_conv + spatial_conv)
         r"decoder\.up_blocks\.0\.upsamplers\.0\.time_conv\.weight": (
             "decoder.up_sample_0.time_conv.conv.kernel",
             Transform.TRANSPOSE_3D,
@@ -201,6 +202,15 @@ def _get_vae_key_mapping():
             "decoder.up_sample_0.time_conv.conv.bias",
             Transform.NONE,
         ),
+        r"decoder\.up_blocks\.0\.upsamplers\.0\.resample\.1\.weight": (
+            "decoder.up_sample_0.spatial_conv.kernel",
+            Transform.TRANSPOSE_2D_CONV,
+        ),
+        r"decoder\.up_blocks\.0\.upsamplers\.0\.resample\.1\.bias": (
+            "decoder.up_sample_0.spatial_conv.bias",
+            Transform.NONE,
+        ),
+        # Block 1: Upsample3D (time_conv + spatial_conv)
         r"decoder\.up_blocks\.1\.upsamplers\.0\.time_conv\.weight": (
             "decoder.up_sample_1.time_conv.conv.kernel",
             Transform.TRANSPOSE_3D,
@@ -209,6 +219,15 @@ def _get_vae_key_mapping():
             "decoder.up_sample_1.time_conv.conv.bias",
             Transform.NONE,
         ),
+        r"decoder\.up_blocks\.1\.upsamplers\.0\.resample\.1\.weight": (
+            "decoder.up_sample_1.spatial_conv.kernel",
+            Transform.TRANSPOSE_2D_CONV,
+        ),
+        r"decoder\.up_blocks\.1\.upsamplers\.0\.resample\.1\.bias": (
+            "decoder.up_sample_1.spatial_conv.bias",
+            Transform.NONE,
+        ),
+        # Block 2: Upsample2D (conv only, no time_conv)
         r"decoder\.up_blocks\.2\.upsamplers\.0\.resample\.1\.weight": (
             "decoder.up_sample_2.conv.kernel",
             Transform.TRANSPOSE_2D_CONV,
