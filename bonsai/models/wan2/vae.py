@@ -61,25 +61,31 @@ class CausalConv3d(nnx.Module):
 
 
 class RMSNorm(nnx.Module):
-    """RMS Normalization."""
+    """RMS Normalization with L2 normalize and learned scale.
 
-    def __init__(self, channels: int, eps: float = 1e-6, *, rngs: nnx.Rngs):
-        self.eps = eps
-        self.scale = nnx.Param(jnp.ones((1, 1, 1, 1, channels)))
+    Based on F.normalize approach: normalize to unit norm, then scale.
+    For videos (images=False), uses 3D spatial+temporal normalization.
+    """
+
+    def __init__(self, dim: int, *, rngs: nnx.Rngs):
+        self.scale_factor = dim**0.5
+        # gamma shape: (dim,) will broadcast to [B, T, H, W, C] or [B, H, W, C]
+        self.gamma = nnx.Param(jnp.ones(dim))
 
     def __call__(self, x: Array) -> Array:
-        # x: [B, T, H, W, C]
-        rms = jnp.sqrt(jnp.mean(x**2, axis=-1, keepdims=True) + self.eps)
-        return x / rms * self.scale.value
+        # x: [B, T, H, W, C] for 3D or [B, H, W, C] for 2D
+        # Normalize to unit L2 norm along channel dimension
+        x_normalized = jax.nn.normalize(x, axis=-1)
+        return x_normalized * self.scale_factor * self.gamma.value
 
 
 class ResidualBlock(nnx.Module):
-    """Residual block with GroupNorm and SiLU activation."""
+    """Residual block with RMSNorm and SiLU activation."""
 
     def __init__(self, in_channels: int, out_channels: int, *, rngs: nnx.Rngs):
-        self.norm1 = nnx.GroupNorm(num_groups=32, num_features=in_channels, rngs=rngs)
+        self.norm1 = RMSNorm(in_channels, rngs=rngs)
         self.conv1 = CausalConv3d(in_channels, out_channels, kernel_size=(3, 3, 3), rngs=rngs)
-        self.norm2 = nnx.GroupNorm(num_groups=32, num_features=out_channels, rngs=rngs)
+        self.norm2 = RMSNorm(out_channels, rngs=rngs)
         self.conv2 = CausalConv3d(out_channels, out_channels, kernel_size=(3, 3, 3), rngs=rngs)
 
         if in_channels != out_channels:
@@ -109,7 +115,7 @@ class AttentionBlock(nnx.Module):
     """Spatial attention block."""
 
     def __init__(self, channels: int, *, rngs: nnx.Rngs):
-        self.norm = nnx.GroupNorm(num_groups=32, num_features=channels, rngs=rngs)
+        self.norm = RMSNorm(channels, rngs=rngs)
         self.qkv = nnx.Conv(
             in_features=channels, out_features=channels * 3, kernel_size=(1, 1), use_bias=True, rngs=rngs
         )
