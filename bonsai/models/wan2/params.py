@@ -194,19 +194,19 @@ def _get_vae_key_mapping():
         ),
         # Upsamplers for blocks 0, 1, 2 (block 3 has no upsampler)
         r"decoder\.up_blocks\.0\.upsamplers\.0\.time_conv\.weight": (
-            "decoder.up_sample_0.time_conv.kernel",
+            "decoder.up_sample_0.time_conv.conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
         r"decoder\.up_blocks\.0\.upsamplers\.0\.time_conv\.bias": (
-            "decoder.up_sample_0.time_conv.bias",
+            "decoder.up_sample_0.time_conv.conv.bias",
             Transform.NONE,
         ),
         r"decoder\.up_blocks\.1\.upsamplers\.0\.time_conv\.weight": (
-            "decoder.up_sample_1.time_conv.kernel",
+            "decoder.up_sample_1.time_conv.conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
         r"decoder\.up_blocks\.1\.upsamplers\.0\.time_conv\.bias": (
-            "decoder.up_sample_1.time_conv.bias",
+            "decoder.up_sample_1.time_conv.conv.bias",
             Transform.NONE,
         ),
         r"decoder\.up_blocks\.2\.upsamplers\.0\.resample\.1\.weight": (
@@ -447,7 +447,6 @@ def create_vae_decoder_from_safe_tensors(
                 jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
 
                 if jax_key is None:
-                    # Skip keys not in our mapping (e.g., spatial upsamplers we don't use)
                     skipped_keys.append(torch_key)
                     print(f"{torch_key} is not mapped")
                     continue
@@ -464,7 +463,7 @@ def create_vae_decoder_from_safe_tensors(
         gc.collect()
 
     print(f"Loaded {len(loaded_keys)} VAE weight tensors")
-    print(f"Skipped {len(skipped_keys)} weight tensors (spatial upsample layers, etc.)")
+    print(f"Skipped {len(skipped_keys)} weight tensors")
 
     if conversion_errors:
         print(f"\nWarning: {len(conversion_errors)} conversion errors occurred:")
