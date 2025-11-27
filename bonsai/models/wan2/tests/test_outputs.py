@@ -40,6 +40,8 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
         atol: Absolute tolerance
     """
     import torch
+    if torch_output.dtype == torch.bfloat16:
+        torch_output = torch_output.float()
 
     # Convert PyTorch to numpy
     if isinstance(torch_output, torch.Tensor):
