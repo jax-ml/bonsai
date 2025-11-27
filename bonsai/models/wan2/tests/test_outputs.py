@@ -310,7 +310,7 @@ def test_t5_encoder():
     # ========================================
     # Configuration
     # ========================================
-    ckpt_dir = "/home/gcpuser/sky_workdir/bonsai/Wan2.1-T2V-1.3B"  # Change this to your checkpoint directory
+    ckpt_dir = "./Wan2.1-T2V-1.3B"  # Change this to your checkpoint directory
     device = torch.device("cpu")  # Force CPU
 
     print("=" * 60)
