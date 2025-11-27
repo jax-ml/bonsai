@@ -135,7 +135,7 @@ def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_ma
             jax_hidden.shape[1],
             jax_hidden.shape[1],
         )
-        jax_hidden = jax_block(jax_hidden, mask=attention_mask_jax, pos_bias=jax_pos_bias)
+        jax_hidden = jax_block(jax_hidden, mask=attention_mask_jax, pos_bias=jax_pos_bias,deterministic=True)
 
         # PyTorch block forward
         with torch.no_grad():

@@ -70,7 +70,7 @@ class T5Attention(nnx.Module):
         context: Optional[Array] = None,
         mask: Optional[Array] = None,
         pos_bias: Optional[Array] = None,
-        deterministic: bool = False,
+        deterministic: bool = True,
     ) -> Array:
         """
         Args:
@@ -126,7 +126,7 @@ class T5FeedForward(nnx.Module):
         self.fc2 = nnx.Linear(dim_ffn, dim, use_bias=False, rngs=rngs)
         self.dropout = nnx.Dropout(dropout, rngs=rngs)
 
-    def __call__(self, x: Array, deterministic: bool = False) -> Array:
+    def __call__(self, x: Array, deterministic: bool = True) -> Array:
         # Gated activation
         x = self.fc1(x) * gelu(self.gate(x))
         x = self.dropout(x, deterministic=deterministic)
@@ -224,7 +224,7 @@ class T5SelfAttention(nnx.Module):
             self.pos_embedding = None
 
     def __call__(
-        self, x: Array, mask: Optional[Array] = None, pos_bias: Optional[Array] = None, deterministic: bool = False
+        self, x: Array, mask: Optional[Array] = None, pos_bias: Optional[Array] = None, deterministic: bool = True
     ) -> Array:
         # Get position bias
         if self.shared_pos:
