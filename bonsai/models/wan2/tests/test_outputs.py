@@ -35,7 +35,8 @@ def check_weight_loading(jax_model, torch_model):
     """比较 JAX (safetensor) 和 PyTorch (pth) 加载的权重"""
     
     # 1. Embedding weights
-    torch_emb = torch_model.shared.weight.detach().cpu().numpy()
+    # torch_model is WanT5EncoderModel, torch_model.model is T5Encoder
+    torch_emb = torch_model.model.token_embedding.weight.detach().cpu().numpy()
     jax_emb = np.array(jax_model.encoder.token_embedding.embedding.value)
     
     print("Embedding weights:")
