@@ -26,7 +26,8 @@ from huggingface_hub import snapshot_download
 from wan.modules.t5 import T5EncoderModel as WanT5EncoderModel
 
 from bonsai.models.wan2 import modeling, params, vae
-
+from wan.configs import WAN_CONFIGS
+from wan.modules.t5 import T5EncoderModel
 
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-3, atol: float = 1e-5):
     """Compare JAX and PyTorch outputs and report differences.
@@ -197,26 +198,22 @@ def test_t5_encoder():
     print("Encoding complete!")
     print()
 
-    with torch.no_grad():
-        # WanT5EncoderModel.__call__ expects list of texts and device
-        # Returns list of tensors [seq_len, hidden_dim], trimmed to actual length
-        torch_outputs = torch_model([prompt], torch.device("cpu"))
-        torch_embeddings = torch_outputs[0]  # Get first (and only) result
-        actual_seq_len = torch_embeddings.shape[0]
+    torch_embeddings = context[0]  # Get first (and only) result
+    actual_seq_len = torch_embeddings.shape[0]
 
-        print(f"✓ PyTorch output shape: {torch_embeddings.shape} (actual length: {actual_seq_len})")
-        print(f"  JAX output shape: {jax_output.shape}")
+    print(f"✓ PyTorch output shape: {torch_embeddings.shape} (actual length: {actual_seq_len})")
+    print(f"  JAX output shape: {jax_output.shape}")
 
-        # Extract only the valid (non-padded) portion from JAX output for comparison
-        # JAX output: [1, max_length, hidden_dim], we want [1, actual_seq_len, hidden_dim]
-        jax_output_trimmed = jax_output[:, :actual_seq_len, :]
+    # Extract only the valid (non-padded) portion from JAX output for comparison
+    # JAX output: [1, max_length, hidden_dim], we want [1, actual_seq_len, hidden_dim]
+    jax_output_trimmed = jax_output[:, :actual_seq_len, :]
 
-        # Add batch dimension to PyTorch output to match JAX format
-        torch_embeddings = torch_embeddings.unsqueeze(0)
+    # Add batch dimension to PyTorch output to match JAX format
+    torch_embeddings = torch_embeddings.unsqueeze(0)
 
-        print(f"\nComparing only valid tokens (first {actual_seq_len} tokens):")
-        print(f"  JAX (trimmed): {jax_output_trimmed.shape}")
-        print(f"  PyTorch: {torch_embeddings.shape}")
+    print(f"\nComparing only valid tokens (first {actual_seq_len} tokens):")
+    print(f"  JAX (trimmed): {jax_output_trimmed.shape}")
+    print(f"  PyTorch: {torch_embeddings.shape}")
 
     # Compare only the valid portion (ignore padding)
     return compare_outputs(jax_output_trimmed, torch_embeddings, "T5 Encoder Output", rtol=1e-3, atol=1e-4)
