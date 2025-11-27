@@ -23,8 +23,8 @@ import jax.numpy as jnp
 import numpy as np
 from flax import nnx
 from huggingface_hub import snapshot_download
-from wan.modules.t5 import T5EncoderModel as WanT5EncoderModel
 
+import os
 from bonsai.models.wan2 import modeling, params, vae
 from wan.configs import WAN_CONFIGS
 from wan.modules.t5 import T5EncoderModel
