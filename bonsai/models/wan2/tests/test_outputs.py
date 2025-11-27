@@ -127,20 +127,6 @@ def test_t5_encoder():
     # JAX model
     print("\n[1/2] Loading JAX T5 encoder...")
     jax_model = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-    # PyTorch reference - WanT5EncoderModel
-    print("\n[2/2] Loading Wan T5 encoder reference...")
-    import os
-
-    torch_model = WanT5EncoderModel(
-        text_len=max_length,
-        dtype=torch.float32,  # Use float32 for comparison accuracy
-        device=torch.device("cpu"),  # Use CPU to avoid CUDA issues
-        checkpoint_path=os.path.join(model_ckpt_path, "text_encoder/model.safetensors"),
-        tokenizer_path="google/umt5-xxl",
-        shard_fn=None,
-    )
-    torch_model.model.eval()
-    print("✓ Wan T5 encoder loaded")
 
     # Run JAX
     print("\nRunning JAX model...")
@@ -152,8 +138,7 @@ def test_t5_encoder():
     # ========================================
     # Configuration
     # ========================================
-    ckpt_dir = "cache"  # Change this to your checkpoint directory
-    prompt = "A cat walking on the street"
+    ckpt_dir = "/home/gcpuser/sky_workdir/bonsai/Wan2.1-T2V-1.3B"  # Change this to your checkpoint directory
     device = torch.device("cpu")  # Force CPU
 
     print("=" * 60)
