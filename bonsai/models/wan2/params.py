@@ -24,6 +24,7 @@ from etils import epath
 from flax import nnx
 
 from bonsai.models.wan2 import modeling as model_lib
+from bonsai.models.wan2 import t5 as t5_lib
 from bonsai.models.wan2 import vae as vae_lib
 
 
@@ -557,7 +558,7 @@ def _get_t5_key_mapping():
 def create_t5_encoder_from_safe_tensors(
     file_dir: str,
     mesh: jax.sharding.Mesh | None = None,
-):
+) -> t5_lib.T5EncoderModel:
     """
     Load T5 encoder from safetensors checkpoint.
 

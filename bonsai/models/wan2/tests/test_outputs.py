@@ -28,6 +28,40 @@ import os
 from bonsai.models.wan2 import modeling, params, vae
 from wan.configs import WAN_CONFIGS
 from wan.modules.t5 import T5EncoderModel
+import torch
+from transformers import AutoTokenizer
+
+def check_weight_loading(jax_model, torch_model):
+    """比较 JAX (safetensor) 和 PyTorch (pth) 加载的权重"""
+    
+    # 1. Embedding weights
+    torch_emb = torch_model.shared.weight.detach().cpu().numpy()
+    jax_emb = np.array(jax_model.encoder.token_embedding.embedding.value)
+    
+    print("Embedding weights:")
+    print(f"  Shapes: torch={torch_emb.shape}, jax={jax_emb.shape}")
+    print(f"  Max diff: {np.abs(torch_emb - jax_emb).max():.2e}")
+    print(f"  Mean: torch={torch_emb.mean():.4f}, jax={jax_emb.mean():.4f}")
+    
+    # 2. 第一个 block 的 query weight
+    # PyTorch: encoder.block[0].layer[0].SelfAttention.q.weight
+    torch_q = torch_model.model.blocks[0].attn.q.weight.detach().cpu().numpy()
+    
+    # JAX: encoder.blocks[0] 的对应参数
+    # 需要知道你的参数结构，可能是：
+    jax_q = np.array(jax_model.encoder.blocks[0].attn.q.kernel.value)
+    
+    print("\nFirst block query weight:")
+    print(f"  Shapes: torch={torch_q.shape}, jax={jax_q.shape}")
+    print(f"  Max diff: {np.abs(torch_q.T - jax_q).max():.2e}")  # 注意可能需要转置
+    
+    # # 3. Layer norm (检查 gamma/beta)
+    # torch_ln_weight = torch_model.encoder.final_layer_norm.weight.detach().cpu().numpy()
+    # jax_ln_weight = np.array(jax_model.encoder.norm.scale.value)
+    
+    # print("\nFinal LayerNorm weight:")
+    # print(f"  Shapes: torch={torch_ln_weight.shape}, jax={jax_ln_weight.shape}")
+    # print(f"  Max diff: {np.abs(torch_ln_weight - jax_ln_weight).max():.2e}")
 
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-3, atol: float = 1e-5):
     """Compare JAX and PyTorch outputs and report differences.
@@ -103,14 +137,6 @@ def test_t5_encoder():
     print("\n" + "=" * 80)
     print("TEST 1: T5 Encoder (UMT5-XXL)")
     print("=" * 80)
-
-    try:
-        import torch
-        from transformers import AutoTokenizer
-    except ImportError:
-        print("❌ PyTorch or transformers not installed. Skipping T5 test.")
-        return False
-
     # Download checkpoint
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
@@ -176,6 +202,8 @@ def test_t5_encoder():
     )
     print("T5 Encoder loaded successfully!")
     print()
+    # 运行检查
+    check_weight_loading(jax_model, text_encoder)
 
     # ========================================
     # Encode Prompt
@@ -334,6 +362,10 @@ def test_vae_decoder():
     # Compare
     # VAE outputs are typically less precise due to stochastic operations
     return compare_outputs(jax_output, torch_output, "VAE Decoder Output", rtol=5e-3, atol=1e-3)
+
+
+
+
 
 
 def run_all_tests():
