@@ -15,7 +15,7 @@ repos:
       # Run the linter.
       - id: ruff-check
         args: [--fix]
-        exclude: bonsai/models/wan2/tests/wan
+        exclude: bonsai/models/wan2/tests
       # Run the formatter.
       - id: ruff-format
-        exclude: bonsai/models/wan2/tests/wan
+        exclude: bonsai/models/wan2/tests

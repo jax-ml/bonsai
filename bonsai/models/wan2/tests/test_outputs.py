@@ -148,8 +148,55 @@ def test_t5_encoder():
     jax_output = jax_model(input_ids_jax, attention_mask_jax, deterministic=True)
     print(f"✓ JAX output shape: {jax_output.shape}")
 
-    # Run PyTorch (WanT5EncoderModel expects list of texts and handles tokenization internally)
-    print("\nRunning PyTorch Wan T5 model...")
+    # ========================================
+    # Configuration
+    # ========================================
+    ckpt_dir = "cache"  # Change this to your checkpoint directory
+    prompt = "A cat walking on the street"
+    device = torch.device("cpu")  # Force CPU
+
+    print("=" * 60)
+    print("T5 Encoder Unit Test")
+    print("=" * 60)
+    print(f"Checkpoint directory: {ckpt_dir}")
+    print(f"Input prompt: {prompt}")
+    print(f"Device: {device}")
+    print()
+
+    # ========================================
+    # Load Configuration
+    # ========================================
+    config = WAN_CONFIGS["t2v-1.3B"]
+    print(f"Model config: {config.__name__}")
+    print(f"T5 checkpoint: {config.t5_checkpoint}")
+    print(f"T5 tokenizer: {config.t5_tokenizer}")
+    print(f"Text length: {config.text_len}")
+    print(f"T5 dtype: {config.t5_dtype}")
+    print()
+
+    # ========================================
+    # Initialize T5 Encoder
+    # ========================================
+    print("Initializing T5 Encoder...")
+    text_encoder = T5EncoderModel(
+        text_len=config.text_len,
+        dtype=config.t5_dtype,
+        device=device,  # Use CPU
+        checkpoint_path=os.path.join(ckpt_dir, config.t5_checkpoint),
+        tokenizer_path=os.path.join(ckpt_dir, config.t5_tokenizer),
+        shard_fn=None,  # No FSDP on CPU
+    )
+    print("T5 Encoder loaded successfully!")
+    print()
+
+    # ========================================
+    # Encode Prompt
+    # ========================================
+    print("Encoding prompt...")
+    context = text_encoder([prompt], device)
+    print("Encoding complete!")
+    print()
+
     with torch.no_grad():
         # WanT5EncoderModel.__call__ expects list of texts and device
         # Returns list of tensors [seq_len, hidden_dim], trimmed to actual length
