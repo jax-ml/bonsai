@@ -56,13 +56,13 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Shapes: torch={torch_q.shape}, jax={jax_q.shape}")
     print(f"  Max diff: {np.abs(torch_q.T - jax_q).max():.2e}")  # 注意可能需要转置
 
-    # # 3. Layer norm (检查 gamma/beta)
-    # torch_ln_weight = torch_model.encoder.final_layer_norm.weight.detach().cpu().numpy()
-    # jax_ln_weight = np.array(jax_model.encoder.norm.scale.value)
+    # 3. Layer norm (检查 gamma/beta)
+    torch_ln_weight = torch_model.encoder.norm.weight.float().detach().cpu().numpy()
+    jax_ln_weight = np.array(jax_model.encoder.norm.weight.value)
 
-    # print("\nFinal LayerNorm weight:")
-    # print(f"  Shapes: torch={torch_ln_weight.shape}, jax={jax_ln_weight.shape}")
-    # print(f"  Max diff: {np.abs(torch_ln_weight - jax_ln_weight).max():.2e}")
+    print("\nFinal LayerNorm weight:")
+    print(f"  Shapes: torch={torch_ln_weight.shape}, jax={jax_ln_weight.shape}")
+    print(f"  Max diff: {np.abs(torch_ln_weight - jax_ln_weight).max():.2e}")
 
 
 def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_mask):
@@ -117,23 +117,7 @@ def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_ma
     compare_outputs(jax_x, torch_x, "After Initial Dropout", rtol=1e-3, atol=1e-4)
 
     # ========================================
-    # 3. Position embeddings
-    # ========================================
-    print("\n[Layer 0.6] Position Embeddings")
-
-    seq_len = input_ids_jax.shape[1]
-
-    # JAX
-    jax_pos_bias = jax_model.encoder.pos_embedding(seq_len, seq_len)
-
-    # PyTorch
-    with torch.no_grad():
-        torch_pos_bias = torch_encoder.pos_embedding(seq_len, seq_len)
-
-    compare_outputs(jax_pos_bias, torch_pos_bias, "Position Embeddings", rtol=1e-3, atol=1e-4)
-
-    # ========================================
-    # 4. Each Transformer Block
+    # 3. Each Transformer Block
     # ========================================
     num_layers = len(torch_encoder.blocks)
     print(f"\n[Blocks] Processing {num_layers} transformer layers...")
@@ -147,11 +131,19 @@ def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_ma
 
         # JAX block forward
         jax_block = jax_model.encoder.blocks[layer_idx]
+        jax_pos_bias = jax_model.encoder.pos_embedding(
+            jax_hidden.shape[1],
+            jax_hidden.shape[1],
+        )
         jax_hidden = jax_block(jax_hidden, mask=attention_mask_jax, pos_bias=jax_pos_bias)
 
         # PyTorch block forward
         with torch.no_grad():
             torch_block = torch_encoder.blocks[layer_idx]
+            torch_pos_bias = torch_encoder.pos_embedding(
+                torch_hidden.shape[1],
+                torch_hidden.shape[1],
+            )
             torch_hidden = torch_block(torch_hidden, mask=attention_mask_torch, pos_bias=torch_pos_bias)
 
         # Compare
