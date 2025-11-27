@@ -131,7 +131,7 @@ def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_ma
 
         # JAX block forward
         jax_block = jax_model.encoder.blocks[layer_idx]
-        jax_pos_bias = jax_model.encoder.pos_embedding(
+        jax_pos_bias = jax_block.pos_embedding(
             jax_hidden.shape[1],
             jax_hidden.shape[1],
         )
@@ -140,7 +140,7 @@ def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_ma
         # PyTorch block forward
         with torch.no_grad():
             torch_block = torch_encoder.blocks[layer_idx]
-            torch_pos_bias = torch_encoder.pos_embedding(
+            torch_pos_bias = torch_block.pos_embedding(
                 torch_hidden.shape[1],
                 torch_hidden.shape[1],
             )
