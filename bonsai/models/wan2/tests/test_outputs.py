@@ -57,7 +57,7 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Max diff: {np.abs(torch_q.T - jax_q).max():.2e}")  # 注意可能需要转置
 
     # 3. Layer norm (检查 gamma/beta)
-    torch_ln_weight = torch_model.encoder.norm.weight.float().detach().cpu().numpy()
+    torch_ln_weight = torch_model.model.norm.weight.float().detach().cpu().numpy()
     jax_ln_weight = np.array(jax_model.encoder.norm.weight.value)
 
     print("\nFinal LayerNorm weight:")
