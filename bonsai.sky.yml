@@ -1,0 +1,20 @@
+# sglang-jax.sky.yaml
+resources:
+  accelerators: tpu-v6e-1
+  accelerator_args:
+    tpu_vm: True
+    runtime_version: v2-alpha-tpuv6e
+
+# file_mounts:
+#     /home/gcpuser/sky_workdir/sglang-jax: .
+run: |
+  rm -rf bonsai
+  git clone https://github.com/primatrix/bonsai
+  cd bonsai && git checkout test-wan
+  uv venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -e .
+  uv pip install -r requirements.txt
+  cd bonsai/models/wan2/tests
+  hf download Wan-AI/Wan2.1-T2V-1.3B --local-dir ./Wan2.1-T2V-1.3B
+  python bonsai/models/wan2/tests/test_outputs.py

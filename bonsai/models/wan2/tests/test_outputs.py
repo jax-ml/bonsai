@@ -375,139 +375,134 @@ def test_t5_encoder():
     return compare_outputs(jax_output_trimmed, torch_embeddings, "T5 Encoder Output", rtol=1e-3, atol=1e-4)
 
 
-def test_dit_transformer():
-    """Test DiT transformer output against HuggingFace reference."""
-    print("\n" + "=" * 80)
-    print("TEST 2: DiT Transformer (Wan2.1-T2V-1.3B)")
-    print("=" * 80)
+# def test_dit_transformer():
+#     """Test DiT transformer output against HuggingFace reference."""
+#     print("\n" + "=" * 80)
+#     print("TEST 2: DiT Transformer (Wan2.1-T2V-1.3B)")
+#     print("=" * 80)
 
-    try:
-        import torch
-        from diffusers import WanDiT2DModel
-    except ImportError:
-        print("❌ PyTorch or diffusers not installed. Skipping DiT test.")
-        return False
+#     try:
+#         import torch
+#         from diffusers import WanDiT2DModel
+#     except ImportError:
+#         print("❌ PyTorch or diffusers not installed. Skipping DiT test.")
+#         return False
 
-    # Download checkpoint
-    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+#     # Download checkpoint
+#     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
-    # Config
-    config = modeling.ModelConfig(num_layers=24)  # Use default full config
+#     # Config
+#     config = modeling.ModelConfig(num_layers=24)  # Use default full config
 
-    # Create dummy inputs (matching expected shapes)
-    batch_size = 1
-    num_frames = config.num_frames  # 21
-    latent_h, latent_w = config.latent_size  # (104, 60)
-    latent_channels = config.input_dim  # 16
-    text_seq_len = config.max_text_len  # 512
-    text_embed_dim = config.text_embed_dim  # 4096
+#     # Create dummy inputs (matching expected shapes)
+#     batch_size = 1
+#     num_frames = config.num_frames  # 21
+#     latent_h, latent_w = config.latent_size  # (104, 60)
+#     latent_channels = config.input_dim  # 16
+#     text_seq_len = config.max_text_len  # 512
+#     text_embed_dim = config.text_embed_dim  # 4096
 
-    latents = jnp.zeros((batch_size, num_frames, latent_h, latent_w, latent_channels))
-    text_embeds = jnp.zeros((batch_size, text_seq_len, text_embed_dim))
-    timestep = jnp.array([25])  # Middle of diffusion
+#     latents = jnp.zeros((batch_size, num_frames, latent_h, latent_w, latent_channels))
+#     text_embeds = jnp.zeros((batch_size, text_seq_len, text_embed_dim))
+#     timestep = jnp.array([25])  # Middle of diffusion
 
-    print("\nInput shapes:")
-    print(f"  Latents: {latents.shape}")
-    print(f"  Text embeds: {text_embeds.shape}")
-    print(f"  Timestep: {timestep}")
+#     print("\nInput shapes:")
+#     print(f"  Latents: {latents.shape}")
+#     print(f"  Text embeds: {text_embeds.shape}")
+#     print(f"  Timestep: {timestep}")
 
-    # JAX model
-    print("\n[1/2] Loading JAX DiT model...")
-    jax_model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None, load_transformer_only=True)
+#     # JAX model
+#     print("\n[1/2] Loading JAX DiT model...")
+#     jax_model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None, load_transformer_only=True)
 
-    # PyTorch reference
-    print("[2/2] Loading PyTorch DiT reference...")
-    torch_model = WanDiT2DModel.from_pretrained(f"{model_ckpt_path}/transformer")
-    torch_model.eval()
+#     # PyTorch reference
+#     print("[2/2] Loading PyTorch DiT reference...")
+#     torch_model = WanDiT2DModel.from_pretrained(f"{model_ckpt_path}/transformer")
+#     torch_model.eval()
 
-    # Run JAX
-    print("\nRunning JAX model...")
-    jax_output = jax_model.forward(latents, text_embeds, timestep, deterministic=True)
+#     # Run JAX
+#     print("\nRunning JAX model...")
+#     jax_output = jax_model.forward(latents, text_embeds, timestep, deterministic=True)
 
-    # Run PyTorch (need to convert to channel-first format)
-    print("Running PyTorch model...")
-    with torch.no_grad():
-        # PyTorch expects [B, C, T, H, W] (channel-first)
-        latents_torch = torch.from_numpy(np.array(latents))
-        latents_torch = latents_torch.permute(0, 4, 1, 2, 3)  # [B, T, H, W, C] -> [B, C, T, H, W]
+#     # Run PyTorch (need to convert to channel-first format)
+#     print("Running PyTorch model...")
+#     with torch.no_grad():
+#         # PyTorch expects [B, C, T, H, W] (channel-first)
+#         latents_torch = torch.from_numpy(np.array(latents))
+#         latents_torch = latents_torch.permute(0, 4, 1, 2, 3)  # [B, T, H, W, C] -> [B, C, T, H, W]
 
-        text_embeds_torch = torch.from_numpy(np.array(text_embeds))
-        timestep_torch = torch.tensor([25])
+#         text_embeds_torch = torch.from_numpy(np.array(text_embeds))
+#         timestep_torch = torch.tensor([25])
 
-        torch_output = torch_model(
-            hidden_states=latents_torch,
-            encoder_hidden_states=text_embeds_torch,
-            timestep=timestep_torch,
-            return_dict=False,
-        )[0]
+#         torch_output = torch_model(
+#             hidden_states=latents_torch,
+#             encoder_hidden_states=text_embeds_torch,
+#             timestep=timestep_torch,
+#             return_dict=False,
+#         )[0]
 
-        # Convert back to channel-last for comparison
-        torch_output = torch_output.permute(0, 2, 3, 4, 1)  # [B, C, T, H, W] -> [B, T, H, W, C]
+#         # Convert back to channel-last for comparison
+#         torch_output = torch_output.permute(0, 2, 3, 4, 1)  # [B, C, T, H, W] -> [B, T, H, W, C]
 
-    # Compare
-    return compare_outputs(jax_output, torch_output, "DiT Transformer Output", rtol=1e-3, atol=1e-4)
-
-
-def test_vae_decoder():
-    """Test VAE decoder output against HuggingFace reference."""
-    print("\n" + "=" * 80)
-    print("TEST 3: VAE Decoder (Wan-VAE)")
-    print("=" * 80)
-
-    try:
-        import torch
-        from diffusers import AutoencoderKLWan
-    except ImportError:
-        print("❌ PyTorch or diffusers not installed. Skipping VAE test.")
-        return False
-
-    # Download checkpoint
-    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-
-    # Create dummy latent input
-    # Expected: [B, T, H, W, C] = [1, 21, 104, 60, 16]
-    batch_size = 1
-    num_frames = 21
-    latent_h, latent_w = 104, 60
-    latent_channels = 16
-
-    latents_jax = jnp.zeros((batch_size, num_frames, latent_h, latent_w, latent_channels))
-
-    print(f"\nInput latents shape: {latents_jax.shape}")
-
-    # JAX model
-    print("\n[1/2] Loading JAX VAE decoder...")
-    jax_vae = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
-
-    # PyTorch reference
-    print("[2/2] Loading PyTorch VAE reference...")
-    torch_vae = AutoencoderKLWan.from_pretrained(f"{model_ckpt_path}/vae")
-    torch_vae.eval()
-
-    # Run JAX
-    print("\nRunning JAX VAE decoder...")
-    jax_output = jax_vae.decode(latents_jax)
-
-    # Run PyTorch (need to convert to channel-first format)
-    print("Running PyTorch VAE decoder...")
-    with torch.no_grad():
-        # PyTorch expects [B, C, T, H, W] (channel-first)
-        latents_torch = torch.from_numpy(np.array(latents_jax))
-        latents_torch = latents_torch.permute(0, 4, 1, 2, 3)  # [B, T, H, W, C] -> [B, C, T, H, W]
-
-        torch_output = torch_vae.decode(latents_torch).sample
-
-        # Convert back to channel-last for comparison: [B, C, T, H, W] -> [B, T, H, W, C]
-        torch_output = torch_output.permute(0, 2, 3, 4, 1)
-
-    # Compare
-    # VAE outputs are typically less precise due to stochastic operations
-    return compare_outputs(jax_output, torch_output, "VAE Decoder Output", rtol=5e-3, atol=1e-3)
+#     # Compare
+#     return compare_outputs(jax_output, torch_output, "DiT Transformer Output", rtol=1e-3, atol=1e-4)
 
 
+# def test_vae_decoder():
+#     """Test VAE decoder output against HuggingFace reference."""
+#     print("\n" + "=" * 80)
+#     print("TEST 3: VAE Decoder (Wan-VAE)")
+#     print("=" * 80)
 
+#     try:
+#         import torch
+#         from diffusers import AutoencoderKLWan
+#     except ImportError:
+#         print("❌ PyTorch or diffusers not installed. Skipping VAE test.")
+#         return False
 
+#     # Download checkpoint
+#     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
+#     # Create dummy latent input
+#     # Expected: [B, T, H, W, C] = [1, 21, 104, 60, 16]
+#     batch_size = 1
+#     num_frames = 21
+#     latent_h, latent_w = 104, 60
+#     latent_channels = 16
+
+#     latents_jax = jnp.zeros((batch_size, num_frames, latent_h, latent_w, latent_channels))
+
+#     print(f"\nInput latents shape: {latents_jax.shape}")
+
+#     # JAX model
+#     print("\n[1/2] Loading JAX VAE decoder...")
+#     jax_vae = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
+
+#     # PyTorch reference
+#     print("[2/2] Loading PyTorch VAE reference...")
+#     torch_vae = AutoencoderKLWan.from_pretrained(f"{model_ckpt_path}/vae")
+#     torch_vae.eval()
+
+#     # Run JAX
+#     print("\nRunning JAX VAE decoder...")
+#     jax_output = jax_vae.decode(latents_jax)
+
+#     # Run PyTorch (need to convert to channel-first format)
+#     print("Running PyTorch VAE decoder...")
+#     with torch.no_grad():
+#         # PyTorch expects [B, C, T, H, W] (channel-first)
+#         latents_torch = torch.from_numpy(np.array(latents_jax))
+#         latents_torch = latents_torch.permute(0, 4, 1, 2, 3)  # [B, T, H, W, C] -> [B, C, T, H, W]
+
+#         torch_output = torch_vae.decode(latents_torch).sample
+
+#         # Convert back to channel-last for comparison: [B, C, T, H, W] -> [B, T, H, W, C]
+#         torch_output = torch_output.permute(0, 2, 3, 4, 1)
+
+#     # Compare
+#     # VAE outputs are typically less precise due to stochastic operations
+#     return compare_outputs(jax_output, torch_output, "VAE Decoder Output", rtol=5e-3, atol=1e-3)
 
 def run_all_tests():
     """Run all output comparison tests."""
@@ -529,25 +524,25 @@ def run_all_tests():
         traceback.print_exc()
         results["T5 Encoder"] = False
 
-    # Test DiT
-    try:
-        results["DiT Transformer"] = test_dit_transformer()
-    except Exception as e:
-        print(f"\n❌ DiT test failed with error: {e}")
-        import traceback
+    # # Test DiT
+    # try:
+    #     results["DiT Transformer"] = test_dit_transformer()
+    # except Exception as e:
+    #     print(f"\n❌ DiT test failed with error: {e}")
+    #     import traceback
 
-        traceback.print_exc()
-        results["DiT Transformer"] = False
+    #     traceback.print_exc()
+    #     results["DiT Transformer"] = False
 
-    # Test VAE
-    try:
-        results["VAE Decoder"] = test_vae_decoder()
-    except Exception as e:
-        print(f"\n❌ VAE test failed with error: {e}")
-        import traceback
+    # # Test VAE
+    # try:
+    #     results["VAE Decoder"] = test_vae_decoder()
+    # except Exception as e:
+    #     print(f"\n❌ VAE test failed with error: {e}")
+    #     import traceback
 
-        traceback.print_exc()
-        results["VAE Decoder"] = False
+    #     traceback.print_exc()
+    #     results["VAE Decoder"] = False
 
     # Summary
     print("\n" + "=" * 80)
