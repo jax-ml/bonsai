@@ -33,36 +33,179 @@ from transformers import AutoTokenizer
 
 def check_weight_loading(jax_model, torch_model):
     """比较 JAX (safetensor) 和 PyTorch (pth) 加载的权重"""
-    
+
     # 1. Embedding weights
     # torch_model is WanT5EncoderModel, torch_model.model is T5Encoder
     torch_emb = torch_model.model.token_embedding.weight.float().detach().cpu().numpy()
     jax_emb = np.array(jax_model.encoder.token_embedding.embedding.value)
-    
+
     print("Embedding weights:")
     print(f"  Shapes: torch={torch_emb.shape}, jax={jax_emb.shape}")
     print(f"  Max diff: {np.abs(torch_emb - jax_emb).max():.2e}")
     print(f"  Mean: torch={torch_emb.mean():.4f}, jax={jax_emb.mean():.4f}")
-    
+
     # 2. 第一个 block 的 query weight
     # PyTorch: encoder.block[0].layer[0].SelfAttention.q.weight
     torch_q = torch_model.model.blocks[0].attn.q.weight.float().detach().cpu().numpy()
-    
+
     # JAX: encoder.blocks[0] 的对应参数
     # 需要知道你的参数结构，可能是：
     jax_q = np.array(jax_model.encoder.blocks[0].attn.q.kernel.value)
-    
+
     print("\nFirst block query weight:")
     print(f"  Shapes: torch={torch_q.shape}, jax={jax_q.shape}")
     print(f"  Max diff: {np.abs(torch_q.T - jax_q).max():.2e}")  # 注意可能需要转置
-    
+
     # # 3. Layer norm (检查 gamma/beta)
     # torch_ln_weight = torch_model.encoder.final_layer_norm.weight.detach().cpu().numpy()
     # jax_ln_weight = np.array(jax_model.encoder.norm.scale.value)
-    
+
     # print("\nFinal LayerNorm weight:")
     # print(f"  Shapes: torch={torch_ln_weight.shape}, jax={jax_ln_weight.shape}")
     # print(f"  Max diff: {np.abs(torch_ln_weight - jax_ln_weight).max():.2e}")
+
+
+def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_mask):
+    """Compare intermediate layer outputs between JAX and PyTorch models.
+
+    Args:
+        jax_model: JAX T5Encoder model
+        torch_model: WanT5EncoderModel instance
+        input_ids: Tokenized input IDs [batch, seq_len]
+        attention_mask: Attention mask [batch, seq_len]
+    """
+    print("\n" + "=" * 80)
+    print("COMPARING INTERMEDIATE LAYER OUTPUTS")
+    print("=" * 80)
+
+    # Convert inputs to appropriate formats
+    input_ids_jax = jnp.array(input_ids)
+    attention_mask_jax = jnp.array(attention_mask)
+
+    input_ids_torch = torch.from_numpy(np.array(input_ids)).long()
+    attention_mask_torch = torch.from_numpy(np.array(attention_mask)).long()
+
+    # Get PyTorch encoder
+    torch_encoder = torch_model.model
+
+    # ========================================
+    # 1. Embedding Layer
+    # ========================================
+    print("\n[Layer 0] Token Embeddings")
+
+    # JAX
+    jax_emb = jax_model.encoder.token_embedding(input_ids_jax)
+
+    # PyTorch
+    with torch.no_grad():
+        torch_emb = torch_encoder.token_embedding(input_ids_torch)
+
+    compare_outputs(jax_emb, torch_emb, "Token Embeddings", rtol=1e-3, atol=1e-4)
+
+    # ========================================
+    # 2. After dropout (before blocks)
+    # ========================================
+    print("\n[Layer 0.5] After Dropout")
+
+    # JAX - manually apply dropout with deterministic=True (no dropout)
+    jax_x = jax_emb
+
+    # PyTorch
+    with torch.no_grad():
+        torch_x = torch_encoder.dropout(torch_emb)
+
+    compare_outputs(jax_x, torch_x, "After Initial Dropout", rtol=1e-3, atol=1e-4)
+
+    # ========================================
+    # 3. Position embeddings
+    # ========================================
+    print("\n[Layer 0.6] Position Embeddings")
+
+    seq_len = input_ids_jax.shape[1]
+
+    # JAX
+    jax_pos_bias = jax_model.encoder.pos_embedding(seq_len, seq_len)
+
+    # PyTorch
+    with torch.no_grad():
+        torch_pos_bias = torch_encoder.pos_embedding(seq_len, seq_len)
+
+    compare_outputs(jax_pos_bias, torch_pos_bias, "Position Embeddings", rtol=1e-3, atol=1e-4)
+
+    # ========================================
+    # 4. Each Transformer Block
+    # ========================================
+    num_layers = len(torch_encoder.blocks)
+    print(f"\n[Blocks] Processing {num_layers} transformer layers...")
+
+    # Initialize with embedding output
+    jax_hidden = jax_x
+    torch_hidden = torch_x
+
+    for layer_idx in range(num_layers):
+        print(f"\n[Block {layer_idx}] Transformer Layer {layer_idx}")
+
+        # JAX block forward
+        jax_block = jax_model.encoder.blocks[layer_idx]
+        jax_hidden = jax_block(jax_hidden, mask=attention_mask_jax, pos_bias=jax_pos_bias)
+
+        # PyTorch block forward
+        with torch.no_grad():
+            torch_block = torch_encoder.blocks[layer_idx]
+            torch_hidden = torch_block(torch_hidden, mask=attention_mask_torch, pos_bias=torch_pos_bias)
+
+        # Compare
+        compare_outputs(
+            jax_hidden,
+            torch_hidden,
+            f"Block {layer_idx} Output",
+            rtol=1e-3,
+            atol=1e-4
+        )
+
+        # Optional: Compare sub-components for first few layers
+        if layer_idx < 3:
+            print(f"  [Block {layer_idx}] Sub-component details:")
+
+            # Norm1 output
+            with torch.no_grad():
+                jax_norm1_out = jax_block.norm1(jax_hidden)
+                torch_norm1_out = torch_block.norm1(torch_hidden)
+
+            diff = np.abs(np.array(jax_norm1_out) - np.array(torch_norm1_out.float()))
+            print(f"    Norm1: max_diff={diff.max():.2e}, mean_diff={diff.mean():.2e}")
+
+    # ========================================
+    # 5. Final Layer Norm
+    # ========================================
+    print("\n[Final] Layer Normalization")
+
+    # JAX
+    jax_output = jax_model.encoder.norm(jax_hidden)
+
+    # PyTorch
+    with torch.no_grad():
+        torch_output = torch_encoder.norm(torch_hidden)
+
+    compare_outputs(jax_output, torch_output, "Final LayerNorm Output", rtol=1e-3, atol=1e-4)
+
+    # ========================================
+    # 6. Final Dropout
+    # ========================================
+    print("\n[Final] After Final Dropout")
+
+    # JAX - no dropout in eval mode
+    jax_final = jax_output
+
+    # PyTorch
+    with torch.no_grad():
+        torch_final = torch_encoder.dropout(torch_output)
+
+    compare_outputs(jax_final, torch_final, "Final Output", rtol=1e-3, atol=1e-4)
+
+    print("\n" + "=" * 80)
+    print("INTERMEDIATE COMPARISON COMPLETE")
+    print("=" * 80)
 
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-3, atol: float = 1e-5):
     """Compare JAX and PyTorch outputs and report differences.
@@ -158,11 +301,11 @@ def test_t5_encoder():
     jax_model = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
 
     # Run JAX
-    print("\nRunning JAX model...")
-    input_ids_jax = jnp.array(inputs["input_ids"])
-    attention_mask_jax = jnp.array(inputs["attention_mask"])
-    jax_output = jax_model(input_ids_jax, attention_mask_jax, deterministic=True)
-    print(f"✓ JAX output shape: {jax_output.shape}")
+    # print("\nRunning JAX model...")
+    # input_ids_jax = jnp.array(inputs["input_ids"])
+    # attention_mask_jax = jnp.array(inputs["attention_mask"])
+    # jax_output = jax_model(input_ids_jax, attention_mask_jax, deterministic=True)
+    # print(f"✓ JAX output shape: {jax_output.shape}")
 
     # ========================================
     # Configuration
@@ -205,6 +348,11 @@ def test_t5_encoder():
     print()
     # 运行检查
     check_weight_loading(jax_model, text_encoder)
+
+    # ========================================
+    # Compare Intermediate Outputs
+    # ========================================
+    compare_intermediate_outputs(jax_model, text_encoder, inputs["input_ids"], inputs["attention_mask"])
 
     # ========================================
     # Encode Prompt
@@ -430,4 +578,4 @@ def run_all_tests():
 
 
 if __name__ == "__main__":
-    run_all_tests()
+    test_t5_encoder()
