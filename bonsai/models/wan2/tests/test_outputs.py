@@ -36,7 +36,7 @@ def check_weight_loading(jax_model, torch_model):
     
     # 1. Embedding weights
     # torch_model is WanT5EncoderModel, torch_model.model is T5Encoder
-    torch_emb = torch_model.model.token_embedding.weight.detach().cpu().numpy()
+    torch_emb = torch_model.model.token_embedding.weight.float().detach().cpu().numpy()
     jax_emb = np.array(jax_model.encoder.token_embedding.embedding.value)
     
     print("Embedding weights:")
@@ -46,7 +46,7 @@ def check_weight_loading(jax_model, torch_model):
     
     # 2. 第一个 block 的 query weight
     # PyTorch: encoder.block[0].layer[0].SelfAttention.q.weight
-    torch_q = torch_model.model.blocks[0].attn.q.weight.detach().cpu().numpy()
+    torch_q = torch_model.model.blocks[0].attn.q.weight.float().detach().cpu().numpy()
     
     # JAX: encoder.blocks[0] 的对应参数
     # 需要知道你的参数结构，可能是：
