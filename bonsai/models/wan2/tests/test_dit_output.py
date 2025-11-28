@@ -153,7 +153,7 @@ def test_dit():
     expected_output = np.transpose(output.sample.numpy(), (0, 2, 3, 4, 1))
 
     # Compare only the valid portion (ignore padding)
-    return compare_outputs(jax_dit_output, expected_shape, "Dit", rtol=1e-3, atol=1e-4)
+    return compare_outputs(jax_dit_output, expected_output, "Dit", rtol=1e-3, atol=1e-4)
 
 if __name__ == "__main__":
     test_dit()
