@@ -256,7 +256,7 @@ def test_t5_encoder():
 
     print("\n[1/2] Loading T5 encoder...")
     jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-    hf_t5 = UMT5EncoderModel.from_pretrained("Wan-AI/Wan2.1-T2V-14B-Diffusers", subfolder="text_encoder", torch_dtype=torch.bfloat16)
+    hf_t5 = UMT5EncoderModel.from_pretrained(model_ckpt_path, subfolder="text_encoder", torch_dtype=torch.bfloat16)
 
     check_weight_loading(jax_t5, hf_t5)
 
