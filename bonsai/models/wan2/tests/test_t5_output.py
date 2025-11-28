@@ -271,10 +271,7 @@ def test_t5_encoder():
 
     print("\n[1/2] Loading T5 encoder...")
     jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-    hf_t5 = UMT5EncoderModel.from_pretrained(
-        "google/umt5-xxl",
-        subfolder="text_encoder",
-    )
+    hf_t5 = UMT5EncoderModel.from_pretrained("Wan-AI/Wan2.1-T2V-14B-Diffusers", subfolder="text_encoder", torch_dtype=torch.bfloat16)
 
     print("\nRunning model...")
     input_ids_jax = jnp.array(inputs_j.input_ids)

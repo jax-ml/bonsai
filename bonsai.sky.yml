@@ -16,5 +16,4 @@ run: |
   uv pip install -e .
   uv pip install -r requirements.txt
   cd bonsai/models/wan2/tests
-  hf download Wan-AI/Wan2.1-T2V-1.3B --local-dir ./Wan2.1-T2V-1.3B
   python test_outputs.py
