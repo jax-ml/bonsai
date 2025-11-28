@@ -71,9 +71,6 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
 
     return close
 
-def check_intermediate_weights(jax_model, torch_model):
-
-
 def test_dit():
     print("\n" + "=" * 80)
     print("TEST 2: DiT")
@@ -130,7 +127,7 @@ def test_dit():
             return_dict=True,
             attention_kwargs=None,
         )
-        
+
     # 5. Get intermediate outputs
     intermediate_outputs = debugger.get_outputs()
 
@@ -272,110 +269,110 @@ class WanTransformerDebugger:
         self.intermediate_outputs = OrderedDict()
 
 
-def test_wan_transformer_with_intermediate_outputs():
-    """
-    Test WanTransformer3DModel and extract all intermediate outputs
-    """
-    # 1. Create model with Wan2.1-T2V-1.3B config
-    config = {
-        "patch_size": (1, 2, 2),
-        "num_attention_heads": 12,
-        "attention_head_dim": 128,
-        "in_channels": 16,
-        "out_channels": 16,
-        "text_dim": 4096,
-        "freq_dim": 256,
-        "ffn_dim": 8960,
-        "num_layers": 30,
-        "cross_attn_norm": True,
-        "qk_norm": "rms_norm_across_heads",
-        "eps": 1e-6,
-        "added_kv_proj_dim": None,
-        "rope_max_seq_len": 1024,
-    }
+# def test_wan_transformer_with_intermediate_outputs():
+#     """
+#     Test WanTransformer3DModel and extract all intermediate outputs
+#     """
+#     # 1. Create model with Wan2.1-T2V-1.3B config
+#     config = {
+#         "patch_size": (1, 2, 2),
+#         "num_attention_heads": 12,
+#         "attention_head_dim": 128,
+#         "in_channels": 16,
+#         "out_channels": 16,
+#         "text_dim": 4096,
+#         "freq_dim": 256,
+#         "ffn_dim": 8960,
+#         "num_layers": 30,
+#         "cross_attn_norm": True,
+#         "qk_norm": "rms_norm_across_heads",
+#         "eps": 1e-6,
+#         "added_kv_proj_dim": None,
+#         "rope_max_seq_len": 1024,
+#     }
 
-    model = WanTransformer3DModel(**config)
-    model.eval()
+#     model = WanTransformer3DModel(**config)
+#     model.eval()
 
-    # 2. Create debugger and register hooks
+#     # 2. Create debugger and register hooks
 
 
-    # 3. Prepare inputs
-    batch_size = 1
-    num_channels = 16
-    num_frames = 9
-    height = 60
-    width = 104
-    text_seq_len = 512
-    text_dim = 4096
+#     # 3. Prepare inputs
+#     batch_size = 1
+#     num_channels = 16
+#     num_frames = 9
+#     height = 60
+#     width = 104
+#     text_seq_len = 512
+#     text_dim = 4096
 
-    # Set seed for reproducibility
-    torch.manual_seed(42)
+#     # Set seed for reproducibility
+#     torch.manual_seed(42)
 
-    hidden_states = torch.randn(
-        batch_size, num_channels, num_frames, height, width,
-        dtype=torch.float32
-    )
+#     hidden_states = torch.randn(
+#         batch_size, num_channels, num_frames, height, width,
+#         dtype=torch.float32
+#     )
 
-    timestep = torch.tensor([500], dtype=torch.long)
+#     timestep = torch.tensor([500], dtype=torch.long)
 
-    encoder_hidden_states = torch.randn(
-        batch_size, text_seq_len, text_dim,
-        dtype=torch.float32
-    )
+#     encoder_hidden_states = torch.randn(
+#         batch_size, text_seq_len, text_dim,
+#         dtype=torch.float32
+#     )
 
-    print("Input shapes:")
-    print(f"  hidden_states: {hidden_states.shape}")
-    print(f"  timestep: {timestep.shape}")
-    print(f"  encoder_hidden_states: {encoder_hidden_states.shape}")
-    print()
+#     print("Input shapes:")
+#     print(f"  hidden_states: {hidden_states.shape}")
+#     print(f"  timestep: {timestep.shape}")
+#     print(f"  encoder_hidden_states: {encoder_hidden_states.shape}")
+#     print()
 
-    # 4. Run forward pass
-    with torch.no_grad():
-        output = model(
-            hidden_states=hidden_states,
-            timestep=timestep,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_hidden_states_image=None,
-            return_dict=True,
-            attention_kwargs=None,
-        )
+#     # 4. Run forward pass
+#     with torch.no_grad():
+#         output = model(
+#             hidden_states=hidden_states,
+#             timestep=timestep,
+#             encoder_hidden_states=encoder_hidden_states,
+#             encoder_hidden_states_image=None,
+#             return_dict=True,
+#             attention_kwargs=None,
+#         )
 
-    # 5. Get intermediate outputs
-    intermediate_outputs = debugger.get_outputs()
+#     # 5. Get intermediate outputs
+#     intermediate_outputs = debugger.get_outputs()
 
-    print("=" * 80)
-    print("INTERMEDIATE OUTPUTS")
-    print("=" * 80)
+#     print("=" * 80)
+#     print("INTERMEDIATE OUTPUTS")
+#     print("=" * 80)
 
-    # Print all intermediate output shapes
-    for name, tensor in intermediate_outputs.items():
-        if isinstance(tensor, torch.Tensor):
-            print(f"{name:50s} : {tuple(tensor.shape)}")
+#     # Print all intermediate output shapes
+#     for name, tensor in intermediate_outputs.items():
+#         if isinstance(tensor, torch.Tensor):
+#             print(f"{name:50s} : {tuple(tensor.shape)}")
 
-    print("=" * 80)
-    print(f"Final output shape: {output.sample.shape}")
-    print("=" * 80)
+#     print("=" * 80)
+#     print(f"Final output shape: {output.sample.shape}")
+#     print("=" * 80)
 
-    # 6. Save outputs for comparison
-    outputs_dict = {
-        'inputs': {
-            'hidden_states': hidden_states.cpu(),
-            'timestep': timestep.cpu(),
-            'encoder_hidden_states': encoder_hidden_states.cpu(),
-        },
-        'intermediate': intermediate_outputs,
-        'output': output.sample.cpu(),
-    }
+#     # 6. Save outputs for comparison
+#     outputs_dict = {
+#         'inputs': {
+#             'hidden_states': hidden_states.cpu(),
+#             'timestep': timestep.cpu(),
+#             'encoder_hidden_states': encoder_hidden_states.cpu(),
+#         },
+#         'intermediate': intermediate_outputs,
+#         'output': output.sample.cpu(),
+#     }
 
-    # Save to file
-    torch.save(outputs_dict, 'wan_transformer_outputs.pt')
-    print("\n✓ Saved outputs to 'wan_transformer_outputs.pt'")
+#     # Save to file
+#     torch.save(outputs_dict, 'wan_transformer_outputs.pt')
+#     print("\n✓ Saved outputs to 'wan_transformer_outputs.pt'")
 
-    # 7. Clean up
-    debugger.remove_hooks()
+#     # 7. Clean up
+#     debugger.remove_hooks()
 
-    return outputs_dict
+#     return outputs_dict
 
 
 def compare_specific_layers(outputs_dict_diffusers, outputs_dict_yours):
