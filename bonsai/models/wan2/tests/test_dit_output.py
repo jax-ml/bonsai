@@ -113,7 +113,8 @@ def test_dit():
         batch_size, num_channels, num_frames, height, width,
         dtype=torch.float32
     )
-    hidden_states_jax = jnp.array(hidden_states.numpy())
+    # jax channels last
+    hidden_states_jax = jnp.array(np.transpose(hidden_states.numpy(), (0, 2, 3, 4, 1)))    
     timestep = torch.randint(
         0, 1000,
         (batch_size,),
@@ -126,7 +127,7 @@ def test_dit():
     )
     encoder_hidden_states_jax = jnp.array(encoder_hidden_states.numpy())
 
-    # 3. Run forward pass
+    print("\n[2/2] Running forward pass")
     with torch.no_grad():
         output = transformer(
             hidden_states=hidden_states,
