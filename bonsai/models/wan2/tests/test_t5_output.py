@@ -258,6 +258,8 @@ def test_t5_encoder():
     jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
     hf_t5 = UMT5EncoderModel.from_pretrained("Wan-AI/Wan2.1-T2V-14B-Diffusers", subfolder="text_encoder", torch_dtype=torch.bfloat16)
 
+    check_weight_loading(jax_t5, hf_t5)
+
     print("\nRunning model...")
     input_ids_jax = jnp.array(inputs_j.input_ids)
     jax_output = jax_t5(input_ids_jax, deterministic=True)
