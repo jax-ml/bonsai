@@ -28,25 +28,29 @@ import torch
 from transformers import AutoTokenizer, UMT5EncoderModel
 
 def check_weight_loading(jax_model, torch_model):
-    torch_emb = torch_model.shared.weight.float().detach().cpu().numpy()
+    torch_emb = torch_model.shared.weight.detach().cpu().numpy()
     jax_emb = np.array(jax_model.encoder.token_embedding.embedding.value)
 
     print("Embedding weights:")
     print(f"  Shapes: torch={torch_emb.shape}, jax={jax_emb.shape}")
     print(f"  Max diff: {np.abs(torch_emb - jax_emb).max():.2e}")
-    torch_q = torch_model.encoder.block[0].layer[0].SelfAttention.q.weight.float().detach().cpu().numpy()
+    print(f"  Mean diff: {np.abs(torch_emb - jax_emb).mean():.2e}")
+    torch_q = torch_model.encoder.block[0].layer[0].SelfAttention.q.weight.detach().cpu().numpy()
     jax_q = np.array(jax_model.encoder.blocks[0].attn.q.kernel.value)
 
     print("\nFirst block query weight:")
     print(f"  Shapes: torch={torch_q.shape}, jax={jax_q.shape}")
     print(f"  Max diff: {np.abs(torch_q.T - jax_q).max():.2e}")
+    print(f"  Mean diff: {np.abs(torch_q.T - jax_q).mean():.2e}")
 
-    torch_ln_weight = torch_model.encoder.final_layer_norm.weight.float().detach().cpu().numpy()
+    torch_ln_weight = torch_model.encoder.final_layer_norm.weight.detach().cpu().numpy()
     jax_ln_weight = np.array(jax_model.encoder.norm.weight.value)
 
     print("\nFinal LayerNorm weight:")
     print(f"  Shapes: torch={torch_ln_weight.shape}, jax={jax_ln_weight.shape}")
     print(f"  Max diff: {np.abs(torch_ln_weight - jax_ln_weight).max():.2e}")
+    print(f"  Mean diff: {np.abs(torch_ln_weight - jax_ln_weight).mean():.2e}")
+    
 
 
 def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_mask):
@@ -140,7 +144,7 @@ def compare_intermediate_outputs(jax_model, torch_model, input_ids, attention_ma
                 jax_norm1_out = jax_block.norm1(jax_hidden)
                 torch_norm1_out = torch_block.norm1(torch_hidden)
 
-            diff = np.abs(np.array(jax_norm1_out) - np.array(torch_norm1_out.float()))
+            diff = np.abs(np.array(jax_norm1_out) - np.array(torch_norm1_out))
             print(f"    Norm1: max_diff={diff.max():.2e}, mean_diff={diff.mean():.2e}")
 
     # ========================================
@@ -256,7 +260,7 @@ def test_t5_encoder():
 
     print("\n[1/2] Loading T5 encoder...")
     jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-    hf_t5 = UMT5EncoderModel.from_pretrained(model_ckpt_path, subfolder="text_encoder", torch_dtype=torch.bfloat16)
+    hf_t5 = UMT5EncoderModel.from_pretrained(model_ckpt_path, subfolder="text_encoder", torch_dtype=torch.float32)
 
     check_weight_loading(jax_t5, hf_t5)
 
