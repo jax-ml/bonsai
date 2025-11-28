@@ -11,13 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-"""JAX/Flax implementation of T5 encoder for Wan2.1-T2V-1.3B.
-
-Modified from transformers.models.t5.modeling_t5
-Converted from PyTorch to JAX/Flax NNX.
-"""
-
 import math
 from typing import Optional
 
@@ -28,13 +21,10 @@ from jaxtyping import Array
 
 
 def gelu(x: Array) -> Array:
-    """GELU activation function."""
     return 0.5 * x * (1.0 + jnp.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * jnp.pow(x, 3.0))))
 
 
-class T5LayerNorm(nnx.Module):
-    """T5 Layer Normalization (RMS normalization without centering)."""
-
+class RMSNorm(nnx.Module):
     def __init__(self, dim: int, eps: float = 1e-6, *, rngs: nnx.Rngs):
         self.dim = dim
         self.eps = eps
@@ -84,10 +74,9 @@ class T5Attention(nnx.Module):
         n = self.num_heads
         c = self.head_dim
 
-        # Compute Q, K, V
-        q = self.q(x).reshape(b, -1, n, c)  # [B, L1, num_heads, head_dim]
-        k = self.k(context).reshape(b, -1, n, c)  # [B, L2, num_heads, head_dim]
-        v = self.v(context).reshape(b, -1, n, c)  # [B, L2, num_heads, head_dim]
+        q = self.q(x).reshape(b, -1, n, c)
+        k = self.k(context).reshape(b, -1, n, c)
+        v = self.v(context).reshape(b, -1, n, c)
 
         # Attention bias
         attn_bias = jnp.zeros((b, n, q.shape[1], k.shape[1]))
@@ -101,12 +90,10 @@ class T5Attention(nnx.Module):
                 mask = mask[:, None, :, :]  # [B, 1, L1, L2]
             attn_bias = jnp.where(mask == 0, jnp.finfo(x.dtype).min, attn_bias)
 
-        # Compute attention (T5 does not use scaling)
         attn = jnp.einsum("binc,bjnc->bnij", q, k) + attn_bias
         attn = jax.nn.softmax(attn, axis=-1)
         x = jnp.einsum("bnij,bjnc->binc", attn, v)
 
-        # Output projection
         x = x.reshape(b, -1, n * c)
         x = self.o(x)
         x = self.dropout(x, deterministic=deterministic)
@@ -120,14 +107,12 @@ class T5FeedForward(nnx.Module):
         self.dim = dim
         self.dim_ffn = dim_ffn
 
-        # Gate and projection layers
         self.gate = nnx.Linear(dim, dim_ffn, use_bias=False, rngs=rngs)
         self.fc1 = nnx.Linear(dim, dim_ffn, use_bias=False, rngs=rngs)
         self.fc2 = nnx.Linear(dim_ffn, dim, use_bias=False, rngs=rngs)
         self.dropout = nnx.Dropout(dropout, rngs=rngs)
 
     def __call__(self, x: Array, deterministic: bool = True) -> Array:
-        # Gated activation
         x = self.fc1(x) * gelu(self.gate(x))
         x = self.dropout(x, deterministic=deterministic)
         x = self.fc2(x)
@@ -136,8 +121,6 @@ class T5FeedForward(nnx.Module):
 
 
 class T5RelativeEmbedding(nnx.Module):
-    """T5 Relative position embeddings."""
-
     def __init__(self, num_buckets: int, num_heads: int, bidirectional: bool, max_dist: int = 128, *, rngs: nnx.Rngs):
         self.num_buckets = num_buckets
         self.num_heads = num_heads
@@ -155,12 +138,10 @@ class T5RelativeEmbedding(nnx.Module):
         Returns:
             [1, num_heads, lq, lk] relative position bias
         """
-        # Compute relative positions
         q_pos = jnp.arange(lq)[:, None]
         k_pos = jnp.arange(lk)[None, :]
-        rel_pos = k_pos - q_pos  # [lq, lk]
+        rel_pos = k_pos - q_pos
 
-        # Convert to buckets
         rel_pos_buckets = self._relative_position_bucket(rel_pos)
 
         # Get embeddings
@@ -212,10 +193,9 @@ class T5SelfAttention(nnx.Module):
     ):
         self.shared_pos = shared_pos
 
-        # Layers
-        self.norm1 = T5LayerNorm(dim, rngs=rngs)
+        self.norm1 = RMSNorm(dim, rngs=rngs)
         self.attn = T5Attention(dim, dim_attn, num_heads, dropout, rngs=rngs)
-        self.norm2 = T5LayerNorm(dim, rngs=rngs)
+        self.norm2 = RMSNorm(dim, rngs=rngs)
         self.ffn = T5FeedForward(dim, dim_ffn, dropout, rngs=rngs)
 
         if not shared_pos:
@@ -232,16 +212,12 @@ class T5SelfAttention(nnx.Module):
         else:
             e = self.pos_embedding(x.shape[1], x.shape[1])
 
-        # Self-attention
         x = x + self.attn(self.norm1(x), mask=mask, pos_bias=e, deterministic=deterministic)
-        # Feed-forward
         x = x + self.ffn(self.norm2(x), deterministic=deterministic)
         return x
 
 
 class T5Encoder(nnx.Module):
-    """T5 Encoder."""
-
     def __init__(
         self,
         vocab_size: int,
@@ -259,7 +235,6 @@ class T5Encoder(nnx.Module):
         self.dim = dim
         self.shared_pos = shared_pos
 
-        # Layers
         self.token_embedding = nnx.Embed(vocab_size, dim, rngs=rngs)
         if shared_pos:
             self.pos_embedding = T5RelativeEmbedding(num_buckets, num_heads, bidirectional=True, rngs=rngs)
@@ -272,19 +247,9 @@ class T5Encoder(nnx.Module):
                 for _ in range(num_layers)
             ]
         )
-        self.norm = T5LayerNorm(dim, rngs=rngs)
+        self.norm = RMSNorm(dim, rngs=rngs)
 
     def __call__(self, ids: Array, mask: Optional[Array] = None, deterministic: bool = True) -> Array:
-        """Encode input tokens.
-
-        Args:
-            ids: [B, L] input token IDs
-            mask: [B, L] attention mask (1 for valid tokens)
-            deterministic: whether to disable dropout
-
-        Returns:
-            [B, L, dim] encoded representations
-        """
         x = self.token_embedding(ids)
         x = self.dropout(x, deterministic=deterministic)
 
