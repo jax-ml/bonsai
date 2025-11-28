@@ -6,7 +6,7 @@ import numpy as np
 from huggingface_hub import snapshot_download
 from bonsai.models.wan2 import params, modeling
 import torch
-from transformers import AutoTokenizer, UMT5EncoderModel, AutoModel
+from diffusers import AutoModel
 
 def check_weight_loading(jax_model, torch_model):
     torch_emb = torch_model.shared.weight.detach().cpu().numpy()
@@ -95,7 +95,8 @@ def test_dit():
     config = modeling.ModelConfig
 
     print("\n[1/2] Loading transformer")
-    transformer = AutoModel.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers", subfolder="transformer", torch_dtype=torch.bfloat16)
+    transformer = AutoModel.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers", subfolder="transformer", torch_dtype=torch.float32)
+
     jax_dit = params.create_model_from_safe_tensors(model_ckpt_path, config,mesh=None)
     print("transformer loaded:", transformer, transformer.config)
 
