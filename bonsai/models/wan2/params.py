@@ -398,7 +398,6 @@ def create_model_from_safe_tensors(
             # Assign to state dict
             state_dict["blocks"][block_idx]["cross_attn"]["kv_proj"]["kernel"] = jax.device_put(kv_kernel)
             state_dict["blocks"][block_idx]["cross_attn"]["kv_proj"]["bias"] = jax.device_put(kv_bias)
-            print(f"✓ Fused K/V weights for block {block_idx}")
 
     print(f"Loaded {len(loaded_keys)} weight tensors")
     print(f"Skipped {len(skipped_keys)} weight tensors (VAE/text encoder/attn2.norm_k)")

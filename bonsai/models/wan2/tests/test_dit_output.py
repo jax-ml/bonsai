@@ -149,8 +149,11 @@ def test_dit():
     expected_shape = (batch_size, num_channels, num_frames, height, width)
     assert output.sample.shape == expected_shape
 
+    # change to channels last for comparison
+    expected_output = np.transpose(output.sample.numpy(), (0, 2, 3, 4, 1))
+
     # Compare only the valid portion (ignore padding)
-    return compare_outputs(jax_dit_output, output, "Dit", rtol=1e-3, atol=1e-4)
+    return compare_outputs(jax_dit_output, expected_shape, "Dit", rtol=1e-3, atol=1e-4)
 
 if __name__ == "__main__":
     test_dit()
