@@ -65,6 +65,12 @@ class ModelConfig:
     latent_size: Tuple[int, int] = (30, 30)
     num_inference_steps: int = 50
     guidance_scale: float = 5.0
+    patch_size: Tuple[int, int, int] = (1, 2, 2)
+    cross_attn_norm: bool = True
+    qk_norm: Optional[str] = "rms_norm_across_heads"
+    eps: float = 1e-6
+    added_kv_proj_dim: Optional[int] = None  # None for T2V, set for I2V
+    rope_max_seq_len: int = 1024
 
 
 def sinusoidal_embedding_1d(timesteps: Array, embedding_dim: int, max_period: int = 10000) -> Array:

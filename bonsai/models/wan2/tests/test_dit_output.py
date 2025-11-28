@@ -4,10 +4,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from huggingface_hub import snapshot_download
-from bonsai.models.wan2 import params
-from wan.configs import WAN_CONFIGS
+from bonsai.models.wan2 import params, modeling
 import torch
-from transformers import AutoTokenizer, UMT5EncoderModel
+from transformers import AutoTokenizer, UMT5EncoderModel, AutoModel
 
 def check_weight_loading(jax_model, torch_model):
     torch_emb = torch_model.shared.weight.detach().cpu().numpy()
@@ -37,13 +36,11 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
     if torch_output.dtype == torch.bfloat16:
         torch_output = torch_output.float()
 
-    # Convert PyTorch to numpy
     if isinstance(torch_output, torch.Tensor):
         torch_np = torch_output.detach().cpu().numpy()
     else:
         torch_np = np.array(torch_output)
 
-    # Convert JAX to numpy
     jax_np = np.array(jax_output)
 
     print(f"\n{'=' * 80}")
@@ -54,12 +51,10 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
     print(f"JAX dtype:   {jax_np.dtype}")
     print(f"Torch dtype: {torch_np.dtype}")
 
-    # Check shapes match
     if jax_np.shape != torch_np.shape:
         print("Shape mismatch!")
         return False
 
-    # Compute differences
     abs_diff = np.abs(jax_np - torch_np)
     rel_diff = abs_diff / (np.abs(torch_np) + 1e-10)
 
@@ -77,7 +72,6 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
     print(f"\nJAX output range:   [{np.min(jax_np):.4f}, {np.max(jax_np):.4f}]")
     print(f"Torch output range: [{np.min(torch_np):.4f}, {np.max(torch_np):.4f}]")
 
-    # Check if within tolerance
     close = np.allclose(jax_np, torch_np, rtol=rtol, atol=atol)
 
     if close:
@@ -92,41 +86,69 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
     return close
 
 
-def test_t5_encoder():
-    """Test T5 encoder output against Wan T5 reference implementation."""
+def test_dit():
     print("\n" + "=" * 80)
-    print("TEST 1: T5 Encoder (UMT5-XXL)")
+    print("TEST 2: DiT")
     print("=" * 80)
-    # Download checkpoint
+
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    config = modeling.ModelConfig
 
-    # Test prompt
-    prompt = "A beautiful sunset over the ocean with waves crashing on the shore"
-    max_length = 512
+    print("\n[1/2] Loading transformer")
+    transformer = AutoModel.from_pretrained("Wan-AI/Wan2.1-T2V-1.3B-Diffusers", subfolder="transformer", torch_dtype=torch.bfloat16)
+    jax_dit = params.create_model_from_safe_tensors(model_ckpt_path, config,mesh=None)
+    print("transformer loaded:", transformer, transformer.config)
 
-    print(f"\nTest prompt: {prompt}")
-    print(f"Max length: {max_length}")
+    batch_size = 1
+    num_channels = 16  # in_channels
+    num_frames = 9 
+    height = 60      
+    width = 104      
+    text_seq_len = 128  
+    text_dim = 4096     # UMT5 hidden dimension
 
-    print("\nTokenizing...")
-    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
-    inputs_j = tokenizer(prompt, return_tensors="np")
-    inputs_p = tokenizer(prompt, return_tensors="pt")
+    # Create dummy inputs
+    hidden_states = torch.randn(
+        batch_size, num_channels, num_frames, height, width,
+        dtype=torch.float32
+    )
+    hidden_states_jax = jnp.array(hidden_states.numpy())
+    timestep = torch.randint(
+        0, 1000,
+        (batch_size,),
+        dtype=torch.long
+    )
+    timestep_jax = jnp.array(timestep.numpy())
+    encoder_hidden_states = torch.randn(
+        batch_size, text_seq_len, text_dim,
+        dtype=torch.float32
+    )
+    encoder_hidden_states_jax = jnp.array(encoder_hidden_states.numpy())
 
-    print("\n[1/2] Loading T5 encoder...")
-    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-    hf_t5 = UMT5EncoderModel.from_pretrained(model_ckpt_path, subfolder="text_encoder", torch_dtype=torch.float32)
+    # 3. Run forward pass
+    with torch.no_grad():
+        output = transformer(
+            hidden_states=hidden_states,
+            timestep=timestep,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states_image=None,  # Only for I2V models
+            return_dict=True,
+            attention_kwargs=None,
+        )
+    jax_dit_output = jax_dit.forward(
+        hidden_states_jax,
+        encoder_hidden_states_jax,
+        timestep_jax,
+        deterministic=True
+    )
 
-    check_weight_loading(jax_t5, hf_t5)
-
-    print("\nRunning model...")
-    input_ids_jax = jnp.array(inputs_j.input_ids)
-    jax_output = jax_t5(input_ids_jax, deterministic=True)
-
-    pytorch_output = hf_t5(inputs_p.input_ids)
-    torch_embeddings = pytorch_output.last_hidden_state
+    # 4. Verify output shape
+    # Output should have same shape as input
+    expected_shape = (batch_size, num_channels, num_frames, height, width)
+    assert output.sample.shape == expected_shape
 
     # Compare only the valid portion (ignore padding)
-    return compare_outputs(jax_output, torch_embeddings, "T5 Encoder Output", rtol=1e-3, atol=1e-4)
+    return compare_outputs(jax_dit_output, output, "Dit", rtol=1e-3, atol=1e-4)
 
 if __name__ == "__main__":
-    test_t5_encoder()
+    test_dit()

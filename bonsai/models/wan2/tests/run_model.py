@@ -111,32 +111,18 @@ def run_model():
     print(f"Model: Wan2.1-T2V-1.3B ({config.num_layers} layers, {config.hidden_dim} dim)")
     print(f"Video: {config.num_frames} frames @ 480p")
 
-    # Step 1: Get text embeddings
     print("\n[1/4] Encoding text with T5...")
     text_embeds = get_t5_text_embeddings(prompts[0], max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
     print(f"      Text embeddings shape: {text_embeds.shape}")
 
-    # Step 2: Load DiT model
     print("\n[2/5] Loading Diffusion Transformer weights...")
-    try:
-        model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None, load_transformer_only=True)
-        print("      Model loaded successfully")
-    except Exception as e:
-        print(f"      Could not load weights: {e}")
-        print("      Creating model from scratch (random weights)...")
-        model = modeling.Wan2DiT(config, rngs=nnx.Rngs(params=0))
+    model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None)
+    print("      Model loaded successfully")
 
-    # Step 2.5: Load VAE decoder
     print("\n[2.5/5] Loading VAE decoder...")
-    try:
-        vae_decoder = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
-        print("      VAE decoder loaded")
-    except Exception as e:
-        print(f"      Could not load VAE: {e}")
-        print("      VAE decoder will not be used (dummy video output)")
-        vae_decoder = None
+    vae_decoder = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
+    print("      VAE decoder loaded")
 
-    # Step 3: Generate video latents
     print("\n[3/4] Generating video latents...")
     print(f"      Using {config.num_inference_steps} diffusion steps")
     print(f"      Guidance scale: {config.guidance_scale}")

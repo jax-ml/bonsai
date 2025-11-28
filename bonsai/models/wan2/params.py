@@ -299,7 +299,6 @@ def create_model_from_safe_tensors(
     file_dir: str,
     cfg: model_lib.ModelConfig,
     mesh: jax.sharding.Mesh | None = None,
-    load_transformer_only: bool = True,
 ) -> model_lib.Wan2DiT:
     """
     Load Wan2.1-T2V-1.3B DiT model from safetensors checkpoint.
