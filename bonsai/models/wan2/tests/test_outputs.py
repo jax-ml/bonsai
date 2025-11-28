@@ -29,7 +29,7 @@ from bonsai.models.wan2 import modeling, params, vae
 from wan.configs import WAN_CONFIGS
 from wan.modules.t5 import T5EncoderModel
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, UMT5EncoderModel
 
 def check_weight_loading(jax_model, torch_model):
     """比较 JAX (safetensor) 和 PyTorch (pth) 加载的权重"""
@@ -291,13 +291,17 @@ def test_t5_encoder():
     # JAX model
     print("\n[1/2] Loading JAX T5 encoder...")
     jax_model = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
+    text_encoder_auto = UMT5EncoderModel.from_pretrained(
+        "google/umt5-xxl",
+        subfolder="text_encoder",
+    )
 
     # Run JAX
-    # print("\nRunning JAX model...")
+    print("\nRunning JAX model...")
     # input_ids_jax = jnp.array(inputs["input_ids"])
     # attention_mask_jax = jnp.array(inputs["attention_mask"])
-    # jax_output = jax_model(input_ids_jax, attention_mask_jax, deterministic=True)
-    # print(f"✓ JAX output shape: {jax_output.shape}")
+    jax_output = text_encoder_auto(inputs["input_ids"],)
+    print(f"✓ JAX output shape: {jax_output.shape}")
 
     # ========================================
     # Configuration

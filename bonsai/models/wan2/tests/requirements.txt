@@ -12,5 +12,5 @@ ftfy
 dashscope
 imageio-ffmpeg
 gradio>=5.0.0
-numpy>=1.23.5,<2
+numpy==2.3.5
 einops==0.8.1
