@@ -21,42 +21,27 @@ between the JAX implementation and PyTorch reference to ensure correctness.
 import jax
 import jax.numpy as jnp
 import numpy as np
-from flax import nnx
 from huggingface_hub import snapshot_download
-
-import os
-from bonsai.models.wan2 import modeling, params, vae
+from bonsai.models.wan2 import params
 from wan.configs import WAN_CONFIGS
 import torch
 from transformers import AutoTokenizer, UMT5EncoderModel
 
 def check_weight_loading(jax_model, torch_model):
-    """比较 JAX (safetensor) 和 PyTorch (pth) 加载的权重"""
-
-    # 1. Embedding weights
-    # torch_model is WanT5EncoderModel, torch_model.model is T5Encoder
-    torch_emb = torch_model.model.token_embedding.weight.float().detach().cpu().numpy()
+    torch_emb = torch_model.shared.weight.float().detach().cpu().numpy()
     jax_emb = np.array(jax_model.encoder.token_embedding.embedding.value)
 
     print("Embedding weights:")
     print(f"  Shapes: torch={torch_emb.shape}, jax={jax_emb.shape}")
     print(f"  Max diff: {np.abs(torch_emb - jax_emb).max():.2e}")
-    print(f"  Mean: torch={torch_emb.mean():.4f}, jax={jax_emb.mean():.4f}")
-
-    # 2. 第一个 block 的 query weight
-    # PyTorch: encoder.block[0].layer[0].SelfAttention.q.weight
-    torch_q = torch_model.model.blocks[0].attn.q.weight.float().detach().cpu().numpy()
-
-    # JAX: encoder.blocks[0] 的对应参数
-    # 需要知道你的参数结构，可能是：
+    torch_q = torch_model.encoder.block[0].layer[0].SelfAttention.q.weight.float().detach().cpu().numpy()
     jax_q = np.array(jax_model.encoder.blocks[0].attn.q.kernel.value)
 
     print("\nFirst block query weight:")
     print(f"  Shapes: torch={torch_q.shape}, jax={jax_q.shape}")
-    print(f"  Max diff: {np.abs(torch_q.T - jax_q).max():.2e}")  # 注意可能需要转置
+    print(f"  Max diff: {np.abs(torch_q.T - jax_q).max():.2e}")
 
-    # 3. Layer norm (检查 gamma/beta)
-    torch_ln_weight = torch_model.model.norm.weight.float().detach().cpu().numpy()
+    torch_ln_weight = torch_model.encoder.final_layer_norm.weight.float().detach().cpu().numpy()
     jax_ln_weight = np.array(jax_model.encoder.norm.weight.value)
 
     print("\nFinal LayerNorm weight:")
