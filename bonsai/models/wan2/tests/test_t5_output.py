@@ -280,9 +280,6 @@ def test_t5_encoder():
     pytorch_output = hf_t5(inputs_p.input_ids)
     torch_embeddings = pytorch_output.last_hidden_state
 
-    # Add batch dimension to PyTorch output to match JAX format
-    torch_embeddings = torch_embeddings.unsqueeze(0)
-
     # Compare only the valid portion (ignore padding)
     return compare_outputs(jax_output, torch_embeddings, "T5 Encoder Output", rtol=1e-3, atol=1e-4)
 
