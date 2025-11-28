@@ -10,8 +10,10 @@ from diffusers import AutoModel
 from collections import OrderedDict
 
 def check_weight_loading(jax_model, torch_model):
+    # torch :(out, in, t, h, w)
     torch_emb = torch_model.patch_embedding.weight.detach().cpu().numpy()
-    jax_emb = np.array(jax_model.patch_embed.kernel.value).transpose(2, 3, 4, 1, 0)
+    # jax: (t, h, w, in, out)
+    jax_emb = np.array(jax_model.patch_embed.kernel.value).transpose(4,3,0,1,2)
 
     print("Embedding weights:")
     print(f"  Shapes: torch={torch_emb.shape}, jax={jax_emb.shape}")
@@ -146,8 +148,6 @@ def test_dit():
         timestep_jax,
         deterministic=True
     )
-
-
 
     # 4. Verify output shape
     # Output should have same shape as input
