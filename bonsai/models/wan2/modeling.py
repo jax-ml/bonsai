@@ -373,21 +373,12 @@ class Wan2DiT(nnx.Module):
         Returns:
             predicted_noise: [B, T, H, W, C] predicted noise
         """
-        b, _t, _h, _w, _c = latents.shape
+        b = latents.shape[0]
 
-        # Project text embeddings: [B, 512, 4096] → [B, 512, 1536]
         text_embeds = self.text_proj(text_embeds)
-
-        # Patchify video latents with 3D Conv
-        # Input: [B, T, H, W, C] -> [B, T, H/2, W/2, 1536]
         x = self.patch_embed(latents)
-
-        # Flatten spatial-temporal dimensions to sequence
-        # [B, T, H/2, W/2, 1536] → [B, T*H/2*W/2, 1536]
         b, t_out, h_out, w_out, d = x.shape
         x = x.reshape(b, t_out * h_out * w_out, d)
-
-        # Grid sizes for unpatchify later
         grid_sizes = (t_out, h_out, w_out)
 
         # RoPE frequencies for 3D position encoding (compute lazily to keep concrete arrays under jit)

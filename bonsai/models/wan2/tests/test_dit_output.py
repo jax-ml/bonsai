@@ -142,23 +142,98 @@ def test_dit():
         if isinstance(tensor, torch.Tensor):
             print(f"{name:50s} : {tuple(tensor.shape)}")
 
-    jax_dit_output = jax_dit.forward(
-        hidden_states_jax,
-        encoder_hidden_states_jax,
-        timestep_jax,
-        deterministic=True
+    # Manual forward pass with intermediate comparisons
+    print("\n" + "=" * 80)
+    print("STEP-BY-STEP FORWARD PASS WITH COMPARISONS")
+    print("=" * 80)
+
+    # 1. Text projection
+    text_embeds_jax = jax_dit.text_proj(encoder_hidden_states_jax)
+    text_embeds_torch = intermediate_outputs['condition_encoder_hidden_states']
+    compare_outputs(text_embeds_jax, text_embeds_torch, "Text Projection", rtol=1e-3, atol=1e-4)
+
+    # 2. Patch embedding
+    x_jax = jax_dit.patch_embed(hidden_states_jax)
+    # PyTorch is BCTHW, need to convert to BTHWC for comparison
+    patch_embed_torch = intermediate_outputs['patch_embed_output']
+    patch_embed_torch_channels_last = np.transpose(patch_embed_torch.numpy(), (0, 2, 3, 4, 1))
+    compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
+
+    # Reshape to sequence
+    b, t_out, h_out, w_out, d = x_jax.shape
+    x_jax = x_jax.reshape(b, t_out * h_out * w_out, d)
+    grid_sizes = (t_out, h_out, w_out)
+
+    # 3. RoPE frequencies
+    max_seq = max(grid_sizes)
+    rope_freqs = tuple(
+        jax.lax.stop_gradient(arr)
+        for arr in modeling.precompute_freqs_cis_3d(
+            dim=jax_dit.cfg.head_dim,
+            theta=jax_dit.rope_theta,
+            max_seq_len=max_seq
+        )
     )
 
+    # Build full RoPE frequency grid for comparison
+    freqs_t, freqs_h, freqs_w = rope_freqs
+    f, h, w = grid_sizes
+    head_dim = jax_dit.cfg.head_dim
+    dim_base = head_dim // 6
+    dim_t, dim_h, dim_w = head_dim - 4 * dim_base, 2 * dim_base, 2 * dim_base
+
+    freqs_grid = jnp.concatenate([
+        jnp.broadcast_to(freqs_t[:f, None, None, :, :], (f, h, w, dim_t // 2, 2)),
+        jnp.broadcast_to(freqs_h[None, :h, None, :, :], (f, h, w, dim_h // 2, 2)),
+        jnp.broadcast_to(freqs_w[None, None, :w, :, :], (f, h, w, dim_w // 2, 2)),
+    ], axis=3).reshape(t_out * h_out * w_out, head_dim // 2, 2)
+
+    rope_freqs_cos_jax = freqs_grid[..., 0]
+    rope_freqs_cos_jax = jnp.stack([rope_freqs_cos_jax, rope_freqs_cos_jax], axis=-1).reshape(1, -1, 1, head_dim)
+
+    # PyTorch RoPE freqs are in BCHW format, convert to sequence format
+    rope_freqs_cos_torch = intermediate_outputs['rope_freqs_cos']
+    compare_outputs(rope_freqs_cos_jax, rope_freqs_cos_torch, "RoPE Freqs Cos", rtol=1e-5, atol=1e-6)
+
+    # 4. Time embeddings
+    time_emb_jax, time_proj_jax = jax_dit.time_embed(timestep_jax)
+    time_emb_torch = intermediate_outputs['condition_temb']
+    time_proj_torch = intermediate_outputs['condition_timestep_proj']
+    compare_outputs(time_emb_jax, time_emb_torch, "Time Embedding", rtol=1e-3, atol=1e-4)
+    compare_outputs(time_proj_jax, time_proj_torch, "Time Projection", rtol=1e-3, atol=1e-4)
+
+    # 5. Process through transformer blocks
+    for i, block in enumerate(jax_dit.blocks):
+        x_jax = block(x_jax, text_embeds_jax, time_proj_jax, rope_state=(rope_freqs, grid_sizes), deterministic=True)
+
+        # Compare block output (PyTorch is BNCHW, JAX is BND)
+        block_output_torch = intermediate_outputs[f'block_{i}_output']
+        # PyTorch transformer blocks output sequence format (B, N, C) already
+        compare_outputs(x_jax, block_output_torch, f"Block {i} Output", rtol=1e-2, atol=1e-3)
+
+        if i >= 2:  # Only compare first few blocks to avoid too much output
+            break
+
+    # 6. Final layer
+    jax_dit_output = jax_dit.final_layer(x_jax, time_emb_jax)
+
+    # Compare with final norm output
+    norm_out_torch = intermediate_outputs['norm_out_output']
+    # Note: final_layer does norm + linear, so we can't directly compare with norm_out
+
+    # Reshape to video format
+    jax_dit_output = jax_dit.unpatchify(jax_dit_output, grid_sizes)
+
     # 4. Verify output shape
-    # Output should have same shape as input
     expected_shape = (batch_size, num_channels, num_frames, height, width)
     assert output.sample.shape == expected_shape
 
     # change to channels last for comparison
     expected_output = np.transpose(output.sample.numpy(), (0, 2, 3, 4, 1))
 
-    # Compare only the valid portion (ignore padding)
-    return compare_outputs(jax_dit_output, expected_output, "Dit", rtol=1e-3, atol=1e-4)
+    debugger.remove_hooks()
+    # Compare final output
+    return compare_outputs(jax_dit_output, expected_output, "Final DiT Output", rtol=1e-3, atol=1e-4)
 
 class WanTransformerDebugger:
     """Helper class to extract intermediate outputs from WanTransformer3DModel"""
@@ -267,175 +342,6 @@ class WanTransformerDebugger:
     def clear_outputs(self):
         """Clear stored outputs"""
         self.intermediate_outputs = OrderedDict()
-
-
-# def test_wan_transformer_with_intermediate_outputs():
-#     """
-#     Test WanTransformer3DModel and extract all intermediate outputs
-#     """
-#     # 1. Create model with Wan2.1-T2V-1.3B config
-#     config = {
-#         "patch_size": (1, 2, 2),
-#         "num_attention_heads": 12,
-#         "attention_head_dim": 128,
-#         "in_channels": 16,
-#         "out_channels": 16,
-#         "text_dim": 4096,
-#         "freq_dim": 256,
-#         "ffn_dim": 8960,
-#         "num_layers": 30,
-#         "cross_attn_norm": True,
-#         "qk_norm": "rms_norm_across_heads",
-#         "eps": 1e-6,
-#         "added_kv_proj_dim": None,
-#         "rope_max_seq_len": 1024,
-#     }
-
-#     model = WanTransformer3DModel(**config)
-#     model.eval()
-
-#     # 2. Create debugger and register hooks
-
-
-#     # 3. Prepare inputs
-#     batch_size = 1
-#     num_channels = 16
-#     num_frames = 9
-#     height = 60
-#     width = 104
-#     text_seq_len = 512
-#     text_dim = 4096
-
-#     # Set seed for reproducibility
-#     torch.manual_seed(42)
-
-#     hidden_states = torch.randn(
-#         batch_size, num_channels, num_frames, height, width,
-#         dtype=torch.float32
-#     )
-
-#     timestep = torch.tensor([500], dtype=torch.long)
-
-#     encoder_hidden_states = torch.randn(
-#         batch_size, text_seq_len, text_dim,
-#         dtype=torch.float32
-#     )
-
-#     print("Input shapes:")
-#     print(f"  hidden_states: {hidden_states.shape}")
-#     print(f"  timestep: {timestep.shape}")
-#     print(f"  encoder_hidden_states: {encoder_hidden_states.shape}")
-#     print()
-
-#     # 4. Run forward pass
-#     with torch.no_grad():
-#         output = model(
-#             hidden_states=hidden_states,
-#             timestep=timestep,
-#             encoder_hidden_states=encoder_hidden_states,
-#             encoder_hidden_states_image=None,
-#             return_dict=True,
-#             attention_kwargs=None,
-#         )
-
-#     # 5. Get intermediate outputs
-#     intermediate_outputs = debugger.get_outputs()
-
-#     print("=" * 80)
-#     print("INTERMEDIATE OUTPUTS")
-#     print("=" * 80)
-
-#     # Print all intermediate output shapes
-#     for name, tensor in intermediate_outputs.items():
-#         if isinstance(tensor, torch.Tensor):
-#             print(f"{name:50s} : {tuple(tensor.shape)}")
-
-#     print("=" * 80)
-#     print(f"Final output shape: {output.sample.shape}")
-#     print("=" * 80)
-
-#     # 6. Save outputs for comparison
-#     outputs_dict = {
-#         'inputs': {
-#             'hidden_states': hidden_states.cpu(),
-#             'timestep': timestep.cpu(),
-#             'encoder_hidden_states': encoder_hidden_states.cpu(),
-#         },
-#         'intermediate': intermediate_outputs,
-#         'output': output.sample.cpu(),
-#     }
-
-#     # Save to file
-#     torch.save(outputs_dict, 'wan_transformer_outputs.pt')
-#     print("\n✓ Saved outputs to 'wan_transformer_outputs.pt'")
-
-#     # 7. Clean up
-#     debugger.remove_hooks()
-
-#     return outputs_dict
-
-
-def compare_specific_layers(outputs_dict_diffusers, outputs_dict_yours):
-    """
-    Compare specific layer outputs between two implementations
-    
-    Args:
-        outputs_dict_diffusers: Output dict from WanTransformer3DModel
-        outputs_dict_yours: Output dict from your implementation
-    """
-    print("\n" + "=" * 80)
-    print("COMPARISON RESULTS")
-    print("=" * 80)
-
-    # Compare each intermediate output
-    diffusers_intermediate = outputs_dict_diffusers['intermediate']
-    yours_intermediate = outputs_dict_yours['intermediate']
-
-    for name in diffusers_intermediate.keys():
-        if name not in yours_intermediate:
-            print(f"⚠ {name:50s} : MISSING in your implementation")
-            continue
-
-        diffusers_tensor = diffusers_intermediate[name]
-        yours_tensor = yours_intermediate[name]
-
-        # Check shape match
-        if diffusers_tensor.shape != yours_tensor.shape:
-            print(f"✗ {name:50s} : SHAPE MISMATCH")
-            print(f"    Diffusers: {diffusers_tensor.shape}")
-            print(f"    Yours:     {yours_tensor.shape}")
-            continue
-
-        # Calculate difference metrics
-        abs_diff = torch.abs(diffusers_tensor - yours_tensor)
-        max_diff = abs_diff.max().item()
-        mean_diff = abs_diff.mean().item()
-        rel_diff = (abs_diff / (torch.abs(diffusers_tensor) + 1e-8)).mean().item()
-
-        # Determine if match is good
-        if max_diff < 1e-5:
-            status = "✓ EXACT MATCH"
-        elif max_diff < 1e-3:
-            status = "✓ CLOSE MATCH"
-        elif max_diff < 1e-1:
-            status = "⚠ SLIGHT DIFF"
-        else:
-            status = "✗ LARGE DIFF"
-
-        print(f"{status:15s} {name:50s} : max={max_diff:.2e}, mean={mean_diff:.2e}, rel={rel_diff:.2e}")
-
-    # Compare final output
-    diffusers_output = outputs_dict_diffusers['output']
-    yours_output = outputs_dict_yours['output']
-
-    abs_diff = torch.abs(diffusers_output - yours_output)
-    max_diff = abs_diff.max().item()
-    mean_diff = abs_diff.mean().item()
-
-    print("=" * 80)
-    print(f"Final Output Difference: max={max_diff:.2e}, mean={mean_diff:.2e}")
-    print("=" * 80)
-
 
 if __name__ == "__main__":
     test_dit()
