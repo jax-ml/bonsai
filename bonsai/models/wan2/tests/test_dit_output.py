@@ -221,7 +221,7 @@ def test_dit():
         b_size = time_proj_jax.shape[0]
         d = jax_dit.cfg.hidden_dim
         reshaped_time_emb = time_proj_jax.reshape(b_size, 6, d)
-        modulation = jax.nn.silu(reshaped_time_emb + block.scale_shift_table.value)
+        modulation = reshaped_time_emb + block.scale_shift_table.value
         modulation = modulation.reshape(b_size, -1)
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
 
