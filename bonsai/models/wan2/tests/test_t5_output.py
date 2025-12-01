@@ -17,6 +17,7 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Shapes: torch={torch_emb.shape}, jax={jax_emb.shape}")
     print(f"  Max diff: {np.abs(torch_emb - jax_emb).max():.2e}")
     print(f"  Mean diff: {np.abs(torch_emb - jax_emb).mean():.2e}")
+
     torch_q = torch_model.encoder.block[0].layer[0].SelfAttention.q.weight.detach().cpu().numpy()
     jax_q = np.array(jax_model.encoder.blocks[0].attn.q.kernel.value)
 
@@ -178,10 +179,23 @@ def test_t5_intermediate():
         block.layer[0].register_forward_hook(make_hook(f"block_{i}_attn_output"))
 
         # Hook attention Q, K, V projections
+        block.layer[0].layer_norm.register_forward_hook(make_hook(f"block_{i}_attn_norm"))
         attn = block.layer[0].SelfAttention
         attn.q.register_forward_hook(make_hook(f"block_{i}_q_proj"))
         attn.k.register_forward_hook(make_hook(f"block_{i}_k_proj"))
         attn.v.register_forward_hook(make_hook(f"block_{i}_v_proj"))
+
+        # # Hook to capture position bias (computed inside attention)
+        # def make_pos_bias_hook(block_idx):
+        #     def pos_bias_hook(module, input, output):
+        #         # T5 attention returns (output, position_bias, ...)
+        #         if isinstance(output, tuple) and len(output) > 1:
+        #             pos_bias = output[1]  # position_bias is second return value
+        #             if pos_bias is not None:
+        #                 pytorch_intermediates[f"block_{block_idx}_position_bias"] = pos_bias.detach().cpu()
+        #     return pos_bias_hook
+
+        # attn.register_forward_hook(make_pos_bias_hook(i))
 
         if len(block.layer) > 1:
             block.layer[1].register_forward_hook(make_hook(f"block_{i}_ffn_output"))
@@ -228,6 +242,8 @@ def test_t5_intermediate():
         # Norm
         normed_x_jax = block.norm1(x_jax)
 
+        compare_outputs(normed_x_jax, pytorch_intermediates[f"block_{i}_attn_norm"], f"Block {i} Attention Norm", rtol=1e-5, atol=1e-6)
+
         # Q, K, V projections
         q_jax = block.attn.q(normed_x_jax)
         k_jax = block.attn.k(normed_x_jax)
@@ -250,6 +266,10 @@ def test_t5_intermediate():
                 pos_bias=None,
                 deterministic=True
             )
+            # Compare position bias (only computed in first block)
+            if f"block_{i}_position_bias" in pytorch_intermediates:
+                pos_bias_torch = pytorch_intermediates[f"block_{i}_position_bias"]
+                compare_outputs(position_bias_jax, pos_bias_torch, f"Block {i} Position Bias", rtol=1e-5, atol=1e-6)
         else:
             attn_output, _ = block.attn(
                 x_jax,
