@@ -74,7 +74,7 @@ class T5Attention(nnx.Module):
         n = self.num_heads
         c = self.head_dim
 
-        q = self.q(x.T).reshape(b, -1, n, c)
+        q = self.q(x).reshape(b, -1, n, c)
         k = self.k(context).reshape(b, -1, n, c)
         v = self.v(context).reshape(b, -1, n, c)
 
