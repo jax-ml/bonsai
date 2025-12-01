@@ -7,7 +7,7 @@ from huggingface_hub import snapshot_download
 from bonsai.models.wan2 import params
 from wan.configs import WAN_CONFIGS
 import torch
-from transformers import AutoTokenizer, UMT5EncoderModel, UMT5ForConditionalGeneration
+from transformers import AutoTokenizer, UMT5EncoderModel
 
 def check_weight_loading(jax_model, torch_model):
     torch_emb = torch_model.shared.weight.detach().cpu().numpy()
@@ -128,126 +128,170 @@ def test_t5_encoder():
     # Compare only the valid portion (ignore padding)
     return compare_outputs(jax_output, torch_embeddings, "T5 Encoder Output", rtol=1e-3, atol=1e-4)
 
-def test_t5_e2e():
-    """Test JAX T5 encoder with PyTorch decoder on end-to-end generation task."""
+
+def test_t5_intermediate():
+    """Compare intermediate layer outputs between JAX and PyTorch T5 encoder."""
     print("\n" + "=" * 80)
-    print("TEST 2: T5 E2E (JAX Encoder + PyTorch Decoder)")
+    print("TEST 2: T5 Encoder Intermediate Outputs")
     print("=" * 80)
 
     # Download checkpoint
-    model_ckpt_path = snapshot_download("google/umt5-xxl")
+    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
 
-    # Test prompts
-    test_prompts = [
-        "translate English to Chinese: The house is wonderful.",
-    ]
+    # Test prompt
+    prompt = "A beautiful sunset over the ocean with waves crashing on the shore"
+
+    print(f"\nTest prompt: {prompt}")
+
+    print("\nTokenizing...")
+    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
+    inputs_j = tokenizer(prompt, return_tensors="np", padding="max_length", max_length=512, truncation=True)
+    inputs_p = tokenizer(prompt, return_tensors="pt", padding="max_length", max_length=512, truncation=True)
 
     print("\n[1/3] Loading models...")
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
-
-    # Load JAX encoder
     jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-
-    # Load full PyTorch model (encoder + decoder)
-    pytorch_full_model = UMT5ForConditionalGeneration.from_pretrained(
+    pytorch_t5 = UMT5EncoderModel.from_pretrained(
         model_ckpt_path,
+        subfolder="text_encoder",
         torch_dtype=torch.float32
     )
-    pytorch_full_model.eval()
+    pytorch_t5.eval()
 
-    print("\n[2/3] Running generation tests...")
+    # Register hooks to capture PyTorch intermediate outputs
+    print("\n[2/3] Capturing PyTorch intermediate outputs...")
+    pytorch_intermediates = {}
 
-    for i, prompt in enumerate(test_prompts):
+    def make_hook(name):
+        def hook(module, input, output):
+            if isinstance(output, tuple):
+                pytorch_intermediates[name] = output[0].detach().cpu()
+            else:
+                pytorch_intermediates[name] = output.detach().cpu()
+        return hook
+
+    # Hook embedding
+    pytorch_t5.encoder.embed_tokens.register_forward_hook(make_hook("embeddings"))
+
+    # Hook each block with detailed attention captures
+    for i, block in enumerate(pytorch_t5.encoder.block):
+        block.register_forward_hook(make_hook(f"block_{i}_output"))
+        block.layer[0].register_forward_hook(make_hook(f"block_{i}_attn_output"))
+
+        # Hook attention Q, K, V projections
+        attn = block.layer[0].SelfAttention
+        attn.q.register_forward_hook(make_hook(f"block_{i}_q_proj"))
+        attn.k.register_forward_hook(make_hook(f"block_{i}_k_proj"))
+        attn.v.register_forward_hook(make_hook(f"block_{i}_v_proj"))
+
+        if len(block.layer) > 1:
+            block.layer[1].register_forward_hook(make_hook(f"block_{i}_ffn_output"))
+
+    # Hook final norm
+    pytorch_t5.encoder.final_layer_norm.register_forward_hook(make_hook("final_norm"))
+
+    # Run PyTorch forward
+    with torch.no_grad():
+        pytorch_output = pytorch_t5(inputs_p.input_ids)
+
+    print("\n[3/3] Comparing intermediate outputs...")
+
+    # Convert inputs to JAX
+    input_ids_jax = jnp.array(inputs_j.input_ids)
+
+    # Manual forward pass for JAX to get intermediates
+    # 1. Embeddings
+    x_jax = jax_t5.encoder.token_embedding(input_ids_jax)
+    embeddings_torch = pytorch_intermediates["embeddings"]
+    compare_outputs(x_jax, embeddings_torch, "Token Embeddings", rtol=1e-4, atol=1e-6)
+
+    # 2. Dropout (not comparing, just applying)
+    x_jax = jax_t5.encoder.dropout(x_jax, deterministic=True)
+
+    # 3. Position bias setup (only once)
+    batch_size, seq_len = input_ids_jax.shape
+    position_bias_jax = None
+
+    # 4. Process through blocks
+    num_layers = len(jax_t5.encoder.blocks)
+    print(f"\nComparing {num_layers} transformer blocks...")
+
+    for i in range(min(3, num_layers)):  # Compare first 3 blocks
         print(f"\n{'='*80}")
-        print(f"Test Case {i+1}: {prompt}")
+        print(f"BLOCK {i}")
         print(f"{'='*80}")
 
-        # Tokenize
-        inputs_jax = tokenizer(prompt, return_tensors="np", padding="max_length", max_length=512, truncation=True)
-        inputs_torch = tokenizer(prompt, return_tensors="pt", padding="max_length", max_length=512, truncation=True)
+        block = jax_t5.encoder.blocks[i]
 
-        # ============================================================
-        # Baseline: Full PyTorch model
-        # ============================================================
-        print("\n[Baseline] Full PyTorch model:")
-        with torch.no_grad():
-            pytorch_outputs = pytorch_full_model.generate(
-                input_ids=inputs_torch.input_ids,
-                attention_mask=inputs_torch.attention_mask,
-                max_length=50,
-                num_beams=1,  # Greedy decoding
-                do_sample=False,
+        # Manual attention computation to capture Q, K, V
+        print(f"\n--- Attention Details ---")
+
+        # Norm
+        normed_x_jax = block.attn.norm(x_jax)
+
+        # Q, K, V projections
+        q_jax = block.attn.q(normed_x_jax)
+        k_jax = block.attn.k(normed_x_jax)
+        v_jax = block.attn.v(normed_x_jax)
+
+        # Compare with PyTorch
+        q_torch = pytorch_intermediates[f"block_{i}_q_proj"]
+        k_torch = pytorch_intermediates[f"block_{i}_k_proj"]
+        v_torch = pytorch_intermediates[f"block_{i}_v_proj"]
+
+        compare_outputs(q_jax, q_torch, f"Block {i} Q after Linear", rtol=1e-5, atol=1e-6)
+        compare_outputs(k_jax, k_torch, f"Block {i} K after Linear", rtol=1e-5, atol=1e-6)
+        compare_outputs(v_jax, v_torch, f"Block {i} V after Linear", rtol=1e-5, atol=1e-6)
+
+        # Now run full attention (for comparison)
+        if position_bias_jax is None:
+            attn_output, position_bias_jax = block.attn(
+                x_jax,
+                mask=None,
+                pos_bias=None,
+                deterministic=True
+            )
+        else:
+            attn_output, _ = block.attn(
+                x_jax,
+                mask=None,
+                pos_bias=position_bias_jax,
+                deterministic=True
             )
 
-        pytorch_text = tokenizer.decode(pytorch_outputs[0], skip_special_tokens=True)
-        print(f"  Output: {pytorch_text}")
+        # PyTorch attention output (after layer[0] which includes norm + attn + dropout)
+        attn_torch = pytorch_intermediates[f"block_{i}_attn_output"]
+        compare_outputs(attn_output, attn_torch, f"Block {i} Attention Output", rtol=1e-3, atol=1e-5)
 
-        # ============================================================
-        # Hybrid: JAX encoder + PyTorch decoder
-        # ============================================================
-        print("\n[Hybrid] JAX encoder + PyTorch decoder:")
+        x_jax = attn_output
 
-        # Get encoder hidden states from JAX
-        input_ids_jax = jnp.array(inputs_jax.input_ids)
-        jax_encoder_output = jax_t5(input_ids_jax, deterministic=True)
+        # FFN
+        if hasattr(block, 'ffn'):
+            ffn_output = block.ffn(x_jax, deterministic=True)
+            x_jax = ffn_output
 
-        # Convert to PyTorch
-        encoder_hidden_states = torch.from_numpy(np.array(jax_encoder_output))
+            if f"block_{i}_ffn_output" in pytorch_intermediates:
+                ffn_torch = pytorch_intermediates[f"block_{i}_ffn_output"]
+                compare_outputs(ffn_output, ffn_torch, f"Block {i} FFN Output", rtol=1e-3, atol=1e-5)
 
-        print(f"  JAX encoder output shape: {encoder_hidden_states.shape}")
-        print(f"  JAX encoder output range: [{encoder_hidden_states.min():.4f}, {encoder_hidden_states.max():.4f}]")
+        # Final block output
+        block_torch = pytorch_intermediates[f"block_{i}_output"]
+        compare_outputs(x_jax, block_torch, f"Block {i} Final Output", rtol=1e-3, atol=1e-5)
 
-        # Create encoder outputs object for decoder
-        from transformers.modeling_outputs import BaseModelOutput
-        encoder_outputs = BaseModelOutput(
-            last_hidden_state=encoder_hidden_states
-        )
+    # 5. Final layer norm
+    x_jax = jax_t5.encoder.norm(x_jax)
+    final_norm_torch = pytorch_intermediates["final_norm"]
+    compare_outputs(x_jax, final_norm_torch, "Final Layer Norm", rtol=1e-4, atol=1e-6)
 
-        # Generate using decoder with JAX encoder outputs
-        with torch.no_grad():
-            hybrid_outputs = pytorch_full_model.generate(
-                encoder_outputs=encoder_outputs,
-                attention_mask=inputs_torch.attention_mask,
-                max_length=50,
-                num_beams=1,
-                do_sample=False,
-            )
+    # 6. Final output
+    torch_final = pytorch_output.last_hidden_state
+    compare_outputs(x_jax, torch_final, "Final Output", rtol=1e-3, atol=1e-4)
 
-        hybrid_text = tokenizer.decode(hybrid_outputs[0], skip_special_tokens=True)
-        print(f"  Output: {hybrid_text}")
-
-        # ============================================================
-        # Comparison
-        # ============================================================
-        # print("\n[Comparison]")
-        # if pytorch_text == hybrid_text:
-        #     print("  ✅ Outputs MATCH! JAX encoder is working correctly.")
-        # else:
-        #     print("  ❌ Outputs DIFFER!")
-        #     print(f"    Full PyTorch: {pytorch_text}")
-        #     print(f"    JAX + PyTorch: {hybrid_text}")
-
-        #     # Compare encoder hidden states to diagnose
-        #     with torch.no_grad():
-        #         pytorch_encoder_output = pytorch_full_model.encoder(
-        #             input_ids=inputs_torch.input_ids,
-        #             attention_mask=inputs_torch.attention_mask
-        #         )
-
-        #     pytorch_hidden = pytorch_encoder_output.last_hidden_state.numpy()
-        #     jax_hidden = np.array(jax_encoder_output)
-
-        #     abs_diff = np.abs(pytorch_hidden - jax_hidden)
-        #     print(f"\n  Encoder hidden state comparison:")
-        #     print(f"    Max absolute diff: {abs_diff.max():.2e}")
-        #     print(f"    Mean absolute diff: {abs_diff.mean():.2e}")
-
-    print("\n[3/3] Summary")
-    print("=" * 80)
-    print("E2E test complete. Check outputs above to verify encoder correctness.")
+    print("\n" + "="*80)
+    print("Intermediate comparison complete!")
+    print("="*80)
 
 
 if __name__ == "__main__":
-    # test_t5_encoder()
-    test_t5_e2e()
+    # Uncomment the test you want to run:
+    test_t5_encoder()           # Test final outputs only
+    # test_t5_intermediate()    # Test intermediate layer outputs (detailed)
