@@ -92,8 +92,8 @@ def test_dit():
     batch_size = 1
     num_channels = 16  # in_channels
     num_frames = 9 
-    height = 60      
-    width = 104      
+    height = 30      
+    width = 30      
     text_seq_len = 128  
     text_dim = 4096     # UMT5 hidden dimension
 
