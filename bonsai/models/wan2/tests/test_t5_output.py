@@ -249,4 +249,5 @@ def test_t5_e2e():
 
 
 if __name__ == "__main__":
-    test_t5_encoder()
+    # test_t5_encoder()
+    test_t5_e2e()
