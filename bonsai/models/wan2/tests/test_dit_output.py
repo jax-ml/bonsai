@@ -595,7 +595,7 @@ class WanAttentionDebugger:
                     query, key, value,
                     attn_mask=attention_mask, dropout_p=0.0, is_causal=False,
                     backend=original_processor._attention_backend,
-                    parallel_config=original_processor._parallel_config,
+                    parallel_config=parallel_config,
                 )
 
                 hidden_states = hidden_states.flatten(2, 3)
