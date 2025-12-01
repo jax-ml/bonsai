@@ -513,7 +513,7 @@ def _get_t5_key_mapping():
         # Encoder blocks - Self attention
         r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.q\.weight": (
             r"encoder.blocks.\1.attn.q.kernel",
-            Transform.TRANSPOSE,
+            Transform.NONE,
         ),
         r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.k\.weight": (
             r"encoder.blocks.\1.attn.k.kernel",
