@@ -345,7 +345,7 @@ class Wan2DiT(nnx.Module):
         # Linear(4096 → 1536) → GELU → Linear(1536 → 1536)
         self.text_proj = nnx.Sequential(
             nnx.Linear(cfg.text_embed_dim, cfg.hidden_dim, rngs=rngs),
-            nnx.gelu,
+            nnx.gelu(approximate=True),
             nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs),
         )
 

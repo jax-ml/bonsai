@@ -202,16 +202,109 @@ def test_dit():
     compare_outputs(time_emb_jax, time_emb_torch, "Time Embedding", rtol=1e-3, atol=1e-4)
     compare_outputs(time_proj_jax, time_proj_torch, "Time Projection", rtol=1e-3, atol=1e-4)
 
-    # 5. Process through transformer blocks
+    # 5. Process through transformer blocks with detailed attention comparison
     for i, block in enumerate(jax_dit.blocks):
-        x_jax = block(x_jax, text_embeds_jax, time_proj_jax, rope_state=(rope_freqs, grid_sizes), deterministic=True)
+        print(f"\n{'='*80}")
+        print(f"BLOCK {i} - DETAILED COMPARISON")
+        print(f"{'='*80}")
 
-        # Compare block output (PyTorch is BNCHW, JAX is BND)
+        # Get modulation parameters
+        b_size = time_proj_jax.shape[0]
+        d = jax_dit.cfg.hidden_dim
+        reshaped_time_emb = time_proj_jax.reshape(b_size, 6, d)
+        modulation = jax.nn.silu(reshaped_time_emb + block.scale_shift_table.value)
+        modulation = modulation.reshape(b_size, -1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
+
+        # Self-attention with detailed steps
+        print(f"\n--- Self-Attention ---")
+        norm_x = block.norm1(x_jax)
+        norm_x_modulated = norm_x * (1 + scale_msa[:, None, :]) + shift_msa[:, None, :]
+
+        # Q, K, V projections
+        num_heads = block.self_attn.num_heads
+        head_dim = block.self_attn.head_dim
+        b_size, n = norm_x_modulated.shape[:2]
+
+        q = block.self_attn.q_norm(block.self_attn.q_proj(norm_x_modulated))
+        k = block.self_attn.k_norm(block.self_attn.k_proj(norm_x_modulated))
+        v = block.self_attn.v_proj(norm_x_modulated)
+
+        print(f"Q after norm (before reshape): shape={q.shape}, range=[{q.min():.4f}, {q.max():.4f}]")
+        print(f"K after norm (before reshape): shape={k.shape}, range=[{k.min():.4f}, {k.max():.4f}]")
+        print(f"V (before reshape): shape={v.shape}, range=[{v.min():.4f}, {v.max():.4f}]")
+
+        # Reshape to heads
+        q = q.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
+        k = k.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
+        v = v.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
+
+        print(f"Q after reshape: shape={q.shape}, range=[{q.min():.4f}, {q.max():.4f}]")
+        print(f"K after reshape: shape={k.shape}, range=[{k.min():.4f}, {k.max():.4f}]")
+        print(f"V after reshape: shape={v.shape}, range=[{v.min():.4f}, {v.max():.4f}]")
+
+        # Apply RoPE
+        q_before_rope = q.copy()
+        k_before_rope = k.copy()
+
+        q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
+        q = modeling.rope_apply(q, grid_sizes, rope_freqs)
+        k = modeling.rope_apply(k, grid_sizes, rope_freqs)
+        q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
+
+        print(f"Q after RoPE: shape={q.shape}, range=[{q.min():.4f}, {q.max():.4f}]")
+        print(f"K after RoPE: shape={k.shape}, range=[{k.min():.4f}, {k.max():.4f}]")
+
+        # Attention scores
+        attn_scores = jnp.einsum("bhid,bhjd->bhij", q, k) / jnp.sqrt(head_dim)
+        print(f"Attention scores (before softmax): shape={attn_scores.shape}, range=[{attn_scores.min():.4f}, {attn_scores.max():.4f}]")
+
+        # Attention weights
+        attn_weights = jax.nn.softmax(attn_scores, axis=-1)
+        print(f"Attention weights (after softmax): shape={attn_weights.shape}, range=[{attn_weights.min():.4f}, {attn_weights.max():.4f}]")
+
+        # Attention output
+        attn_out = jnp.einsum("bhij,bhjd->bhid", attn_weights, v)
+        attn_out = attn_out.transpose(0, 2, 1, 3).reshape(b_size, n, -1)
+        print(f"Attention output (before proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
+
+        # Output projection
+        attn_out = block.self_attn.out_proj(attn_out)
+        print(f"Attention output (after proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
+
+        # Compare with PyTorch
+        attn1_output_torch = intermediate_outputs[f'block_{i}_attn1_output']
+        compare_outputs(attn_out, attn1_output_torch, f"Block {i} Attn1 Output", rtol=1e-2, atol=1e-3)
+
+        # Apply gate and residual
+        x_jax = x_jax + gate_msa[:, None, :] * attn_out
+
+        # Cross-attention
+        print(f"\n--- Cross-Attention ---")
+        norm_x = block.norm2(x_jax)
+        cross_out = block.cross_attn(norm_x, text_embeds_jax, deterministic=True)
+
+        attn2_output_torch = intermediate_outputs[f'block_{i}_attn2_output']
+        compare_outputs(cross_out, attn2_output_torch, f"Block {i} Attn2 Output", rtol=1e-2, atol=1e-3)
+
+        x_jax = x_jax + cross_out
+
+        # MLP
+        print(f"\n--- MLP ---")
+        norm_x = block.norm3(x_jax)
+        norm_x_modulated = norm_x * (1 + scale_mlp[:, None, :]) + shift_mlp[:, None, :]
+        mlp_out = block.mlp(norm_x_modulated)
+
+        ffn_output_torch = intermediate_outputs[f'block_{i}_ffn_output']
+        compare_outputs(mlp_out, ffn_output_torch, f"Block {i} FFN Output", rtol=1e-2, atol=1e-3)
+
+        x_jax = x_jax + gate_mlp[:, None, :] * mlp_out
+
+        # Compare final block output
         block_output_torch = intermediate_outputs[f'block_{i}_output']
-        # PyTorch transformer blocks output sequence format (B, N, C) already
-        compare_outputs(x_jax, block_output_torch, f"Block {i} Output", rtol=1e-2, atol=1e-3)
+        compare_outputs(x_jax, block_output_torch, f"Block {i} Final Output", rtol=1e-2, atol=1e-3)
 
-        if i >= 2:  # Only compare first few blocks to avoid too much output
+        if i >= 0:  # Only compare first block in detail
             break
 
     # 6. Final layer
