@@ -239,30 +239,27 @@ def test_dit():
         k = block.self_attn.k_norm(block.self_attn.k_proj(norm_x_modulated))
         v = block.self_attn.v_proj(norm_x_modulated)
 
-        print(f"Q after norm (before reshape): shape={q.shape}, range=[{q.min():.4f}, {q.max():.4f}]")
-        print(f"K after norm (before reshape): shape={k.shape}, range=[{k.min():.4f}, {k.max():.4f}]")
-        print(f"V (before reshape): shape={v.shape}, range=[{v.min():.4f}, {v.max():.4f}]")
+        q_after_norm = states[f'block_{i}_attn1_query_normed'].numpy()
+        k_after_norm = states[f'block_{i}_attn1_key_normed'].numpy()
+
+        compare_outputs(q, q_after_norm, f"Block {i} Attn1 Q after Norm", rtol=1e-5, atol=1e-6)
+        compare_outputs(k, k_after_norm, f"Block {i} Attn1 K after Norm", rtol=1e-5, atol=1e-6)
 
         # Reshape to heads
         q = q.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
         k = k.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
         v = v.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
 
-        print(f"Q after reshape: shape={q.shape}, range=[{q.min():.4f}, {q.max():.4f}]")
-        print(f"K after reshape: shape={k.shape}, range=[{k.min():.4f}, {k.max():.4f}]")
-        print(f"V after reshape: shape={v.shape}, range=[{v.min():.4f}, {v.max():.4f}]")
-
-        # Apply RoPE
-        q_before_rope = q.copy()
-        k_before_rope = k.copy()
-
         q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
         q = modeling.rope_apply(q, grid_sizes, rope_freqs)
         k = modeling.rope_apply(k, grid_sizes, rope_freqs)
         q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
 
-        print(f"Q after RoPE: shape={q.shape}, range=[{q.min():.4f}, {q.max():.4f}]")
-        print(f"K after RoPE: shape={k.shape}, range=[{k.min():.4f}, {k.max():.4f}]")
+        q_after_rope = states[f'block_{i}_attn1_query_rope'].numpy().transpose(0, 2, 1, 3)
+        k_after_rope = states[f'block_{i}_attn1_key_rope'].numpy().transpose(0, 2, 1, 3)
+        
+        compare_outputs(q, q_after_rope, f"Block {i} Attn1 Q after RoPE", rtol=1e-5, atol=1e-6)
+        compare_outputs(k, k_after_rope, f"Block {i} Attn1 K after RoPE", rtol=1e-5, atol=1e-6)
 
         # Attention scores
         attn_scores = jnp.einsum("bhid,bhjd->bhij", q, k) / jnp.sqrt(head_dim)
