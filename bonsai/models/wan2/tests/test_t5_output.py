@@ -313,5 +313,5 @@ def test_t5_intermediate():
 
 if __name__ == "__main__":
     # Uncomment the test you want to run:
-    # test_t5_encoder()           # Test final outputs only
+    test_t5_encoder()           # Test final outputs only
     test_t5_intermediate()    # Test intermediate layer outputs (detailed)
