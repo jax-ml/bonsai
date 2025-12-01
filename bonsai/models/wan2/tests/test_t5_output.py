@@ -262,7 +262,7 @@ def test_t5_intermediate():
 
         # Now run full attention (for comparison)
         if position_bias_jax is None:
-            attn_output, position_bias_jax = block.attn(
+            attn_output = block.attn(
                 x_jax,
                 mask=None,
                 pos_bias=None,
@@ -273,7 +273,7 @@ def test_t5_intermediate():
                 pos_bias_torch = pytorch_intermediates[f"block_{i}_position_bias"]
                 compare_outputs(position_bias_jax, pos_bias_torch, f"Block {i} Position Bias", rtol=1e-5, atol=1e-6)
         else:
-            attn_output, _ = block.attn(
+            attn_output = block.attn(
                 x_jax,
                 mask=None,
                 pos_bias=position_bias_jax,
@@ -409,5 +409,6 @@ def test_t5_e2e():
 
 if __name__ == "__main__":
     # Uncomment the test you want to run:
-    test_t5_encoder()           # Test final outputs only
-    test_t5_intermediate()    # Test intermediate layer outputs (detailed)
+    # test_t5_encoder()           # Test final outputs only
+    # test_t5_intermediate()    # Test intermediate layer outputs (detailed)
+    test_t5_e2e()              # End-to-end generation test
