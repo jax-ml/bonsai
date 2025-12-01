@@ -584,6 +584,8 @@ class WanAttentionDebugger:
 
                 # 6. Compute main attention
                 from diffusers.models.attention_dispatch import dispatch_attention_fn
+                backend = getattr(original_processor, '_attention_backend', None)
+                parallel_config = getattr(original_processor, '_parallel_config', None)
 
                 # Note: We can't easily capture attention weights with dispatch_attention_fn
                 # because it uses optimized kernels (flash attention, etc.)
