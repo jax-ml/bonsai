@@ -263,7 +263,7 @@ class WanAttentionBlock(nnx.Module):
 
         # Reshape time embedding and add learnable modulation
         reshaped_time_emb = time_emb.reshape(b, 6, d)
-        modulation = nnx.silu(reshaped_time_emb + self.scale_shift_table.value)
+        modulation = reshaped_time_emb + self.scale_shift_table.value
         modulation = modulation.reshape(b, -1)  # [B, 6*D]
 
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
