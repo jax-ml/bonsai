@@ -99,6 +99,8 @@ def test_dit():
 
     debugger = WanTransformerDebugger(transformer)
     debugger.register_hooks()
+    debugger_attn = WanAttentionDebugger(transformer)
+    debugger_attn.register_attention_hooks(block_indices=[0])
 
     # Create dummy inputs
     hidden_states = torch.randn(
@@ -132,15 +134,22 @@ def test_dit():
 
     # 5. Get intermediate outputs
     intermediate_outputs = debugger.get_outputs()
+    states = debugger_attn.get_attention_states()
 
     print("=" * 80)
     print("INTERMEDIATE OUTPUTS")
     print("=" * 80)
 
-    # Print all intermediate output shapes
-    for name, tensor in intermediate_outputs.items():
-        if isinstance(tensor, torch.Tensor):
-            print(f"{name:50s} : {tuple(tensor.shape)}")
+    # # Print all intermediate output shapes
+    # for name, tensor in intermediate_outputs.items():
+    #     if isinstance(tensor, torch.Tensor):
+    #         print(f"{name:50s} : {tuple(tensor.shape)}")
+
+    for name, tensor in states.items():
+        print(f"{name:50s}: {tuple(tensor.shape)}")
+
+    # Restore original processors
+    debugger_attn.restore_processors()
 
     # Manual forward pass with intermediate comparisons
     print("\n" + "=" * 80)
@@ -436,6 +445,317 @@ class WanTransformerDebugger:
         """Clear stored outputs"""
         self.intermediate_outputs = OrderedDict()
 
+class WanAttentionDebugger:
+    """Capture internal attention states (Q, K, V, attention scores, etc.)"""
+
+    def __init__(self, model):
+        self.model = model
+        self.attention_states = OrderedDict()
+        self.hooks = []
+        self.original_processors = {}
+
+    def register_attention_hooks(self, block_indices=None):
+        """
+        Register hooks to capture attention internal states.
+        
+        Args:
+            block_indices: List of block indices to hook, or None for all blocks
+        """
+        if block_indices is None:
+            block_indices = range(len(self.model.blocks))
+
+        for i in block_indices:
+            block = self.model.blocks[i]
+
+            # Hook self-attention (attn1)
+            self._hook_attention_module(block.attn1, f'block_{i}_attn1')
+
+            # Hook cross-attention (attn2)
+            self._hook_attention_module(block.attn2, f'block_{i}_attn2')
+
+    def _hook_attention_module(self, attn_module, prefix):
+        """Hook a single attention module to capture Q, K, V, and attention outputs"""
+
+        # Save original processor
+        self.original_processors[prefix] = attn_module.processor
+
+        # Create custom processor that captures intermediates
+        original_processor = attn_module.processor
+        attention_states = self.attention_states
+
+        class InstrumentedProcessor:
+            """Wrapper processor that captures intermediate values"""
+
+            def __call__(
+                self,
+                attn,
+                hidden_states,
+                encoder_hidden_states=None,
+                attention_mask=None,
+                rotary_emb=None,
+                **kwargs
+            ):
+                # Get encoder hidden states
+                encoder_hidden_states_img = None
+                if attn.add_k_proj is not None and encoder_hidden_states is not None:
+                    image_context_length = encoder_hidden_states.shape[1] - 512
+                    encoder_hidden_states_img = encoder_hidden_states[:, :image_context_length]
+                    encoder_hidden_states = encoder_hidden_states[:, image_context_length:]
+
+                # 1. Capture Q, K, V projections (before normalization)
+                if encoder_hidden_states is None:
+                    encoder_hidden_states = hidden_states
+
+                if attn.fused_projections:
+                    if attn.cross_attention_dim_head is None:
+                        query, key, value = attn.to_qkv(hidden_states).chunk(3, dim=-1)
+                    else:
+                        query = attn.to_q(hidden_states)
+                        key, value = attn.to_kv(encoder_hidden_states).chunk(2, dim=-1)
+                else:
+                    query = attn.to_q(hidden_states)
+                    key = attn.to_k(encoder_hidden_states)
+                    value = attn.to_v(encoder_hidden_states)
+
+                attention_states[f'{prefix}_query_raw'] = query.detach().cpu()
+                attention_states[f'{prefix}_key_raw'] = key.detach().cpu()
+                attention_states[f'{prefix}_value_raw'] = value.detach().cpu()
+
+                # 2. Capture after normalization
+                query = attn.norm_q(query)
+                key = attn.norm_k(key)
+
+                attention_states[f'{prefix}_query_normed'] = query.detach().cpu()
+                attention_states[f'{prefix}_key_normed'] = key.detach().cpu()
+
+                # 3. Reshape to heads
+                query = query.unflatten(2, (attn.heads, -1))
+                key = key.unflatten(2, (attn.heads, -1))
+                value = value.unflatten(2, (attn.heads, -1))
+
+                attention_states[f'{prefix}_query_heads'] = query.detach().cpu()
+                attention_states[f'{prefix}_key_heads'] = key.detach().cpu()
+                attention_states[f'{prefix}_value_heads'] = value.detach().cpu()
+
+                # 4. Capture after RoPE (if applied)
+                if rotary_emb is not None:
+                    def apply_rotary_emb(hidden_states, freqs_cos, freqs_sin):
+                        x1, x2 = hidden_states.unflatten(-1, (-1, 2)).unbind(-1)
+                        cos = freqs_cos[..., 0::2]
+                        sin = freqs_sin[..., 1::2]
+                        out = torch.empty_like(hidden_states)
+                        out[..., 0::2] = x1 * cos - x2 * sin
+                        out[..., 1::2] = x1 * sin + x2 * cos
+                        return out.type_as(hidden_states)
+
+                    query = apply_rotary_emb(query, *rotary_emb)
+                    key = apply_rotary_emb(key, *rotary_emb)
+
+                    attention_states[f'{prefix}_query_rope'] = query.detach().cpu()
+                    attention_states[f'{prefix}_key_rope'] = key.detach().cpu()
+
+                # 5. Handle I2V additional K, V
+                hidden_states_img = None
+                if encoder_hidden_states_img is not None:
+                    if attn.fused_projections:
+                        key_img, value_img = attn.to_added_kv(encoder_hidden_states_img).chunk(2, dim=-1)
+                    else:
+                        key_img = attn.add_k_proj(encoder_hidden_states_img)
+                        value_img = attn.add_v_proj(encoder_hidden_states_img)
+
+                    key_img = attn.norm_added_k(key_img)
+                    key_img = key_img.unflatten(2, (attn.heads, -1))
+                    value_img = value_img.unflatten(2, (attn.heads, -1))
+
+                    attention_states[f'{prefix}_key_img'] = key_img.detach().cpu()
+                    attention_states[f'{prefix}_value_img'] = value_img.detach().cpu()
+
+                    # Compute image attention (for I2V)
+                    from diffusers.models.attention_dispatch import dispatch_attention_fn
+                    hidden_states_img = dispatch_attention_fn(
+                        query, key_img, value_img,
+                        attn_mask=None, dropout_p=0.0, is_causal=False,
+                        backend=original_processor._attention_backend,
+                        parallel_config=original_processor._parallel_config,
+                    )
+                    hidden_states_img = hidden_states_img.flatten(2, 3)
+
+                    attention_states[f'{prefix}_img_attention_output'] = hidden_states_img.detach().cpu()
+
+                # 6. Compute main attention
+                from diffusers.models.attention_dispatch import dispatch_attention_fn
+
+                # Note: We can't easily capture attention weights with dispatch_attention_fn
+                # because it uses optimized kernels (flash attention, etc.)
+                # For debugging attention weights, we'd need to use manual computation
+
+                hidden_states = dispatch_attention_fn(
+                    query, key, value,
+                    attn_mask=attention_mask, dropout_p=0.0, is_causal=False,
+                    backend=original_processor._attention_backend,
+                    parallel_config=original_processor._parallel_config,
+                )
+
+                hidden_states = hidden_states.flatten(2, 3)
+                hidden_states = hidden_states.type_as(query)
+
+                attention_states[f'{prefix}_attention_output'] = hidden_states.detach().cpu()
+
+                # 7. Combine with image attention if present
+                if hidden_states_img is not None:
+                    hidden_states = hidden_states + hidden_states_img
+                    attention_states[f'{prefix}_combined_output'] = hidden_states.detach().cpu()
+
+                # 8. Output projection
+                hidden_states = attn.to_out[0](hidden_states)
+                attention_states[f'{prefix}_output_proj'] = hidden_states.detach().cpu()
+
+                hidden_states = attn.to_out[1](hidden_states)  # Dropout
+                attention_states[f'{prefix}_final_output'] = hidden_states.detach().cpu()
+
+                return hidden_states
+
+        # Replace processor
+        attn_module.set_processor(InstrumentedProcessor())
+
+    def register_attention_weight_hooks(self, block_indices=None):
+        """
+        Capture actual attention weights (scores).
+        Warning: This uses manual attention computation, not optimized kernels.
+        """
+        if block_indices is None:
+            block_indices = range(len(self.model.blocks))
+
+        for i in block_indices:
+            block = self.model.blocks[i]
+            self._hook_attention_with_weights(block.attn1, f'block_{i}_attn1')
+            self._hook_attention_with_weights(block.attn2, f'block_{i}_attn2')
+
+    def _hook_attention_with_weights(self, attn_module, prefix):
+        """Hook that computes attention manually to capture weights"""
+
+        attention_states = self.attention_states
+
+        class WeightCapturingProcessor:
+            def __call__(self, attn, hidden_states, encoder_hidden_states=None, 
+                        attention_mask=None, rotary_emb=None, **kwargs):
+
+                # [Same Q, K, V projection code as above...]
+                # ... (omitted for brevity)
+
+                # Manual attention computation
+                import math
+
+                # Scaled dot-product attention
+                scale = 1.0 / math.sqrt(query.shape[-1])
+
+                # (B, seq_q, heads, head_dim) @ (B, seq_k, heads, head_dim).T
+                # -> (B, heads, seq_q, seq_k)
+                attn_weights = torch.einsum('bqhd,bkhd->bhqk', query, key) * scale
+
+                attention_states[f'{prefix}_attention_scores'] = attn_weights.detach().cpu()
+
+                # Apply mask if present
+                if attention_mask is not None:
+                    attn_weights = attn_weights + attention_mask
+
+                # Softmax
+                attn_weights = torch.softmax(attn_weights, dim=-1)
+
+                attention_states[f'{prefix}_attention_weights'] = attn_weights.detach().cpu()
+
+                # Apply attention to values
+                # (B, heads, seq_q, seq_k) @ (B, seq_k, heads, head_dim)
+                hidden_states = torch.einsum('bhqk,bkhd->bqhd', attn_weights, value)
+
+                # Continue with output projection...
+                hidden_states = hidden_states.flatten(2, 3)
+                hidden_states = attn.to_out[0](hidden_states)
+                hidden_states = attn.to_out[1](hidden_states)
+
+                return hidden_states
+
+        attn_module.set_processor(WeightCapturingProcessor())
+
+    def restore_processors(self):
+        """Restore original attention processors"""
+        for prefix, original_processor in self.original_processors.items():
+            # Parse prefix to get module
+            parts = prefix.split('_')
+            block_idx = int(parts[1])
+            attn_name = parts[2]
+
+            if attn_name == 'attn1':
+                self.model.blocks[block_idx].attn1.set_processor(original_processor)
+            elif attn_name == 'attn2':
+                self.model.blocks[block_idx].attn2.set_processor(original_processor)
+
+    def get_attention_states(self):
+        """Get all captured attention states"""
+        return self.attention_states
+
+    def clear_states(self):
+        """Clear captured states"""
+        self.attention_states = OrderedDict()
+
+
+def test_attention_hooks():
+    """Test attention hooks"""
+
+    # Create small model for testing
+    config = {
+        "patch_size": (1, 2, 2),
+        "num_attention_heads": 4,  # Smaller for testing
+        "attention_head_dim": 64,
+        "in_channels": 16,
+        "out_channels": 16,
+        "text_dim": 512,
+        "freq_dim": 256,
+        "ffn_dim": 512,
+        "num_layers": 2,  # Just 2 layers for testing
+        "cross_attn_norm": True,
+        "qk_norm": "rms_norm_across_heads",
+        "eps": 1e-6,
+        "rope_max_seq_len": 1024,
+    }
+
+    model = WanTransformer3DModel(**config)
+    model.eval()
+
+    # Create debugger
+    debugger = WanAttentionDebugger(model)
+
+    # Register hooks for first block only
+    debugger.register_attention_hooks(block_indices=[0])
+
+    # Prepare inputs
+    torch.manual_seed(42)
+    hidden_states = torch.randn(1, 16, 5, 20, 20)
+    timestep = torch.tensor([500])
+    encoder_hidden_states = torch.randn(1, 512, 512)
+
+    print("Running forward pass...")
+    with torch.no_grad():
+        output = model(
+            hidden_states=hidden_states,
+            timestep=timestep,
+            encoder_hidden_states=encoder_hidden_states,
+        )
+
+    # Get captured states
+    states = debugger.get_attention_states()
+
+    print("\n" + "=" * 80)
+    print("CAPTURED ATTENTION STATES")
+    print("=" * 80)
+
+    for name, tensor in states.items():
+        print(f"{name:50s}: {tuple(tensor.shape)}")
+
+    # Restore original processors
+    debugger.restore_processors()
+
+    return states
 if __name__ == "__main__":
     test_dit()
 
