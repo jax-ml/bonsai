@@ -235,8 +235,16 @@ def test_dit():
         head_dim = block.self_attn.head_dim
         b_size, n = norm_x_modulated.shape[:2]
 
-        q = block.self_attn.q_norm(block.self_attn.q_proj(norm_x_modulated))
-        k = block.self_attn.k_norm(block.self_attn.k_proj(norm_x_modulated))
+        q_raw_jax = block.self_attn.q_proj(norm_x_modulated)
+        k_raw_jax = block.self_attn.k_proj(norm_x_modulated)
+        q_raw = states[f'block_{i}_attn1_query_raw'].numpy()
+        k_raw = states[f'block_{i}_attn1_key_raw'].numpy()
+
+        compare_outputs(q_raw_jax, q_raw, f"Block {i} Attn1 Q raw", rtol=1e-5, atol=1e-6)
+        compare_outputs(k_raw_jax, k_raw, f"Block {i} Attn1 K raw", rtol=1e-5, atol=1e-6)
+
+        q = block.self_attn.q_norm(q_raw_jax)
+        k = block.self_attn.k_norm(k_raw_jax)
         v = block.self_attn.v_proj(norm_x_modulated)
 
         q_after_norm = states[f'block_{i}_attn1_query_normed'].numpy()
