@@ -576,7 +576,6 @@ class WanAttentionDebugger:
                         query, key_img, value_img,
                         attn_mask=None, dropout_p=0.0, is_causal=False,
                         backend=original_processor._attention_backend,
-                        parallel_config=original_processor._parallel_config,
                     )
                     hidden_states_img = hidden_states_img.flatten(2, 3)
 
@@ -584,8 +583,6 @@ class WanAttentionDebugger:
 
                 # 6. Compute main attention
                 from diffusers.models.attention_dispatch import dispatch_attention_fn
-                backend = getattr(original_processor, '_attention_backend', None)
-                parallel_config = getattr(original_processor, '_parallel_config', None)
 
                 # Note: We can't easily capture attention weights with dispatch_attention_fn
                 # because it uses optimized kernels (flash attention, etc.)
@@ -595,7 +592,6 @@ class WanAttentionDebugger:
                     query, key, value,
                     attn_mask=attention_mask, dropout_p=0.0, is_causal=False,
                     backend=original_processor._attention_backend,
-                    parallel_config=parallel_config,
                 )
 
                 hidden_states = hidden_states.flatten(2, 3)
