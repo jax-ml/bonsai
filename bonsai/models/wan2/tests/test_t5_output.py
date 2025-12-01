@@ -226,7 +226,7 @@ def test_t5_intermediate():
         print(f"\n--- Attention Details ---")
 
         # Norm
-        normed_x_jax = block.attn.norm(x_jax)
+        normed_x_jax = block.norm1(x_jax)
 
         # Q, K, V projections
         q_jax = block.attn.q(normed_x_jax)
