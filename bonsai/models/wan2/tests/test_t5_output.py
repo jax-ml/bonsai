@@ -7,7 +7,9 @@ from huggingface_hub import snapshot_download
 from bonsai.models.wan2 import params
 from wan.configs import WAN_CONFIGS
 import torch
-from transformers import AutoTokenizer, UMT5EncoderModel
+from transformers import AutoTokenizer, UMT5EncoderModel, UMT5ForConditionalGeneration
+from torch import nn
+
 
 def check_weight_loading(jax_model, torch_model):
     torch_emb = torch_model.shared.weight.detach().cpu().numpy()
@@ -309,6 +311,100 @@ def test_t5_intermediate():
     print("\n" + "="*80)
     print("Intermediate comparison complete!")
     print("="*80)
+
+def test_t5_e2e():
+    """Test JAX T5 encoder with PyTorch decoder on end-to-end generation task."""
+    print("\n" + "=" * 80)
+    print("TEST 2: T5 E2E (JAX Encoder + PyTorch Decoder)")
+    print("=" * 80)
+
+    # Download checkpoint
+    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+
+    # Test prompts
+    test_prompts = [
+        "translate English to Chinese: The house is wonderful.",
+    ]
+
+    print("\n[1/3] Loading models...")
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
+
+    # Load JAX encoder
+    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
+
+    # Load full PyTorch model (encoder + decoder)
+    pytorch_full_model = UMT5ForConditionalGeneration.from_pretrained(
+        model_ckpt_path,
+        subfolder="text_encoder",
+        torch_dtype=torch.float32
+    )
+    pytorch_full_model.eval()
+
+    print("\n[2/3] Running generation tests...")
+
+    for i, prompt in enumerate(test_prompts):
+        print(f"\n{'='*80}")
+        print(f"Test Case {i+1}: {prompt}")
+        print(f"{'='*80}")
+
+        # Tokenize
+        inputs_jax = tokenizer(prompt, return_tensors="np", padding="max_length", max_length=512, truncation=True)
+        inputs_torch = tokenizer(prompt, return_tensors="pt", padding="max_length", max_length=512, truncation=True)
+
+        # ============================================================
+        # Baseline: Full PyTorch model
+        # ============================================================
+        print("\n[Baseline] Full PyTorch model:")
+        with torch.no_grad():
+            pytorch_outputs = pytorch_full_model.generate(
+                input_ids=inputs_torch.input_ids,
+                attention_mask=inputs_torch.attention_mask,
+                max_length=50,
+                num_beams=1,  # Greedy decoding
+                do_sample=False,
+            )
+
+        pytorch_text = tokenizer.decode(pytorch_outputs[0], skip_special_tokens=True)
+        print(f"  Output: {pytorch_text}")
+
+        # ============================================================
+        # Hybrid: JAX encoder + PyTorch decoder
+        # ============================================================
+        print("\n[Hybrid] JAX encoder + PyTorch decoder:")
+
+        # Get encoder hidden states from JAX
+        input_ids_jax = jnp.array(inputs_jax.input_ids)
+        jax_encoder_output = jax_t5(input_ids_jax, deterministic=True)
+
+        # Convert to PyTorch
+        encoder_hidden_states = torch.from_numpy(np.array(jax_encoder_output))
+
+        print(f"  JAX encoder output shape: {encoder_hidden_states.shape}")
+        print(f"  JAX encoder output range: [{encoder_hidden_states.min():.4f}, {encoder_hidden_states.max():.4f}]")
+
+        # Create encoder outputs object for decoder
+        from transformers.modeling_outputs import BaseModelOutput
+        encoder_outputs = BaseModelOutput(
+            last_hidden_state=encoder_hidden_states
+        )
+
+        # Generate using decoder with JAX encoder outputs
+        with torch.no_grad():
+            hybrid_outputs = pytorch_full_model.generate(
+                encoder_outputs=encoder_outputs,
+                attention_mask=inputs_torch.attention_mask,
+                max_length=50,
+                num_beams=1,
+                do_sample=False,
+            )
+
+        hybrid_text = tokenizer.decode(hybrid_outputs[0], skip_special_tokens=True)
+        print(f"  Output: {hybrid_text}")
+
+    print("\n[3/3] Summary")
+    print("=" * 80)
+    print("E2E test complete. Check outputs above to verify encoder correctness.")
 
 
 if __name__ == "__main__":

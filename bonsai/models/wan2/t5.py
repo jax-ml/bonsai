@@ -17,6 +17,9 @@ from typing import Optional
 import jax
 import jax.numpy as jnp
 from flax import nnx
+from flax.typing import (
+    PrecisionLike,
+)
 from jaxtyping import Array
 
 
@@ -48,10 +51,10 @@ class T5Attention(nnx.Module):
         self.head_dim = dim_attn // num_heads
 
         # Linear projections
-        self.q = nnx.Linear(dim, dim_attn, use_bias=False, rngs=rngs)
-        self.k = nnx.Linear(dim, dim_attn, use_bias=False, rngs=rngs)
-        self.v = nnx.Linear(dim, dim_attn, use_bias=False, rngs=rngs)
-        self.o = nnx.Linear(dim_attn, dim, use_bias=False, rngs=rngs)
+        self.q = nnx.Linear(dim, dim_attn, use_bias=False, precision=PrecisionLike.HIGHEST, rngs=rngs)
+        self.k = nnx.Linear(dim, dim_attn, use_bias=False, precision=PrecisionLike.HIGHEST, rngs=rngs)
+        self.v = nnx.Linear(dim, dim_attn, use_bias=False, precision=PrecisionLike.HIGHEST, rngs=rngs)
+        self.o = nnx.Linear(dim_attn, dim, use_bias=False, precision=PrecisionLike.HIGHEST, rngs=rngs)
         self.dropout = nnx.Dropout(dropout, rngs=rngs)
 
     def __call__(
@@ -107,9 +110,9 @@ class T5FeedForward(nnx.Module):
         self.dim = dim
         self.dim_ffn = dim_ffn
 
-        self.gate = nnx.Linear(dim, dim_ffn, use_bias=False, rngs=rngs)
-        self.fc1 = nnx.Linear(dim, dim_ffn, use_bias=False, rngs=rngs)
-        self.fc2 = nnx.Linear(dim_ffn, dim, use_bias=False, rngs=rngs)
+        self.gate = nnx.Linear(dim, dim_ffn, use_bias=False, precision=PrecisionLike.HIGHEST, rngs=rngs)
+        self.fc1 = nnx.Linear(dim, dim_ffn, use_bias=False, precision=PrecisionLike.HIGHEST, rngs=rngs)
+        self.fc2 = nnx.Linear(dim_ffn, dim, use_bias=False, precision=PrecisionLike.HIGHEST, rngs=rngs)
         self.dropout = nnx.Dropout(dropout, rngs=rngs)
 
     def __call__(self, x: Array, deterministic: bool = True) -> Array:
