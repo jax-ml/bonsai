@@ -16,4 +16,4 @@ run: |
   uv pip install -e .
   uv pip install -r requirements.txt
   cd bonsai/models/wan2/tests
-  python test_dit_output.py
+  python test_t5_output.py
