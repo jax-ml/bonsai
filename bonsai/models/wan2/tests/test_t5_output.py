@@ -98,7 +98,7 @@ def test_t5_encoder():
     print("TEST 1: T5 Encoder (UMT5-XXL)")
     print("=" * 80)
     # Download checkpoint
-    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    model_ckpt_path = snapshot_download("google/umt5-xxl")
 
     # Test prompt
     prompt = "A beautiful sunset over the ocean with waves crashing on the shore"
