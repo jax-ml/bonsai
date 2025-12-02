@@ -33,6 +33,7 @@ from typing import Optional, Tuple
 import jax
 import jax.numpy as jnp
 from flax import nnx
+from jax.lax import Precision
 from jaxtyping import Array
 
 
@@ -159,10 +160,10 @@ class MultiHeadAttention(nnx.Module):
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.num_heads, self.head_dim = cfg.num_heads, cfg.head_dim
-        self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
-        self.k_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
-        self.v_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
-        self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
+        self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
+        self.k_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
+        self.v_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
+        self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
         self.q_norm = nnx.RMSNorm(cfg.hidden_dim, rngs=rngs)
         self.k_norm = nnx.RMSNorm(cfg.hidden_dim, rngs=rngs)
 
@@ -339,14 +340,15 @@ class Wan2DiT(nnx.Module):
             padding="VALID",
             use_bias=True,
             rngs=rngs,
+            precision=Precision.HIGHEST,
         )
 
         # Text embedding projection: T5 (4096) → DiT (1536)
         # Linear(4096 → 1536) → GELU → Linear(1536 → 1536)
         self.text_proj = nnx.Sequential(
-            nnx.Linear(cfg.text_embed_dim, cfg.hidden_dim, rngs=rngs),
+            nnx.Linear(cfg.text_embed_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST),
             nnx.gelu,
-            nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs),
+            nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST),
         )
 
         self.time_embed = TimestepEmbedding(cfg, rngs=rngs)
