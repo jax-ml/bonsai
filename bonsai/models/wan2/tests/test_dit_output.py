@@ -245,9 +245,9 @@ def test_dit():
         attn_out = block.self_attn(norm_x_modulated, deterministic=True, rope_state=(rope_freqs, grid_sizes))
 
         # # Q, K, V projections
-        # num_heads = block.self_attn.num_heads
-        # head_dim = block.self_attn.head_dim
-        # b_size, n = norm_x_modulated.shape[:2]
+        num_heads = block.self_attn.num_heads
+        head_dim = block.self_attn.head_dim
+        b_size, n = norm_x_modulated.shape[:2]
 
         # q_raw_jax = block.self_attn.q_proj(norm_x_modulated)
         # k_raw_jax = block.self_attn.k_proj(norm_x_modulated)
@@ -314,8 +314,9 @@ def test_dit():
         b, n, m = norm_x.shape[0], norm_x.shape[1], text_embeds_jax.shape[1]
         q_norm = block.cross_attn.q_norm(block.cross_attn.q_proj(norm_x))
         compare_outputs(q_norm, intermediate_outputs[f'block_{i}_attn2_query_normed'], f"Block {i} Attn2 Q after Norm", rtol=1e-5, atol=1e-6)
-        k_raw, v_raw = block.cross_attn.kv_proj(text_embeds_jax)
-        k_norm = block.cross_attn.k_norm(k_raw)
+        kv = block.cross_attn.kv_proj(text_embeds_jax).reshape(b, m, 2, num_heads, head_dim)
+        k, v = kv[:, :, 0], kv[:, :, 1]
+        k_norm = block.cross_attn.k_norm(k)
         compare_outputs(k_norm, intermediate_outputs[f'block_{i}_attn2_key_normed'], f"Block {i} Attn2 K after Norm", rtol=1e-5, atol=1e-6)
 
         cross_out = block.cross_attn(norm_x, text_embeds_jax, deterministic=True)
