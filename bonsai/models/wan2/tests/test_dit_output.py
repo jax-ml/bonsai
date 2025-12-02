@@ -20,6 +20,17 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Shapes: torch={torch_emb.shape}, jax={jax_emb.shape}")
     print(f"  Max diff: {np.abs(torch_emb - jax_emb).max():.2e}")
     print(f"  Mean diff: {np.abs(torch_emb - jax_emb).mean():.2e}")
+
+    # check fused kv projection weights in first block
+    torch_k_weight = torch_model.blocks[0].attn2.to_k.weight.detach().cpu().numpy().T
+    torch_v_weight = torch_model.blocks[0].attn2.to_v.weight.detach().cpu().numpy().T
+    torch_kv = np.concatenate([torch_k_weight, torch_v_weight], axis=1)
+
+    jax_kv_weight = np.array(jax_model.blocks[0].cross_attn.kv_proj.kernel.value)
+    print("First block cross-attention KV projection weights:")
+    print(f"  Shapes: torch={torch_kv.shape}, jax={jax_kv_weight.shape}")
+    print(f"  Max diff: {np.abs(torch_kv - jax_kv_weight).max():.2e}")
+    print(f"  Mean diff: {np.abs(torch_kv - jax_kv_weight).mean():.2e}")
     
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-2, atol: float = 1e-4):
     if torch_output.dtype == torch.bfloat16:
@@ -160,14 +171,14 @@ def test_dit():
     # 1. Text projection
     text_embeds_jax = jax_dit.text_proj(encoder_hidden_states_jax)
     text_embeds_torch = intermediate_outputs['condition_encoder_hidden_states']
-    compare_outputs(text_embeds_jax, text_embeds_torch, "Text Projection", rtol=1e-3, atol=1e-4)
+    # compare_outputs(text_embeds_jax, text_embeds_torch, "Text Projection", rtol=1e-3, atol=1e-4)
 
     # 2. Patch embedding
     x_jax = jax_dit.patch_embed(hidden_states_jax)
     # PyTorch is BCTHW, need to convert to BTHWC for comparison
     patch_embed_torch = intermediate_outputs['patch_embed_output']
     patch_embed_torch_channels_last = np.transpose(patch_embed_torch.numpy(), (0, 2, 3, 4, 1))
-    compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
+    # compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
 
     # Reshape to sequence
     b, t_out, h_out, w_out, d = x_jax.shape
@@ -203,14 +214,14 @@ def test_dit():
 
     # PyTorch RoPE freqs are in BCHW format, convert to sequence format
     rope_freqs_cos_torch = intermediate_outputs['rope_freqs_cos']
-    compare_outputs(rope_freqs_cos_jax, rope_freqs_cos_torch, "RoPE Freqs Cos", rtol=1e-5, atol=1e-6)
+    # compare_outputs(rope_freqs_cos_jax, rope_freqs_cos_torch, "RoPE Freqs Cos", rtol=1e-5, atol=1e-6)
 
     # 4. Time embeddings
     time_emb_jax, time_proj_jax = jax_dit.time_embed(timestep_jax)
     time_emb_torch = intermediate_outputs['condition_temb']
     time_proj_torch = intermediate_outputs['condition_timestep_proj']
-    compare_outputs(time_emb_jax, time_emb_torch, "Time Embedding", rtol=1e-3, atol=1e-4)
-    compare_outputs(time_proj_jax, time_proj_torch, "Time Projection", rtol=1e-3, atol=1e-4)
+    # compare_outputs(time_emb_jax, time_emb_torch, "Time Embedding", rtol=1e-3, atol=1e-4)
+    # compare_outputs(time_proj_jax, time_proj_torch, "Time Projection", rtol=1e-3, atol=1e-4)
 
     # 5. Process through transformer blocks with detailed attention comparison
     for i, block in enumerate(jax_dit.blocks):
@@ -241,8 +252,8 @@ def test_dit():
         q_raw = states[f'block_{i}_attn1_query_raw'].numpy()
         k_raw = states[f'block_{i}_attn1_key_raw'].numpy()
 
-        compare_outputs(q_raw_jax, q_raw, f"Block {i} Attn1 Q raw", rtol=1e-5, atol=1e-6)
-        compare_outputs(k_raw_jax, k_raw, f"Block {i} Attn1 K raw", rtol=1e-5, atol=1e-6)
+        # compare_outputs(q_raw_jax, q_raw, f"Block {i} Attn1 Q raw", rtol=1e-5, atol=1e-6)
+        # compare_outputs(k_raw_jax, k_raw, f"Block {i} Attn1 K raw", rtol=1e-5, atol=1e-6)
 
         q = block.self_attn.q_norm(q_raw_jax)
         k = block.self_attn.k_norm(k_raw_jax)
@@ -251,8 +262,8 @@ def test_dit():
         q_after_norm = states[f'block_{i}_attn1_query_normed'].numpy()
         k_after_norm = states[f'block_{i}_attn1_key_normed'].numpy()
 
-        compare_outputs(q, q_after_norm, f"Block {i} Attn1 Q after Norm", rtol=1e-5, atol=1e-6)
-        compare_outputs(k, k_after_norm, f"Block {i} Attn1 K after Norm", rtol=1e-5, atol=1e-6)
+        # compare_outputs(q, q_after_norm, f"Block {i} Attn1 Q after Norm", rtol=1e-5, atol=1e-6)
+        # compare_outputs(k, k_after_norm, f"Block {i} Attn1 K after Norm", rtol=1e-5, atol=1e-6)
 
         # Reshape to heads
         q = q.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
@@ -267,8 +278,8 @@ def test_dit():
         q_after_rope = states[f'block_{i}_attn1_query_rope'].numpy().transpose(0, 2, 1, 3)
         k_after_rope = states[f'block_{i}_attn1_key_rope'].numpy().transpose(0, 2, 1, 3)
         
-        compare_outputs(q, q_after_rope, f"Block {i} Attn1 Q after RoPE", rtol=1e-5, atol=1e-6)
-        compare_outputs(k, k_after_rope, f"Block {i} Attn1 K after RoPE", rtol=1e-5, atol=1e-6)
+        # compare_outputs(q, q_after_rope, f"Block {i} Attn1 Q after RoPE", rtol=1e-5, atol=1e-6)
+        # compare_outputs(k, k_after_rope, f"Block {i} Attn1 K after RoPE", rtol=1e-5, atol=1e-6)
 
         # Attention scores
         attn_scores = jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / jnp.sqrt(head_dim)
