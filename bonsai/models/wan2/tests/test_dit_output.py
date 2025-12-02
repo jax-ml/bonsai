@@ -249,57 +249,6 @@ def test_dit():
         head_dim = block.self_attn.head_dim
         b_size, n = norm_x_modulated.shape[:2]
 
-        # q_raw_jax = block.self_attn.q_proj(norm_x_modulated)
-        # k_raw_jax = block.self_attn.k_proj(norm_x_modulated)
-        # q_raw = states[f'block_{i}_attn1_query_raw'].numpy()
-        # k_raw = states[f'block_{i}_attn1_key_raw'].numpy()
-
-        # # compare_outputs(q_raw_jax, q_raw, f"Block {i} Attn1 Q raw", rtol=1e-5, atol=1e-6)
-        # # compare_outputs(k_raw_jax, k_raw, f"Block {i} Attn1 K raw", rtol=1e-5, atol=1e-6)
-
-        # q = block.self_attn.q_norm(q_raw_jax)
-        # k = block.self_attn.k_norm(k_raw_jax)
-        # v = block.self_attn.v_proj(norm_x_modulated)
-
-        # q_after_norm = states[f'block_{i}_attn1_query_normed'].numpy()
-        # k_after_norm = states[f'block_{i}_attn1_key_normed'].numpy()
-
-        # # compare_outputs(q, q_after_norm, f"Block {i} Attn1 Q after Norm", rtol=1e-5, atol=1e-6)
-        # # compare_outputs(k, k_after_norm, f"Block {i} Attn1 K after Norm", rtol=1e-5, atol=1e-6)
-
-        # # Reshape to heads
-        # q = q.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
-        # k = k.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
-        # v = v.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
-
-        # q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
-        # q = modeling.rope_apply(q, grid_sizes, rope_freqs)
-        # k = modeling.rope_apply(k, grid_sizes, rope_freqs)
-        # q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
-
-        # q_after_rope = states[f'block_{i}_attn1_query_rope'].numpy().transpose(0, 2, 1, 3)
-        # k_after_rope = states[f'block_{i}_attn1_key_rope'].numpy().transpose(0, 2, 1, 3)
-        
-        # # compare_outputs(q, q_after_rope, f"Block {i} Attn1 Q after RoPE", rtol=1e-5, atol=1e-6)
-        # # compare_outputs(k, k_after_rope, f"Block {i} Attn1 K after RoPE", rtol=1e-5, atol=1e-6)
-
-        # # Attention scores
-        # attn_scores = jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / jnp.sqrt(head_dim)
-        # print(f"Attention scores (before softmax): shape={attn_scores.shape}, range=[{attn_scores.min():.4f}, {attn_scores.max():.4f}]")
-
-        # # Attention weights
-        # attn_weights = jax.nn.softmax(attn_scores, axis=-1)
-        # print(f"Attention weights (after softmax): shape={attn_weights.shape}, range=[{attn_weights.min():.4f}, {attn_weights.max():.4f}]")
-
-        # # Attention output
-        # attn_out = jnp.einsum("bhij,bhjd->bhid", attn_weights, v, precision=Precision.HIGHEST)
-        # attn_out = attn_out.transpose(0, 2, 1, 3).reshape(b_size, n, -1)
-        # print(f"Attention output (before proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
-
-        # # Output projection
-        # attn_out = block.self_attn.out_proj(attn_out)
-        # print(f"Attention output (after proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
-
         # Compare with PyTorch
         attn1_output_torch = intermediate_outputs[f'block_{i}_attn1_output']
         compare_outputs(attn_out, attn1_output_torch, f"Block {i} Attn1 Output", rtol=1e-2, atol=1e-3)
@@ -343,7 +292,7 @@ def test_dit():
         compare_outputs(x_jax, block_output_torch, f"Block {i} Final Output", rtol=1e-2, atol=1e-3)
 
         if i >= 0:  # Only compare first block in detail
-            break
+            x_jax = block(x_jax, text_embeds_jax, deterministic=True, rope_state=(rope_freqs, grid_sizes))
 
     # 6. Final layer
     jax_dit_output = jax_dit.final_layer(x_jax, time_emb_jax)
