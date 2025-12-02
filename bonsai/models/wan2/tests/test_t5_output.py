@@ -326,7 +326,7 @@ def test_t5_e2e():
     safetensors_path = os.path.join(model_ckpt_path, "model.safetensors")
 
     # Load JAX encoder
-    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None, config=t5.T5Config.umt5_base())
+    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None, is_sf=False,config=t5.T5Config.umt5_base())
 
     # Load full PyTorch model (encoder + decoder)
     pytorch_full_model = UMT5ForConditionalGeneration.from_pretrained(
