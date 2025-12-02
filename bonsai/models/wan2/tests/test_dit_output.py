@@ -312,7 +312,7 @@ def test_dit():
         norm_x = block.norm2(x_jax)
         compare_outputs(norm_x, intermediate_outputs[f'block_{i}_norm2_output'], f"Block {i} Norm2 Output", rtol=1e-3, atol=1e-4)
         b, n, m = norm_x.shape[0], norm_x.shape[1], text_embeds_jax.shape[1]
-        q_norm = block.cross_attn.q_norm(block.cross_attn.to_q(norm_x))
+        q_norm = block.cross_attn.q_norm(block.cross_attn.q_proj(norm_x))
         compare_outputs(q_norm, intermediate_outputs[f'block_{i}_attn2_query_normed'], f"Block {i} Attn2 Q after Norm", rtol=1e-5, atol=1e-6)
         k_raw, v_raw = block.cross_attn.kv_proj(text_embeds_jax)
         k_norm = block.cross_attn.k_norm(k_raw)
