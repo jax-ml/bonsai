@@ -578,7 +578,7 @@ def create_t5_encoder_from_safe_tensors(
         files = sorted(list(text_encoder_path.glob("model-*.safetensors")))
     else:
         # Look in provided directory
-        files = sorted(list(file_path.glob("model-*.safetensors")))
+        files = sorted(list(file_path.glob("*.safetensors")))
 
     if not files:
         raise ValueError(f"No safetensors found in {file_dir} or {file_dir}/text_encoder")

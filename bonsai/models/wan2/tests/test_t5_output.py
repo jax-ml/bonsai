@@ -8,8 +8,7 @@ from bonsai.models.wan2 import params
 from wan.configs import WAN_CONFIGS
 import torch
 from transformers import AutoTokenizer, UMT5EncoderModel, UMT5ForConditionalGeneration
-from torch import nn
-
+import os
 
 def check_weight_loading(jax_model, torch_model):
     torch_emb = torch_model.shared.weight.detach().cpu().numpy()
@@ -317,26 +316,31 @@ def test_t5_e2e():
     print("\n" + "=" * 80)
     print("TEST 2: T5 E2E (JAX Encoder + PyTorch Decoder)")
     print("=" * 80)
-
-    # Download checkpoint
-    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-
     # Test prompts
     test_prompts = [
         "translate English to Chinese: The house is wonderful.",
     ]
 
     print("\n[1/3] Loading models...")
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
+    model_ckpt_path = snapshot_download("google/umt5-base")
+
+    tokenizer = AutoTokenizer.from_pretrained("google/umt5-base")
+
+    text_encoder_path = os.path.join(model_ckpt_path, "text_encoder")
+    safetensors_path = os.path.join(text_encoder_path, "model.safetensors")
+
+    if not os.path.exists(safetensors_path):
+        print("Converting to safetensors...")
+        temp_model = UMT5ForConditionalGeneration.from_pretrained(text_encoder_path)
+        temp_model.save_pretrained(text_encoder_path, safe_serialization=True)
+        del temp_model
 
     # Load JAX encoder
-    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
+    jax_t5 = params.create_t5_encoder_from_safe_tensors(text_encoder_path, mesh=None)
 
     # Load full PyTorch model (encoder + decoder)
     pytorch_full_model = UMT5ForConditionalGeneration.from_pretrained(
         model_ckpt_path,
-        subfolder="text_encoder",
         torch_dtype=torch.float32
     )
     pytorch_full_model.eval()
