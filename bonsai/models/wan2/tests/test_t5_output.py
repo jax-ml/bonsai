@@ -317,7 +317,7 @@ def test_t5_e2e():
     print("=" * 80)
     # Test prompts
     test_prompts = [
-        "translate English to Chinese: The house is wonderful.",
+        "Studies have shown that <extra_id_0> good for you",
     ]
 
     print("\n[1/3] Loading models...")
