@@ -309,7 +309,7 @@ class FinalLayer(nnx.Module):
         self.cfg = cfg
         self.norm = WanLayerNorm(cfg.hidden_dim, rngs=rngs)
         out_dim = math.prod(patch_size) * cfg.output_dim  # expand out_dim here for unpatchify
-        self.linear = nnx.Linear(cfg.hidden_dim, out_dim, rngs=rngs)
+        self.linear = nnx.Linear(cfg.hidden_dim, out_dim, rngs=rngs, precision=Precision.HIGHEST)
 
         # Learnable modulation parameter (matches HF: torch.randn / dim**0.5)
         self.scale_shift_table = nnx.Param(
@@ -435,11 +435,7 @@ class Wan2DiT(nnx.Module):
         patch_size = (1, 2, 2)  # Patch size from the 3D Conv kernel
         c = self.cfg.output_dim
 
-        # Reshape from sequence to grid: [B, T*H*W, C] -> [B, T, H, W, C]
-        x = x.reshape(b, t_patches, h_patches, w_patches, c * math.prod(patch_size))
-
         # Rearrange dimensions for unpatchify
-        # [B, T, H, W, C] -> [B, T, H, W, patch_t, patch_h, patch_w, C]
         x = x.reshape(
             b,
             t_patches,

@@ -98,6 +98,7 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         r"scale_shift_table": ("final_layer.scale_shift_table", Transform.NONE),
         r"proj_out\.weight": ("final_layer.linear.kernel", Transform.TRANSPOSE),
         r"proj_out\.bias": ("final_layer.linear.bias", Transform.NONE),
+        r"norm_out\.weight": ("final_layer.norm.scale", Transform.NONE),
     }
 
     return mapping

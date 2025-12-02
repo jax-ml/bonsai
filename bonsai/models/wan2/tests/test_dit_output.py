@@ -291,15 +291,13 @@ def test_dit():
         block_output_torch = intermediate_outputs[f'block_{i}_output']
         compare_outputs(x_jax, block_output_torch, f"Block {i} Final Output", rtol=1e-2, atol=1e-3)
 
-        if i >= 0:  # Only compare first block in detail
+        if i > 0:  # Only compare first block in detail
             x_jax = block(x_jax, text_embeds_jax, deterministic=True, rope_state=(rope_freqs, grid_sizes))
 
     # 6. Final layer
     jax_dit_output = jax_dit.final_layer(x_jax, time_emb_jax)
 
-    # Compare with final norm output
-    norm_out_torch = intermediate_outputs['norm_out_output']
-    # Note: final_layer does norm + linear, so we can't directly compare with norm_out
+    compare_outputs(jax_dit_output, intermediate_outputs['proj_out_output'], "Final Projection Output", rtol=1e-3, atol=1e-4)
 
     # Reshape to video format
     jax_dit_output = jax_dit.unpatchify(jax_dit_output, grid_sizes)
