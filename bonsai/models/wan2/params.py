@@ -510,6 +510,7 @@ def _get_t5_key_mapping():
     mapping = {
         # Shared token embeddings
         r"shared\.weight": ("encoder.token_embedding.embedding", Transform.NONE),
+        r"encoder\.embed_tokens\.weight": ("encoder.token_embedding.embedding", Transform.NONE),
         # Encoder blocks - Self attention
         r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.q\.weight": (
             r"encoder.blocks.\1.attn.q.kernel",
