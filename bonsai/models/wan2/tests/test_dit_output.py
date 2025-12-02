@@ -225,71 +225,72 @@ def test_dit():
 
     # 5. Process through transformer blocks with detailed attention comparison
     for i, block in enumerate(jax_dit.blocks):
-        print(f"\n{'='*80}")
-        print(f"BLOCK {i} - DETAILED COMPARISON")
-        print(f"{'='*80}")
+        if i==0:
+            print(f"\n{'='*80}")
+            print(f"BLOCK {i} - DETAILED COMPARISON")
+            print(f"{'='*80}")
 
-        # Get modulation parameters
-        b_size = time_proj_jax.shape[0]
-        d = jax_dit.cfg.hidden_dim
-        reshaped_time_emb = time_proj_jax.reshape(b_size, 6, d)
-        modulation = reshaped_time_emb + block.scale_shift_table.value
-        modulation = modulation.reshape(b_size, -1)
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
+            # Get modulation parameters
+            b_size = time_proj_jax.shape[0]
+            d = jax_dit.cfg.hidden_dim
+            reshaped_time_emb = time_proj_jax.reshape(b_size, 6, d)
+            modulation = reshaped_time_emb + block.scale_shift_table.value
+            modulation = modulation.reshape(b_size, -1)
+            shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
 
-        # Self-attention with detailed steps
-        print(f"\n--- Self-Attention ---")
-        norm_x = block.norm1(x_jax)
-        norm_x_modulated = norm_x * (1 + scale_msa[:, None, :]) + shift_msa[:, None, :]
+            # Self-attention with detailed steps
+            print(f"\n--- Self-Attention ---")
+            norm_x = block.norm1(x_jax)
+            norm_x_modulated = norm_x * (1 + scale_msa[:, None, :]) + shift_msa[:, None, :]
 
-        attn_out = block.self_attn(norm_x_modulated, deterministic=True, rope_state=(rope_freqs, grid_sizes))
+            attn_out = block.self_attn(norm_x_modulated, deterministic=True, rope_state=(rope_freqs, grid_sizes))
 
-        # # Q, K, V projections
-        num_heads = block.self_attn.num_heads
-        head_dim = block.self_attn.head_dim
-        b_size, n = norm_x_modulated.shape[:2]
+            # # Q, K, V projections
+            num_heads = block.self_attn.num_heads
+            head_dim = block.self_attn.head_dim
+            b_size, n = norm_x_modulated.shape[:2]
 
-        # Compare with PyTorch
-        attn1_output_torch = intermediate_outputs[f'block_{i}_attn1_output']
-        compare_outputs(attn_out, attn1_output_torch, f"Block {i} Attn1 Output", rtol=1e-2, atol=1e-3)
+            # Compare with PyTorch
+            attn1_output_torch = intermediate_outputs[f'block_{i}_attn1_output']
+            compare_outputs(attn_out, attn1_output_torch, f"Block {i} Attn1 Output", rtol=1e-2, atol=1e-3)
 
-        # Apply gate and residual
-        x_jax = x_jax + gate_msa[:, None, :] * attn_out
+            # Apply gate and residual
+            x_jax = x_jax + gate_msa[:, None, :] * attn_out
 
-        # Cross-attention
-        print(f"\n--- Cross-Attention ---")
-        norm_x = block.norm2(x_jax)
-        compare_outputs(norm_x, intermediate_outputs[f'block_{i}_norm2_output'], f"Block {i} Norm2 Output", rtol=1e-3, atol=1e-4)
-        b, n, m = norm_x.shape[0], norm_x.shape[1], text_embeds_jax.shape[1]
-        q_norm = block.cross_attn.q_norm(block.cross_attn.q_proj(norm_x))
-        compare_outputs(q_norm, intermediate_outputs[f'block_{i}_attn2_query_normed'], f"Block {i} Attn2 Q after Norm", rtol=1e-5, atol=1e-6)
-        kv = block.cross_attn.kv_proj(text_embeds_jax)
-        k, v = jnp.split(kv, 2, axis=-1)
-        k_norm = block.cross_attn.k_norm(k)
-        compare_outputs(k_norm, intermediate_outputs[f'block_{i}_attn2_key_normed'], f"Block {i} Attn2 K after Norm", rtol=1e-5, atol=1e-6)
+            # Cross-attention
+            print(f"\n--- Cross-Attention ---")
+            norm_x = block.norm2(x_jax)
+            compare_outputs(norm_x, intermediate_outputs[f'block_{i}_norm2_output'], f"Block {i} Norm2 Output", rtol=1e-3, atol=1e-4)
+            b, n, m = norm_x.shape[0], norm_x.shape[1], text_embeds_jax.shape[1]
+            q_norm = block.cross_attn.q_norm(block.cross_attn.q_proj(norm_x))
+            compare_outputs(q_norm, intermediate_outputs[f'block_{i}_attn2_query_normed'], f"Block {i} Attn2 Q after Norm", rtol=1e-5, atol=1e-6)
+            kv = block.cross_attn.kv_proj(text_embeds_jax)
+            k, v = jnp.split(kv, 2, axis=-1)
+            k_norm = block.cross_attn.k_norm(k)
+            compare_outputs(k_norm, intermediate_outputs[f'block_{i}_attn2_key_normed'], f"Block {i} Attn2 K after Norm", rtol=1e-5, atol=1e-6)
 
-        cross_out = block.cross_attn(norm_x, text_embeds_jax, deterministic=True)
+            cross_out = block.cross_attn(norm_x, text_embeds_jax, deterministic=True)
 
 
-        attn2_output_torch = intermediate_outputs[f'block_{i}_attn2_output']
-        compare_outputs(cross_out, attn2_output_torch, f"Block {i} Attn2 Output", rtol=1e-2, atol=1e-3)
+            attn2_output_torch = intermediate_outputs[f'block_{i}_attn2_output']
+            compare_outputs(cross_out, attn2_output_torch, f"Block {i} Attn2 Output", rtol=1e-2, atol=1e-3)
 
-        x_jax = x_jax + cross_out
+            x_jax = x_jax + cross_out
 
-        # MLP
-        print(f"\n--- MLP ---")
-        norm_x = block.norm3(x_jax)
-        norm_x_modulated = norm_x * (1 + scale_mlp[:, None, :]) + shift_mlp[:, None, :]
-        mlp_out = block.mlp(norm_x_modulated)
+            # MLP
+            print(f"\n--- MLP ---")
+            norm_x = block.norm3(x_jax)
+            norm_x_modulated = norm_x * (1 + scale_mlp[:, None, :]) + shift_mlp[:, None, :]
+            mlp_out = block.mlp(norm_x_modulated)
 
-        ffn_output_torch = intermediate_outputs[f'block_{i}_ffn_output']
-        compare_outputs(mlp_out, ffn_output_torch, f"Block {i} FFN Output", rtol=1e-2, atol=1e-3)
+            ffn_output_torch = intermediate_outputs[f'block_{i}_ffn_output']
+            compare_outputs(mlp_out, ffn_output_torch, f"Block {i} FFN Output", rtol=1e-2, atol=1e-3)
 
-        x_jax = x_jax + gate_mlp[:, None, :] * mlp_out
+            x_jax = x_jax + gate_mlp[:, None, :] * mlp_out
 
-        # Compare final block output
-        block_output_torch = intermediate_outputs[f'block_{i}_output']
-        compare_outputs(x_jax, block_output_torch, f"Block {i} Final Output", rtol=1e-2, atol=1e-3)
+            # Compare final block output
+            block_output_torch = intermediate_outputs[f'block_{i}_output']
+            compare_outputs(x_jax, block_output_torch, f"Block {i} Final Output", rtol=1e-2, atol=1e-3)
 
         if i > 0:  # Only compare first block in detail
             x_jax = block(x_jax, text_embeds_jax, time_proj_jax, deterministic=True, rope_state=(rope_freqs, grid_sizes))
