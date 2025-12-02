@@ -557,6 +557,7 @@ def create_t5_encoder_from_safe_tensors(
     file_dir: str,
     mesh: jax.sharding.Mesh | None = None,
     is_sf: bool = True,
+    config: t5_lib.T5Config | None = None,
 ) -> t5_lib.T5EncoderModel:
     """
     Load T5 encoder from safetensors checkpoint.
@@ -564,13 +565,19 @@ def create_t5_encoder_from_safe_tensors(
     Args:
         file_dir: Directory containing .safetensors files or path to text_encoder directory
         mesh: Optional JAX mesh for sharding
+        is_sf: Whether to load from safetensors (True) or PyTorch checkpoint (False)
+        config: T5Config to use. If None, defaults to UMT5-XXL
 
     Returns:
         T5EncoderModel with loaded weights
     """
     from bonsai.models.wan2 import t5
 
-    t5_encoder = nnx.eval_shape(lambda: t5.T5EncoderModel(rngs=nnx.Rngs(params=0, dropout=0)))
+    # Use provided config or default to UMT5-XXL
+    if config is None:
+        config = t5.T5Config.umt5_xxl()
+
+    t5_encoder = nnx.eval_shape(lambda: t5.T5EncoderModel(config, rngs=nnx.Rngs(params=0, dropout=0)))
     graph_def, abs_state = nnx.split(t5_encoder)
     state_dict = abs_state.to_pure_dict()
 

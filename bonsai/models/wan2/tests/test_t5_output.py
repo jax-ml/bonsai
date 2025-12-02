@@ -4,8 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from huggingface_hub import snapshot_download
-from bonsai.models.wan2 import params
-from wan.configs import WAN_CONFIGS
+from bonsai.models.wan2 import params, t5
 import torch
 from transformers import AutoTokenizer, UMT5EncoderModel, UMT5ForConditionalGeneration
 import os
@@ -322,18 +321,12 @@ def test_t5_e2e():
     ]
 
     print("\n[1/3] Loading models...")
-    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
-    model_ckpt_path = snapshot_download("google/umt5-xxl")
+    tokenizer = AutoTokenizer.from_pretrained("google/umt5-base")
+    model_ckpt_path = snapshot_download("google/umt5-base")
     safetensors_path = os.path.join(model_ckpt_path, "model.safetensors")
 
-    if not os.path.exists(safetensors_path):
-        print("Converting to safetensors...")
-        temp_model = UMT5ForConditionalGeneration.from_pretrained(model_ckpt_path)
-        temp_model.save_pretrained(model_ckpt_path, safe_serialization=True)
-        del temp_model
-
     # Load JAX encoder
-    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
+    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None, config=t5.T5Config.umt5_base())
 
     # Load full PyTorch model (encoder + decoder)
     pytorch_full_model = UMT5ForConditionalGeneration.from_pretrained(

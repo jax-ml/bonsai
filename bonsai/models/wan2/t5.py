@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import dataclasses
 import math
 from typing import Optional
 
@@ -266,16 +267,24 @@ class T5Encoder(nnx.Module):
         return x
 
 
-class T5EncoderModel(nnx.Module):
-    """T5 Encoder-only model for text encoding.
+@dataclasses.dataclass(frozen=True)
+class T5Config:
+    """Configuration for T5 Encoder."""
 
-    This is a wrapper for the T5 encoder configured for UMT5-XXL.
-    """
+    vocab_size: int = 256384
+    dim: int = 4096
+    dim_attn: int = 4096
+    dim_ffn: int = 10240
+    num_heads: int = 64
+    num_layers: int = 24
+    num_buckets: int = 32
+    shared_pos: bool = False  # UMT5 uses per-layer position embeddings
+    dropout: float = 0.1
 
-    def __init__(self, *, rngs: nnx.Rngs):
-        """Initialize UMT5-XXL encoder."""
-        # UMT5-XXL configuration
-        self.encoder = T5Encoder(
+    @classmethod
+    def umt5_xxl(cls) -> "T5Config":
+        """UMT5-XXL configuration (~5B parameters)."""
+        return cls(
             vocab_size=256384,
             dim=4096,
             dim_attn=4096,
@@ -283,10 +292,89 @@ class T5EncoderModel(nnx.Module):
             num_heads=64,
             num_layers=24,
             num_buckets=32,
-            shared_pos=False,  # UMT5 uses per-layer position embeddings
+            shared_pos=False,
             dropout=0.1,
+        )
+
+    @classmethod
+    def umt5_base(cls) -> "T5Config":
+        """UMT5-Base configuration (~580M parameters)."""
+        return cls(
+            vocab_size=256384,
+            dim=768,
+            dim_attn=768,
+            dim_ffn=2048,
+            num_heads=12,
+            num_layers=12,
+            num_buckets=32,
+            shared_pos=False,
+            dropout=0.1,
+        )
+
+
+class T5EncoderModel(nnx.Module):
+    """T5 Encoder-only model for text encoding.
+
+    Supports multiple T5 configurations (UMT5-XXL, UMT5-Base).
+    """
+
+    def __init__(self, config: T5Config, *, rngs: nnx.Rngs):
+        """Initialize T5 encoder from config.
+
+        Args:
+            config: T5Config specifying model architecture
+            rngs: Random number generators for initialization
+        """
+        self.config = config
+        self.encoder = T5Encoder(
+            vocab_size=config.vocab_size,
+            dim=config.dim,
+            dim_attn=config.dim_attn,
+            dim_ffn=config.dim_ffn,
+            num_heads=config.num_heads,
+            num_layers=config.num_layers,
+            num_buckets=config.num_buckets,
+            shared_pos=config.shared_pos,
+            dropout=config.dropout,
             rngs=rngs,
         )
+
+    @classmethod
+    def from_config(cls, config: T5Config, *, rngs: nnx.Rngs) -> "T5EncoderModel":
+        """Create T5 encoder from configuration.
+
+        Args:
+            config: T5Config instance
+            rngs: Random number generators
+
+        Returns:
+            T5EncoderModel instance
+        """
+        return cls(config, rngs=rngs)
+
+    @classmethod
+    def umt5_xxl(cls, *, rngs: nnx.Rngs) -> "T5EncoderModel":
+        """Create UMT5-XXL encoder (~5B parameters).
+
+        Args:
+            rngs: Random number generators
+
+        Returns:
+            T5EncoderModel configured as UMT5-XXL
+        """
+        return cls(T5Config.umt5_xxl(), rngs=rngs)
+
+    @classmethod
+    def umt5_base(cls, *, rngs: nnx.Rngs) -> "T5EncoderModel":
+        """Create UMT5-Base encoder (~580M parameters).
+
+        Args:
+            rngs: Random number generators
+
+        Returns:
+            T5EncoderModel configured as UMT5-Base
+        """
+        return cls(T5Config.umt5_base(), rngs=rngs)
 
     def __call__(self, input_ids: Array, attention_mask: Optional[Array] = None, deterministic: bool = True) -> Array:
         """Encode text.
@@ -297,9 +385,9 @@ class T5EncoderModel(nnx.Module):
             deterministic: whether to disable dropout (True for inference)
 
         Returns:
-            [B, L, 4096] encoded text embeddings
+            [B, L, dim] encoded text embeddings (dim depends on config)
         """
         return self.encoder(input_ids, mask=attention_mask, deterministic=deterministic)
 
 
-__all__ = ["T5Encoder", "T5EncoderModel"]
+__all__ = ["T5Config", "T5Encoder", "T5EncoderModel"]
