@@ -470,12 +470,7 @@ class WanTransformerDebugger:
                 make_hook(f'block_{i}_attn2_output')
             )
             self.hooks.append(h)
-
-            # 7. Hook final output (after dropout)
-            def final_hook(module, input, output):
-                self.outputs[f'block_{i}_attn2_final'] = output.detach().cpu()
-
-            h = attn.register_forward_hook(final_hook)
+            h = attn.register_forward_hook(make_hook(f'block_{i}_attn2_attention'))
             self.hooks.append(h)
 
 
