@@ -194,9 +194,9 @@ class CrossAttention(nnx.Module):
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.num_heads, self.head_dim = cfg.num_heads, cfg.head_dim
-        self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
-        self.kv_proj = nnx.Linear(cfg.hidden_dim, 2 * cfg.hidden_dim, rngs=rngs)
-        self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs)
+        self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
+        self.kv_proj = nnx.Linear(cfg.hidden_dim, 2 * cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
+        self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
         self.q_norm = nnx.RMSNorm(cfg.hidden_dim, rngs=rngs)
 
     def __call__(self, x: Array, context: Array, deterministic: bool = True) -> Array:
@@ -204,8 +204,12 @@ class CrossAttention(nnx.Module):
         # Apply normalization BEFORE reshaping to heads
         q = self.q_norm(self.q_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
         k, v = self.kv_proj(context).reshape(b, m, 2, self.num_heads, self.head_dim).transpose(2, 0, 3, 1, 4)
-        attn = jax.nn.softmax(jnp.einsum("bhid,bhjd->bhij", q, k) / math.sqrt(self.head_dim), axis=-1)
-        out = jnp.einsum("bhij,bhjd->bhid", attn, v).transpose(0, 2, 1, 3).reshape(b, n, -1)
+        attn = jax.nn.softmax(
+            jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / math.sqrt(self.head_dim), axis=-1
+        )
+        out = (
+            jnp.einsum("bhij,bhjd->bhid", attn, v, precision=Precision.HIGHEST).transpose(0, 2, 1, 3).reshape(b, n, -1)
+        )
         return self.out_proj(out)
 
 
@@ -238,9 +242,9 @@ class WanAttentionBlock(nnx.Module):
 
         # Feed-forward MLP: Linear -> GELU -> Linear
         self.mlp = nnx.Sequential(
-            nnx.Linear(cfg.hidden_dim, cfg.ffn_dim, rngs=rngs),
+            nnx.Linear(cfg.hidden_dim, cfg.ffn_dim, rngs=rngs, precision=Precision.HIGHEST),
             nnx.gelu,
-            nnx.Linear(cfg.ffn_dim, cfg.hidden_dim, rngs=rngs),
+            nnx.Linear(cfg.ffn_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST),
         )
 
         # Learnable AdaLN scale/shift table loaded from checkpoints
