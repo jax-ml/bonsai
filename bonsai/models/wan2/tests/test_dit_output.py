@@ -314,8 +314,8 @@ def test_dit():
         b, n, m = norm_x.shape[0], norm_x.shape[1], text_embeds_jax.shape[1]
         q_norm = block.cross_attn.q_norm(block.cross_attn.q_proj(norm_x))
         compare_outputs(q_norm, intermediate_outputs[f'block_{i}_attn2_query_normed'], f"Block {i} Attn2 Q after Norm", rtol=1e-5, atol=1e-6)
-        kv = block.cross_attn.kv_proj(text_embeds_jax).reshape(b, m, 2, num_heads, head_dim)
-        k, v = kv[:, :, 0], kv[:, :, 1]
+        kv = block.cross_attn.kv_proj(text_embeds_jax)
+        k, v = jnp.split(kv, 2, axis=-1)
         k_norm = block.cross_attn.k_norm(k)
         compare_outputs(k_norm, intermediate_outputs[f'block_{i}_attn2_key_normed'], f"Block {i} Attn2 K after Norm", rtol=1e-5, atol=1e-6)
 

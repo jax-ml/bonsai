@@ -204,10 +204,10 @@ class CrossAttention(nnx.Module):
         b, n, m = x.shape[0], x.shape[1], context.shape[1]
         # Apply normalization BEFORE reshaping to heads
         q = self.q_norm(self.q_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        kv = self.kv_proj(context).reshape(b, m, 2, self.num_heads, self.head_dim)
-        k, v = kv[:, :, 0], kv[:, :, 1]
-        k = self.k_norm(k).transpose(0, 2, 1, 3)
-        v = v.transpose(0, 2, 1, 3)
+        kv = self.kv_proj(context)
+        k, v = jnp.split(kv, 2, axis=-1)
+        k = self.k_norm(k).reshape(b, m, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        v = v.reshape(b, m, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
         attn = jax.nn.softmax(
             jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / math.sqrt(self.head_dim), axis=-1
         )
