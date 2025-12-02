@@ -322,8 +322,8 @@ def test_t5_e2e():
     ]
 
     print("\n[1/3] Loading models...")
-    tokenizer = AutoTokenizer.from_pretrained("google/umt5-base")
-    model_ckpt_path = snapshot_download("google/umt5-base")
+    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
+    model_ckpt_path = snapshot_download("google/umt5-xxl")
     safetensors_path = os.path.join(model_ckpt_path, "model.safetensors")
 
     if not os.path.exists(safetensors_path):
