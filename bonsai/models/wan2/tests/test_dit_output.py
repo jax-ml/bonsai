@@ -242,7 +242,7 @@ def test_dit():
         norm_x = block.norm1(x_jax)
         norm_x_modulated = norm_x * (1 + scale_msa[:, None, :]) + shift_msa[:, None, :]
 
-        attn_out = block.self_attn(norm_x_modulated, deterministic=True, rope_freqs=(rope_freqs_cos_jax, None))
+        attn_out = block.self_attn(norm_x_modulated, deterministic=True, rope_state=(rope_freqs, grid_sizes))
 
         # # Q, K, V projections
         # num_heads = block.self_attn.num_heads
