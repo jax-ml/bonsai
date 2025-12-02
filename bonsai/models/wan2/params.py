@@ -556,6 +556,7 @@ def _get_t5_key_mapping():
 def create_t5_encoder_from_safe_tensors(
     file_dir: str,
     mesh: jax.sharding.Mesh | None = None,
+    is_sf: bool = True,
 ) -> t5_lib.T5EncoderModel:
     """
     Load T5 encoder from safetensors checkpoint.
@@ -569,28 +570,10 @@ def create_t5_encoder_from_safe_tensors(
     """
     from bonsai.models.wan2 import t5
 
-    # Check if file_dir is the model root or text_encoder subdirectory
-    file_path = epath.Path(file_dir).expanduser()
-    text_encoder_path = file_path / "text_encoder"
-
-    if text_encoder_path.exists():
-        # Look in text_encoder subdirectory
-        files = sorted(list(text_encoder_path.glob("model-*.safetensors")))
-    else:
-        # Look in provided directory
-        files = sorted(list(file_path.glob("*.safetensors")))
-
-    if not files:
-        raise ValueError(f"No safetensors found in {file_dir} or {file_dir}/text_encoder")
-
-    print(f"Found {len(files)} T5 encoder safetensors file(s)")
-
-    # Create T5 encoder structure
     t5_encoder = nnx.eval_shape(lambda: t5.T5EncoderModel(rngs=nnx.Rngs(params=0, dropout=0)))
     graph_def, abs_state = nnx.split(t5_encoder)
     state_dict = abs_state.to_pure_dict()
 
-    # Setup sharding if mesh provided
     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
     key_mapping = _get_t5_key_mapping()
@@ -598,29 +581,69 @@ def create_t5_encoder_from_safe_tensors(
     loaded_keys = []
     skipped_keys = []
 
-    for f in files:
-        print(f"Loading T5 weights from {f.name}...")
-        with safetensors.safe_open(f, framework="numpy") as sf:
-            for torch_key in sf.keys():
-                tensor = sf.get_tensor(torch_key)
+    # Check if file_dir is the model root or text_encoder subdirectory
+    file_path = epath.Path(file_dir).expanduser()
+    text_encoder_path = file_path / "text_encoder"
 
-                jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+    def load_pytorch_weights(file_dir):
+        from transformers import UMT5ForConditionalGeneration
 
-                if jax_key is None:
-                    # Skip keys not in our mapping
-                    skipped_keys.append(torch_key)
-                    print(f"{torch_key} is not mapped")
-                    continue
+        model = UMT5ForConditionalGeneration.from_pretrained(file_dir)
+        encoder_state = {k: v for k, v in model.state_dict().items() if k.startswith("encoder.")}
+        return encoder_state
 
-                keys = [_stoi(k) for k in jax_key.split(".")]
-                try:
-                    _assign_weights(keys, tensor, state_dict, torch_key, transform, sharding)
-                    loaded_keys.append(torch_key)
-                except Exception as e:
-                    full_jax_key = ".".join([str(k) for k in keys])
-                    conversion_errors.append(
-                        f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}"
-                    )
+    if is_sf:
+        if text_encoder_path.exists():
+            files = sorted(list(text_encoder_path.glob("model-*.safetensors")))
+        else:
+            files = sorted(list(file_path.glob("*.safetensors")))
+        if not files:
+            raise ValueError(f"No safetensors found in {file_dir} or {file_dir}/text_encoder")
+        print(f"Found {len(files)} T5 encoder safetensors file(s)")
+
+        for f in files:
+            print(f"Loading T5 weights from {f.name}...")
+            with safetensors.safe_open(f, framework="numpy") as sf:
+                for torch_key in sf.keys():
+                    tensor = sf.get_tensor(torch_key)
+
+                    jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+
+                    if jax_key is None:
+                        # Skip keys not in our mapping
+                        skipped_keys.append(torch_key)
+                        print(f"{torch_key} is not mapped")
+                        continue
+
+                    keys = [_stoi(k) for k in jax_key.split(".")]
+                    try:
+                        _assign_weights(keys, tensor, state_dict, torch_key, transform, sharding)
+                        loaded_keys.append(torch_key)
+                    except Exception as e:
+                        full_jax_key = ".".join([str(k) for k in keys])
+                        conversion_errors.append(
+                            f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}"
+                        )
+            gc.collect()
+    else:
+        print(f"Loading T5 weights from PyTorch checkpoint in {file_dir}...")
+        pt_state = load_pytorch_weights(file_dir)
+        for torch_key, tensor in pt_state.items():
+            jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+
+            if jax_key is None:
+                # Skip keys not in our mapping
+                skipped_keys.append(torch_key)
+                print(f"{torch_key} is not mapped")
+                continue
+
+            keys = [_stoi(k) for k in jax_key.split(".")]
+            try:
+                _assign_weights(keys, tensor.numpy(), state_dict, torch_key, transform, sharding)
+                loaded_keys.append(torch_key)
+            except Exception as e:
+                full_jax_key = ".".join([str(k) for k in keys])
+                conversion_errors.append(f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}")
         gc.collect()
 
     print(f"Loaded {len(loaded_keys)} T5 weight tensors")
