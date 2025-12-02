@@ -7,6 +7,7 @@ from huggingface_hub import snapshot_download
 from bonsai.models.wan2 import params, modeling
 import torch
 from diffusers import AutoModel
+from jax.lax import Precision
 from collections import OrderedDict
 
 def check_weight_loading(jax_model, torch_model):
@@ -270,7 +271,7 @@ def test_dit():
         compare_outputs(k, k_after_rope, f"Block {i} Attn1 K after RoPE", rtol=1e-5, atol=1e-6)
 
         # Attention scores
-        attn_scores = jnp.einsum("bhid,bhjd->bhij", q, k) / jnp.sqrt(head_dim)
+        attn_scores = jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / jnp.sqrt(head_dim)
         print(f"Attention scores (before softmax): shape={attn_scores.shape}, range=[{attn_scores.min():.4f}, {attn_scores.max():.4f}]")
 
         # Attention weights
@@ -278,7 +279,7 @@ def test_dit():
         print(f"Attention weights (after softmax): shape={attn_weights.shape}, range=[{attn_weights.min():.4f}, {attn_weights.max():.4f}]")
 
         # Attention output
-        attn_out = jnp.einsum("bhij,bhjd->bhid", attn_weights, v)
+        attn_out = jnp.einsum("bhij,bhjd->bhid", attn_weights, v, precision=Precision.HIGHEST)
         attn_out = attn_out.transpose(0, 2, 1, 3).reshape(b_size, n, -1)
         print(f"Attention output (before proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
 

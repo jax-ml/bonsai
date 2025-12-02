@@ -180,8 +180,12 @@ class MultiHeadAttention(nnx.Module):
             q, k = rope_apply(q, grid_sizes, freqs), rope_apply(k, grid_sizes, freqs)
             q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
 
-        attn = jax.nn.softmax(jnp.einsum("bhid,bhjd->bhij", q, k) / math.sqrt(self.head_dim), axis=-1)
-        out = jnp.einsum("bhij,bhjd->bhid", attn, v).transpose(0, 2, 1, 3).reshape(b, n, -1)
+        attn = jax.nn.softmax(
+            jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / math.sqrt(self.head_dim), axis=-1
+        )
+        out = (
+            jnp.einsum("bhij,bhjd->bhid", attn, v, precision=Precision.HIGHEST).transpose(0, 2, 1, 3).reshape(b, n, -1)
+        )
         return self.out_proj(out)
 
 
