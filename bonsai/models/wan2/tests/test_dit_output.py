@@ -242,61 +242,63 @@ def test_dit():
         norm_x = block.norm1(x_jax)
         norm_x_modulated = norm_x * (1 + scale_msa[:, None, :]) + shift_msa[:, None, :]
 
-        # Q, K, V projections
-        num_heads = block.self_attn.num_heads
-        head_dim = block.self_attn.head_dim
-        b_size, n = norm_x_modulated.shape[:2]
+        attn_out = block.self_attn(norm_x_modulated, deterministic=True, rope_freqs=(rope_freqs_cos_jax, None))
 
-        q_raw_jax = block.self_attn.q_proj(norm_x_modulated)
-        k_raw_jax = block.self_attn.k_proj(norm_x_modulated)
-        q_raw = states[f'block_{i}_attn1_query_raw'].numpy()
-        k_raw = states[f'block_{i}_attn1_key_raw'].numpy()
+        # # Q, K, V projections
+        # num_heads = block.self_attn.num_heads
+        # head_dim = block.self_attn.head_dim
+        # b_size, n = norm_x_modulated.shape[:2]
 
-        # compare_outputs(q_raw_jax, q_raw, f"Block {i} Attn1 Q raw", rtol=1e-5, atol=1e-6)
-        # compare_outputs(k_raw_jax, k_raw, f"Block {i} Attn1 K raw", rtol=1e-5, atol=1e-6)
+        # q_raw_jax = block.self_attn.q_proj(norm_x_modulated)
+        # k_raw_jax = block.self_attn.k_proj(norm_x_modulated)
+        # q_raw = states[f'block_{i}_attn1_query_raw'].numpy()
+        # k_raw = states[f'block_{i}_attn1_key_raw'].numpy()
 
-        q = block.self_attn.q_norm(q_raw_jax)
-        k = block.self_attn.k_norm(k_raw_jax)
-        v = block.self_attn.v_proj(norm_x_modulated)
+        # # compare_outputs(q_raw_jax, q_raw, f"Block {i} Attn1 Q raw", rtol=1e-5, atol=1e-6)
+        # # compare_outputs(k_raw_jax, k_raw, f"Block {i} Attn1 K raw", rtol=1e-5, atol=1e-6)
 
-        q_after_norm = states[f'block_{i}_attn1_query_normed'].numpy()
-        k_after_norm = states[f'block_{i}_attn1_key_normed'].numpy()
+        # q = block.self_attn.q_norm(q_raw_jax)
+        # k = block.self_attn.k_norm(k_raw_jax)
+        # v = block.self_attn.v_proj(norm_x_modulated)
 
-        # compare_outputs(q, q_after_norm, f"Block {i} Attn1 Q after Norm", rtol=1e-5, atol=1e-6)
-        # compare_outputs(k, k_after_norm, f"Block {i} Attn1 K after Norm", rtol=1e-5, atol=1e-6)
+        # q_after_norm = states[f'block_{i}_attn1_query_normed'].numpy()
+        # k_after_norm = states[f'block_{i}_attn1_key_normed'].numpy()
 
-        # Reshape to heads
-        q = q.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
-        k = k.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
-        v = v.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
+        # # compare_outputs(q, q_after_norm, f"Block {i} Attn1 Q after Norm", rtol=1e-5, atol=1e-6)
+        # # compare_outputs(k, k_after_norm, f"Block {i} Attn1 K after Norm", rtol=1e-5, atol=1e-6)
 
-        q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
-        q = modeling.rope_apply(q, grid_sizes, rope_freqs)
-        k = modeling.rope_apply(k, grid_sizes, rope_freqs)
-        q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
+        # # Reshape to heads
+        # q = q.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
+        # k = k.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
+        # v = v.reshape(b_size, n, num_heads, head_dim).transpose(0, 2, 1, 3)
 
-        q_after_rope = states[f'block_{i}_attn1_query_rope'].numpy().transpose(0, 2, 1, 3)
-        k_after_rope = states[f'block_{i}_attn1_key_rope'].numpy().transpose(0, 2, 1, 3)
+        # q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
+        # q = modeling.rope_apply(q, grid_sizes, rope_freqs)
+        # k = modeling.rope_apply(k, grid_sizes, rope_freqs)
+        # q, k = jnp.transpose(q, (0, 2, 1, 3)), jnp.transpose(k, (0, 2, 1, 3))
+
+        # q_after_rope = states[f'block_{i}_attn1_query_rope'].numpy().transpose(0, 2, 1, 3)
+        # k_after_rope = states[f'block_{i}_attn1_key_rope'].numpy().transpose(0, 2, 1, 3)
         
-        # compare_outputs(q, q_after_rope, f"Block {i} Attn1 Q after RoPE", rtol=1e-5, atol=1e-6)
-        # compare_outputs(k, k_after_rope, f"Block {i} Attn1 K after RoPE", rtol=1e-5, atol=1e-6)
+        # # compare_outputs(q, q_after_rope, f"Block {i} Attn1 Q after RoPE", rtol=1e-5, atol=1e-6)
+        # # compare_outputs(k, k_after_rope, f"Block {i} Attn1 K after RoPE", rtol=1e-5, atol=1e-6)
 
-        # Attention scores
-        attn_scores = jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / jnp.sqrt(head_dim)
-        print(f"Attention scores (before softmax): shape={attn_scores.shape}, range=[{attn_scores.min():.4f}, {attn_scores.max():.4f}]")
+        # # Attention scores
+        # attn_scores = jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / jnp.sqrt(head_dim)
+        # print(f"Attention scores (before softmax): shape={attn_scores.shape}, range=[{attn_scores.min():.4f}, {attn_scores.max():.4f}]")
 
-        # Attention weights
-        attn_weights = jax.nn.softmax(attn_scores, axis=-1)
-        print(f"Attention weights (after softmax): shape={attn_weights.shape}, range=[{attn_weights.min():.4f}, {attn_weights.max():.4f}]")
+        # # Attention weights
+        # attn_weights = jax.nn.softmax(attn_scores, axis=-1)
+        # print(f"Attention weights (after softmax): shape={attn_weights.shape}, range=[{attn_weights.min():.4f}, {attn_weights.max():.4f}]")
 
-        # Attention output
-        attn_out = jnp.einsum("bhij,bhjd->bhid", attn_weights, v, precision=Precision.HIGHEST)
-        attn_out = attn_out.transpose(0, 2, 1, 3).reshape(b_size, n, -1)
-        print(f"Attention output (before proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
+        # # Attention output
+        # attn_out = jnp.einsum("bhij,bhjd->bhid", attn_weights, v, precision=Precision.HIGHEST)
+        # attn_out = attn_out.transpose(0, 2, 1, 3).reshape(b_size, n, -1)
+        # print(f"Attention output (before proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
 
-        # Output projection
-        attn_out = block.self_attn.out_proj(attn_out)
-        print(f"Attention output (after proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
+        # # Output projection
+        # attn_out = block.self_attn.out_proj(attn_out)
+        # print(f"Attention output (after proj): shape={attn_out.shape}, range=[{attn_out.min():.4f}, {attn_out.max():.4f}]")
 
         # Compare with PyTorch
         attn1_output_torch = intermediate_outputs[f'block_{i}_attn1_output']
@@ -308,7 +310,16 @@ def test_dit():
         # Cross-attention
         print(f"\n--- Cross-Attention ---")
         norm_x = block.norm2(x_jax)
+        compare_outputs(norm_x, intermediate_outputs[f'block_{i}_norm2_output'], f"Block {i} Norm2 Output", rtol=1e-3, atol=1e-4)
+        b, n, m = norm_x.shape[0], norm_x.shape[1], text_embeds_jax.shape[1]
+        q_norm = block.cross_attn.q_norm(block.cross_attn.to_q(norm_x))
+        compare_outputs(q_norm, intermediate_outputs[f'block_{i}_attn2_query_normed'], f"Block {i} Attn2 Q after Norm", rtol=1e-5, atol=1e-6)
+        k_raw, v_raw = block.cross_attn.kv_proj(text_embeds_jax)
+        k_norm = block.cross_attn.k_norm(k_raw)
+        compare_outputs(k_norm, intermediate_outputs[f'block_{i}_attn2_key_normed'], f"Block {i} Attn2 K after Norm", rtol=1e-5, atol=1e-6)
+
         cross_out = block.cross_attn(norm_x, text_embeds_jax, deterministic=True)
+
 
         attn2_output_torch = intermediate_outputs[f'block_{i}_attn2_output']
         compare_outputs(cross_out, attn2_output_torch, f"Block {i} Attn2 Output", rtol=1e-2, atol=1e-3)
@@ -409,9 +420,64 @@ class WanTransformerDebugger:
                 def attn2_hook(module, input, output):
                     self.intermediate_outputs[f'block_{block_idx}_attn2_output'] = output.detach().cpu()
                 return attn2_hook
+            
+            def make_hook(name):
+                def hook(module, input, output):
+                    if isinstance(output, tuple):
+                        self.intermediate_outputs[name] = output[0].detach().cpu()
+                    else:
+                        self.intermediate_outputs[name] = output.detach().cpu()
+                return hook
 
             handle = block.attn2.register_forward_hook(make_attn2_hook(i))
             self.hooks.append(handle)
+            handle = block.norm2.register_forward_hook(make_hook(f'block_{i}_norm2_output'))
+            self.hooks.append(handle)
+
+            attn = block.attn2
+          # 1. Hook Q projection
+            h = attn.to_q.register_forward_hook(
+                make_hook(f'block_{i}_attn2_query')
+            )
+            self.hooks.append(h)
+
+            # 2. Hook K projection
+            h = attn.to_k.register_forward_hook(
+                make_hook(f'block_{i}_attn2_key')
+            )
+            self.hooks.append(h)
+
+            # 3. Hook V projection
+            h = attn.to_v.register_forward_hook(
+                make_hook(f'block_{i}_attn2_value')
+            )
+            self.hooks.append(h)
+
+            # 4. Hook Q norm
+            h = attn.norm_q.register_forward_hook(
+                make_hook(f'block_{i}_attn2_query_normed')
+            )
+            self.hooks.append(h)
+
+            # 5. Hook K norm
+            h = attn.norm_k.register_forward_hook(
+                make_hook(f'block_{i}_attn2_key_normed')
+            )
+            self.hooks.append(h)
+
+            # 6. Hook output projection
+            h = attn.to_out[0].register_forward_hook(
+                make_hook(f'block_{i}_attn2_output')
+            )
+            self.hooks.append(h)
+
+            # 7. Hook final output (after dropout)
+            def final_hook(module, input, output):
+                self.outputs[f'block_{i}_attn2_final'] = output.detach().cpu()
+
+            h = attn.register_forward_hook(final_hook)
+            self.hooks.append(h)
+
 
             # Hook for FFN in each block
             def make_ffn_hook(block_idx):

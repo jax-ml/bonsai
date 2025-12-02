@@ -198,12 +198,16 @@ class CrossAttention(nnx.Module):
         self.kv_proj = nnx.Linear(cfg.hidden_dim, 2 * cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
         self.out_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
         self.q_norm = nnx.RMSNorm(cfg.hidden_dim, rngs=rngs)
+        self.k_norm = nnx.RMSNorm(cfg.hidden_dim, rngs=rngs)
 
     def __call__(self, x: Array, context: Array, deterministic: bool = True) -> Array:
         b, n, m = x.shape[0], x.shape[1], context.shape[1]
         # Apply normalization BEFORE reshaping to heads
         q = self.q_norm(self.q_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
-        k, v = self.kv_proj(context).reshape(b, m, 2, self.num_heads, self.head_dim).transpose(2, 0, 3, 1, 4)
+        kv = self.kv_proj(context).reshape(b, m, 2, self.num_heads, self.head_dim)
+        k, v = kv[:, :, 0], kv[:, :, 1]
+        k = self.k_norm(k).transpose(0, 2, 1, 3)
+        v = v.transpose(0, 2, 1, 3)
         attn = jax.nn.softmax(
             jnp.einsum("bhid,bhjd->bhij", q, k, precision=Precision.HIGHEST) / math.sqrt(self.head_dim), axis=-1
         )

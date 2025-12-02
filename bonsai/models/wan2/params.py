@@ -78,6 +78,7 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         # Transformer blocks - Cross attention (attn2)
         # Note: CrossAttention only has q_norm, not k_norm; norm_k is skipped
         r"blocks\.([0-9]+)\.attn2\.norm_q\.weight": (r"blocks.\1.cross_attn.q_norm.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.norm_k\.weight": (r"blocks.\1.cross_attn.k_norm.scale", Transform.NONE),
         r"blocks\.([0-9]+)\.attn2\.to_q\.weight": (r"blocks.\1.cross_attn.q_proj.kernel", Transform.TRANSPOSE),
         r"blocks\.([0-9]+)\.attn2\.to_q\.bias": (r"blocks.\1.cross_attn.q_proj.bias", Transform.NONE),
         # Note: to_k and to_v need special handling - they're fused into kv_proj in JAX
