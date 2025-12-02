@@ -322,21 +322,18 @@ def test_t5_e2e():
     ]
 
     print("\n[1/3] Loading models...")
-    model_ckpt_path = snapshot_download("google/umt5-base")
-
     tokenizer = AutoTokenizer.from_pretrained("google/umt5-base")
-
-    text_encoder_path = os.path.join(model_ckpt_path, "text_encoder")
-    safetensors_path = os.path.join(text_encoder_path, "model.safetensors")
+    model_ckpt_path = snapshot_download("google/umt5-base")
+    safetensors_path = os.path.join(model_ckpt_path, "model.safetensors")
 
     if not os.path.exists(safetensors_path):
         print("Converting to safetensors...")
-        temp_model = UMT5ForConditionalGeneration.from_pretrained(text_encoder_path)
-        temp_model.save_pretrained(text_encoder_path, safe_serialization=True)
+        temp_model = UMT5ForConditionalGeneration.from_pretrained(model_ckpt_path)
+        temp_model.save_pretrained(model_ckpt_path, safe_serialization=True)
         del temp_model
 
     # Load JAX encoder
-    jax_t5 = params.create_t5_encoder_from_safe_tensors(text_encoder_path, mesh=None)
+    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
 
     # Load full PyTorch model (encoder + decoder)
     pytorch_full_model = UMT5ForConditionalGeneration.from_pretrained(
