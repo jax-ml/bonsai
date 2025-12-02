@@ -292,7 +292,7 @@ def test_dit():
         compare_outputs(x_jax, block_output_torch, f"Block {i} Final Output", rtol=1e-2, atol=1e-3)
 
         if i > 0:  # Only compare first block in detail
-            x_jax = block(x_jax, text_embeds_jax, deterministic=True, rope_state=(rope_freqs, grid_sizes))
+            x_jax = block(x_jax, text_embeds_jax, time_proj_jax, deterministic=True, rope_state=(rope_freqs, grid_sizes))
 
     # 6. Final layer
     jax_dit_output = jax_dit.final_layer(x_jax, time_emb_jax)
