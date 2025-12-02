@@ -358,7 +358,7 @@ def test_t5_e2e():
                 do_sample=False,
             )
 
-        pytorch_text = tokenizer.decode(pytorch_outputs[0], skip_special_tokens=True)
+        pytorch_text = tokenizer.decode(pytorch_outputs[0])
         print(f"  Output: {pytorch_text}")
 
         # ============================================================
@@ -392,7 +392,7 @@ def test_t5_e2e():
                 do_sample=False,
             )
 
-        hybrid_text = tokenizer.decode(hybrid_outputs[0], skip_special_tokens=True)
+        hybrid_text = tokenizer.decode(hybrid_outputs[0])
         print(f"  Output: {hybrid_text}")
 
     print("\n[3/3] Summary")
