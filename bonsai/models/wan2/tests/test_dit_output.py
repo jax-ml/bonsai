@@ -294,6 +294,7 @@ def test_dit():
 
         if i > 0:  # Only compare first block in detail
             x_jax = block(x_jax, text_embeds_jax, time_proj_jax, deterministic=True, rope_state=(rope_freqs, grid_sizes))
+            compare_outputs(x_jax, intermediate_outputs[f'block_{i}_output'], f"Block {i} Output", rtol=1e-2, atol=1e-3)
 
     # 6. Final layer
     jax_dit_output = jax_dit.final_layer(x_jax, time_emb_jax)
