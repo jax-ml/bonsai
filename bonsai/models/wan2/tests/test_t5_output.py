@@ -185,18 +185,6 @@ def test_t5_intermediate():
         attn.k.register_forward_hook(make_hook(f"block_{i}_k_proj"))
         attn.v.register_forward_hook(make_hook(f"block_{i}_v_proj"))
 
-        # # Hook to capture position bias (computed inside attention)
-        # def make_pos_bias_hook(block_idx):
-        #     def pos_bias_hook(module, input, output):
-        #         # T5 attention returns (output, position_bias, ...)
-        #         if isinstance(output, tuple) and len(output) > 1:
-        #             pos_bias = output[1]  # position_bias is second return value
-        #             if pos_bias is not None:
-        #                 pytorch_intermediates[f"block_{block_idx}_position_bias"] = pos_bias.detach().cpu()
-        #     return pos_bias_hook
-
-        # attn.register_forward_hook(make_pos_bias_hook(i))
-
         if len(block.layer) > 1:
             block.layer[1].register_forward_hook(make_hook(f"block_{i}_ffn_output"))
 
