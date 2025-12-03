@@ -263,7 +263,7 @@ class Upsample3D(nnx.Module):
     def __init__(self, in_channels: int, out_channels: int, *, rngs: nnx.Rngs):
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.time_conv = CausalConv3d(in_channels, in_channels * 2, kernel_size=(3, 1, 1), rngs=rngs)
+        self.time_conv = CausalConv3d(in_channels, in_channels * 2, kernel_size=(3, 1, 1), padding=(1, 0, 0), rngs=rngs)
         self.spatial_conv = nnx.Conv(
             in_features=in_channels,
             out_features=out_channels,
@@ -350,7 +350,7 @@ class Decoder3D(nnx.Module):
 
         # Output head: 96 -> 3
         self.norm_out = RMSNorm(96, rngs=rngs)
-        self.conv_out = CausalConv3d(96, 3, kernel_size=(3, 3, 3), rngs=rngs)
+        self.conv_out = CausalConv3d(96, 3, kernel_size=(3, 3, 3), padding=(1, 1, 1), rngs=rngs)
 
     def __call__(self, z: Array) -> Array:
         """
