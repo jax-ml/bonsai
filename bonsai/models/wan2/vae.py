@@ -147,9 +147,9 @@ class ResidualBlock(nnx.Module):
 
     def __init__(self, in_channels: int, out_channels: int, *, rngs: nnx.Rngs):
         self.norm1 = RMSNorm(in_channels, rngs=rngs)
-        self.conv1 = CausalConv3d(in_channels, out_channels, kernel_size=(3, 3, 3), rngs=rngs)
+        self.conv1 = CausalConv3d(in_channels, out_channels, kernel_size=(3, 3, 3), padding=(1, 1, 1), rngs=rngs)
         self.norm2 = RMSNorm(out_channels, rngs=rngs)
-        self.conv2 = CausalConv3d(out_channels, out_channels, kernel_size=(3, 3, 3), rngs=rngs)
+        self.conv2 = CausalConv3d(out_channels, out_channels, kernel_size=(3, 3, 3), padding=(1, 1, 1), rngs=rngs)
 
         if in_channels != out_channels:
             self.skip_conv = CausalConv3d(in_channels, out_channels, kernel_size=(1, 1, 1), rngs=rngs)
@@ -157,7 +157,6 @@ class ResidualBlock(nnx.Module):
             self.skip_conv = None
 
     def __call__(self, x: Array) -> Array:
-        # x: [B, T, H, W, C] - already in JAX format
         residual = x
 
         x = self.norm1(x)
