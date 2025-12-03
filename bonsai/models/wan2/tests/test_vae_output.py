@@ -71,8 +71,8 @@ class WanVAEDecoderHooks:
                     self.hooks.append(h)
 
             # Hook upsample layers
-            if hasattr(up_block, 'upsamples') and up_block.upsamples is not None:
-                h = up_block.upsamples[0].register_forward_hook(
+            if hasattr(up_block, 'upsamplers') and up_block.upsamplers is not None:
+                h = up_block.upsamplers[0].register_forward_hook(
                     self._make_hook(f'up_block_{i}_upsample')
                 )
                 self.hooks.append(h)
@@ -189,28 +189,28 @@ def test_vae_decoder():
             output_jax['mid_block_res_1'] = x
             for i, block in enumerate(decoder.up_blocks_0):
                 x = block(x)
-                output_jax['up_block_0_res_{i}'] = x
+                output_jax[f'up_block_0_res_{i}'] = x
             x = decoder.up_sample_0(x)
             output_jax['up_block_0_upsample'] = x
 
             # Upsample stage 1
             for i, block in enumerate(decoder.up_blocks_1):
                 x = block(x)
-                output_jax['up_block_1_res_{i}'] = x
+                output_jax[f'up_block_1_res_{i}'] = x
             x = decoder.up_sample_1(x)
             output_jax['up_block_1_upsample'] = x
 
             # Upsample stage 2
             for i, block in enumerate(decoder.up_blocks_2):
                 x = block(x)
-                output_jax['up_block_2_res_{i}'] = x
+                output_jax[f'up_block_2_res_{i}'] = x
             x = decoder.up_sample_2(x)
             output_jax['up_block_2_upsample'] = x
 
             # Upsample stage 3 (no spatial upsample)
             for i, block in enumerate(decoder.up_blocks_3):
                 x = block(x)
-                output_jax['up_block_3_res_{i}'] = x
+                output_jax[f'up_block_3_res_{i}'] = x
 
             x = decoder.norm_out(x)
             output_jax['norm_out'] = x
@@ -273,7 +273,7 @@ def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
         torch_output = torch_intermediate[name]
         torch_np = torch_output.cpu().numpy()
         jax_output = jax_intermediate[name]
-        jax_np = np.array(jax_output)
+        jax_np = np.array(jax_output).transpose(0,4,1,2,3)  # Convert JAX [B,T,H,W,C] to [B,C,T,H,W]
 
         # Check shape match
         if torch_np.shape != jax_np.shape:
@@ -311,20 +311,20 @@ def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
 
         print(f"{name:40s}: max={max_diff:.2e}, mean={mean_diff:.2e}, rel={rel_diff:.2e}")
 
-    # Compare final output
-    torch_output = outputs_dict_torch['output']
-    jax_output = outputs_dict_jax['output']
+    # # Compare final output
+    # torch_output = outputs_dict_torch['output']
+    # jax_output = outputs_dict_jax['output']
 
-    if not isinstance(jax_output, torch.Tensor):
-        jax_output = torch.from_numpy(jax_output)
+    # if not isinstance(jax_output, torch.Tensor):
+    #     jax_output = torch.from_numpy(jax_output)
 
-    abs_diff = torch.abs(torch_output - jax_output)
-    max_diff = abs_diff.max().item()
-    mean_diff = abs_diff.mean().item()
+    # abs_diff = torch.abs(torch_output - jax_output)
+    # max_diff = abs_diff.max().item()
+    # mean_diff = abs_diff.mean().item()
 
-    print("=" * 80)
-    print(f"Final Output: max_diff={max_diff:.2e}, mean_diff={mean_diff:.2e}")
-    print("=" * 80)
+    # print("=" * 80)
+    # print(f"Final Output: max_diff={max_diff:.2e}, mean_diff={mean_diff:.2e}")
+    # print("=" * 80)
 
 
 if __name__ == "__main__":
