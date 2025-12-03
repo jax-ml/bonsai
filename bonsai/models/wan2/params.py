@@ -33,8 +33,8 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         """Transformations for model parameters"""
 
         NONE = None
-        TRANSPOSE = ((1, 0), None, False)  # For linear layers: (out, in) -> (in, out)
-        TRANSPOSE_CONV = ((2, 3, 4, 1, 0), None, False)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
+        TRANSPOSE = ((1, 0), None)  # For linear layers: (out, in) -> (in, out)
+        TRANSPOSE_CONV = ((2, 3, 4, 1, 0), None)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
 
     mapping = {
         # Patch embedding (input projection)
@@ -111,9 +111,9 @@ def _get_vae_key_mapping():
         """Transformations for VAE parameters"""
 
         NONE = None
-        TRANSPOSE_2D_CONV = ((2, 3, 1, 0), None, False)  # For 2D conv: (out, in, h, w) -> (h, w, in, out)
-        TRANSPOSE_3D = ((2, 3, 4, 1, 0), None, False)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
-        SQUEEZE = (None, (-1,), False)  # Squeeze to 1D: (C, 1, 1, 1) -> (C,)
+        TRANSPOSE_2D_CONV = ((2, 3, 1, 0), None)  # For 2D conv: (out, in, h, w) -> (h, w, in, out)
+        TRANSPOSE_3D = ((2, 3, 4, 1, 0), None)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
+        SQUEEZE = (None, (-1,))  # Squeeze to 1D: (C, 1, 1, 1) -> (C,)
 
     # PyTorch format: (out_channels, in_channels, kernel_size...)
     # JAX format: (kernel_size..., in_channels, out_channels)
@@ -125,30 +125,19 @@ def _get_vae_key_mapping():
         r"decoder\.conv_in\.weight": ("decoder.conv_in.conv.kernel", Transform.TRANSPOSE_3D),
         r"decoder\.conv_in\.bias": ("decoder.conv_in.conv.bias", Transform.NONE),
         # Mid block resnets
-        r"decoder\.mid_block\.resnets\.0\.norm1\.gamma": ("decoder.mid_block1.norm1.scale", Transform.SQUEEZE),
-        r"decoder\.mid_block\.resnets\.0\.conv1\.weight": (
+        r"decoder\.mid_block\.resnets\.[0-1]\.norm1\.gamma": ("decoder.mid_block\1.norm1.scale", Transform.SQUEEZE),
+        r"decoder\.mid_block\.resnets\.[0-1]\.conv1\.weight": (
             "decoder.mid_block1.conv1.conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
-        r"decoder\.mid_block\.resnets\.0\.conv1\.bias": ("decoder.mid_block1.conv1.conv.bias", Transform.NONE),
-        r"decoder\.mid_block\.resnets\.0\.norm2\.gamma": ("decoder.mid_block1.norm2.scale", Transform.SQUEEZE),
-        r"decoder\.mid_block\.resnets\.0\.conv2\.weight": (
-            "decoder.mid_block1.conv2.conv.kernel",
+        r"decoder\.mid_block\.resnets\.[0-1]\.conv1\.bias": ("decoder.mid_block\1.conv1.conv.bias", Transform.NONE),
+        r"decoder\.mid_block\.resnets\.[0-1]\.norm2\.gamma": ("decoder.mid_block\1.norm2.scale", Transform.SQUEEZE),
+        r"decoder\.mid_block\.resnets\.[0-1]\.norm2\.bias": ("decoder.mid_block\1.norm2.scale", Transform.NONE),
+        r"decoder\.mid_block\.resnets\.[0-1]\.conv2\.weight": (
+            "decoder.mid_block\1.conv2.conv.kernel",
             Transform.TRANSPOSE_3D,
         ),
-        r"decoder\.mid_block\.resnets\.0\.conv2\.bias": ("decoder.mid_block1.conv2.conv.bias", Transform.NONE),
-        r"decoder\.mid_block\.resnets\.1\.norm1\.gamma": ("decoder.mid_block2.norm1.scale", Transform.SQUEEZE),
-        r"decoder\.mid_block\.resnets\.1\.conv1\.weight": (
-            "decoder.mid_block2.conv1.conv.kernel",
-            Transform.TRANSPOSE_3D,
-        ),
-        r"decoder\.mid_block\.resnets\.1\.conv1\.bias": ("decoder.mid_block2.conv1.conv.bias", Transform.NONE),
-        r"decoder\.mid_block\.resnets\.1\.norm2\.gamma": ("decoder.mid_block2.norm2.scale", Transform.SQUEEZE),
-        r"decoder\.mid_block\.resnets\.1\.conv2\.weight": (
-            "decoder.mid_block2.conv2.conv.kernel",
-            Transform.TRANSPOSE_3D,
-        ),
-        r"decoder\.mid_block\.resnets\.1\.conv2\.bias": ("decoder.mid_block2.conv2.conv.bias", Transform.NONE),
+        r"decoder\.mid_block\.resnets\.[0-1]\.conv2\.bias": ("decoder.mid_block\1.conv2.conv.bias", Transform.NONE),
         # Mid attention block
         r"decoder\.mid_block\.attentions\.0\.norm\.gamma": ("decoder.mid_attn.norm.scale", Transform.SQUEEZE),
         r"decoder\.mid_block\.attentions\.0\.to_qkv\.weight": (
@@ -265,13 +254,11 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict=N
     key, *rest = keys
     if not rest:
         if transform is not None and transform.value is not None:
-            permute, reshape, reshape_first = transform.value
-            if reshape_first and reshape is not None:
+            permute, reshape = transform.value
+            if reshape is not None:
                 tensor = tensor.reshape(reshape)
             if permute:
                 tensor = tensor.transpose(permute)
-            if not reshape_first and reshape is not None:
-                tensor = tensor.reshape(reshape)
 
         if key not in state_dict:
             raise KeyError(f"Key {key} not found in state_dict. Available keys: {list(state_dict.keys())[:10]}...")
@@ -506,7 +493,7 @@ def _get_t5_key_mapping():
         """Transformations for T5 parameters"""
 
         NONE = None
-        TRANSPOSE = ((1, 0), None, False)  # For linear layers: (out, in) -> (in, out)
+        TRANSPOSE = ((1, 0), None)  # For linear layers: (out, in) -> (in, out)
 
     # T5/UMT5 uses standard HuggingFace naming
     mapping = {
