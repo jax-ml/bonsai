@@ -217,10 +217,11 @@ def test_vae_decoder():
             x = nnx.silu(x)
             x = decoder.conv_out(x)
             output_jax['conv_out'] = x
-
-        # else:
-        #     frame_out = vae_jax.decoder(frame_latent)
-        #     frames.append(frame_out)
+            frames.append(x)
+        else:
+            frame_out = vae_jax.decoder(frame_latent)
+            # output_jax['conv_out'] = frame_out
+            frames.append(frame_out)
 
     print("\n" + "=" * 80)
     print(f"Final decoded output shape: {decoded.shape}")
@@ -282,11 +283,13 @@ def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
             print(f"     JAX:     {jax_np.shape}")
             continue
 
-        # Calculate differences
-        abs_diff = torch.abs(torch_np - jax_np)
-        max_diff = abs_diff.max().item()
-        mean_diff = abs_diff.mean().item()
-        rel_diff = (abs_diff / (torch.abs(torch_np) + 1e-8)).mean().item()
+        abs_diff = np.abs(jax_np - torch_np)
+        rel_diff = abs_diff / (np.abs(torch_np) + 1e-10)
+
+        max_abs_diff = np.max(abs_diff)
+        max_rel_diff = np.max(rel_diff)
+        mean_abs_diff = np.mean(abs_diff)
+        mean_rel_diff = np.mean(rel_diff)
 
         rtol = 1e-2
         atol = 1e-4
@@ -309,7 +312,7 @@ def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
         # else:
         #     status = "✗ LARGE DIFF"
 
-        print(f"{name:40s}: max={max_diff:.2e}, mean={mean_diff:.2e}, rel={rel_diff:.2e}")
+        print(f"{name:40s}: max_diff={max_abs_diff:.2e}, mean_diff={mean_abs_diff:.2e}, mean_rel_diff={mean_rel_diff:.2e}")
 
     # # Compare final output
     # torch_output = outputs_dict_torch['output']
