@@ -32,7 +32,8 @@ import imageio
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from jaxtyping import Array
+from jax.lax import Precision
+from jaxtyping import Array, Union
 
 
 @dataclass
@@ -86,7 +87,13 @@ class CausalConv3d(nnx.Module):
     """Causal 3D convolution that doesn't look into the future."""
 
     def __init__(
-        self, in_channels: int, out_channels: int, kernel_size: Tuple[int, int, int] = (3, 3, 3), *, rngs: nnx.Rngs
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Tuple[int, int, int] = (3, 3, 3),
+        *,
+        rngs: nnx.Rngs,
+        padding: Tuple[int, int, int] = (0, 0, 0),
     ):
         self.kernel_size = kernel_size
         # Causal padding: pad past frames, no future frames
@@ -96,15 +103,20 @@ class CausalConv3d(nnx.Module):
             kernel_size=kernel_size,
             padding="VALID",  # We'll handle padding manually
             rngs=rngs,
+            precision=Precision.HIGHEST,
+        )
+        self.padding = (
+            (0, 0),
+            (2 * self.padding[0], 0),
+            (self.padding[1], self.padding[1]),
+            (self.padding[2], self.padding[2]),
+            (0, 0),
         )
 
     def __call__(self, x: Array) -> Array:
         # x: [B, T, H, W, C] (JAX channel-last format)
         # Causal padding: (kernel_t - 1, 0) for temporal, symmetric for spatial
-        kt, kh, kw = self.kernel_size
-        # Pad: (batch, temporal_past, temporal_future, height_before, height_after, width_before, width_after, channel)
-        padding = ((0, 0), (kt - 1, 0), (kh // 2, kh // 2), (kw // 2, kw // 2), (0, 0))
-        x_padded = jnp.pad(x, padding, mode="constant")
+        x_padded = jnp.pad(x, self.padding, mode="constant")
         out = self.conv(x_padded)
         return out
 
@@ -168,9 +180,21 @@ class AttentionBlock(nnx.Module):
     def __init__(self, channels: int, *, rngs: nnx.Rngs):
         self.norm = RMSNorm(channels, rngs=rngs)
         self.qkv = nnx.Conv(
-            in_features=channels, out_features=channels * 3, kernel_size=(1, 1), use_bias=True, rngs=rngs
+            in_features=channels,
+            out_features=channels * 3,
+            kernel_size=(1, 1),
+            use_bias=True,
+            rngs=rngs,
+            precision=Precision.HIGHEST,
         )
-        self.proj = nnx.Conv(in_features=channels, out_features=channels, kernel_size=(1, 1), use_bias=True, rngs=rngs)
+        self.proj = nnx.Conv(
+            in_features=channels,
+            out_features=channels,
+            kernel_size=(1, 1),
+            use_bias=True,
+            rngs=rngs,
+            precision=Precision.HIGHEST,
+        )
 
     def __call__(self, x: Array) -> Array:
         # x: [B, T, H, W, C]
@@ -214,7 +238,12 @@ class Upsample2D(nnx.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.conv = nnx.Conv(
-            in_features=in_channels, out_features=out_channels, kernel_size=(3, 3), padding=1, rngs=rngs
+            in_features=in_channels,
+            out_features=out_channels,
+            kernel_size=(3, 3),
+            padding=1,
+            rngs=rngs,
+            precision=Precision.HIGHEST,
         )
 
     def __call__(self, x: Array) -> Array:
@@ -237,7 +266,12 @@ class Upsample3D(nnx.Module):
         self.out_channels = out_channels
         self.time_conv = CausalConv3d(in_channels, in_channels * 2, kernel_size=(3, 1, 1), rngs=rngs)
         self.spatial_conv = nnx.Conv(
-            in_features=in_channels, out_features=out_channels, kernel_size=(3, 3), padding=1, rngs=rngs
+            in_features=in_channels,
+            out_features=out_channels,
+            kernel_size=(3, 3),
+            padding=1,
+            rngs=rngs,
+            precision=Precision.HIGHEST,
         )
 
     def __call__(self, x: Array) -> Array:
@@ -268,7 +302,7 @@ class Decoder3D(nnx.Module):
 
     def __init__(self, *, rngs: nnx.Rngs):
         # Initial convolution: 16 -> 384
-        self.conv_in = CausalConv3d(16, 384, kernel_size=(3, 3, 3), rngs=rngs)
+        self.conv_in = CausalConv3d(16, 384, kernel_size=(3, 3, 3), rngs=rngs, padding=(1, 1, 1))
 
         # Middle blocks (at lowest resolution)
         self.mid_block1 = ResidualBlock(384, 384, rngs=rngs)
