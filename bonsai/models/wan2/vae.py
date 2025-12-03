@@ -107,9 +107,9 @@ class CausalConv3d(nnx.Module):
         )
         self.padding = (
             (0, 0),
-            (2 * self.padding[0], 0),
-            (self.padding[1], self.padding[1]),
-            (self.padding[2], self.padding[2]),
+            (2 * padding[0], 0),
+            (padding[1], padding[1]),
+            (padding[2], padding[2]),
             (0, 0),
         )
 
