@@ -149,8 +149,8 @@ def test_vae_decoder():
     ).to(dtype=torch.float32)
 
     latents = torch.randn(batch_size, z_dim, num_frames, height, width,dtype=torch.float32)
-    latents_jax = jnp.array(latents.numpy().transpose(0,2,3,4,1))
     latents = latents / latents_std + latents_mean
+    latents_jax = jnp.array(latents.numpy().transpose(0,2,3,4,1))
 
 
     print(f"\nInput latents shape: {latents.shape}")
