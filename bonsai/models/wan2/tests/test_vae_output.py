@@ -270,37 +270,46 @@ def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
             print(f"⚠  {name:40s}: MISSING in JAX implementation")
             continue
 
-        torch_tensor = torch_intermediate[name]
-        jax_tensor = jax_intermediate[name]
-
-        # Convert JAX array to torch if needed
-        if not isinstance(jax_tensor, torch.Tensor):
-            jax_tensor = torch.from_numpy(jax_tensor)
+        torch_output = torch_intermediate[name]
+        torch_np = torch_output.cpu().numpy()
+        jax_output = jax_intermediate[name]
+        jax_np = np.array(jax_output)
 
         # Check shape match
-        if torch_tensor.shape != jax_tensor.shape:
+        if torch_np.shape != jax_np.shape:
             print(f"✗  {name:40s}: SHAPE MISMATCH")
-            print(f"     PyTorch: {torch_tensor.shape}")
-            print(f"     JAX:     {jax_tensor.shape}")
+            print(f"     PyTorch: {torch_np.shape}")
+            print(f"     JAX:     {jax_np.shape}")
             continue
 
         # Calculate differences
-        abs_diff = torch.abs(torch_tensor - jax_tensor)
+        abs_diff = torch.abs(torch_np - jax_np)
         max_diff = abs_diff.max().item()
         mean_diff = abs_diff.mean().item()
-        rel_diff = (abs_diff / (torch.abs(torch_tensor) + 1e-8)).mean().item()
+        rel_diff = (abs_diff / (torch.abs(torch_np) + 1e-8)).mean().item()
 
-        # Status
-        if max_diff < 1e-5:
-            status = "✓ EXACT"
-        elif max_diff < 1e-3:
-            status = "✓ CLOSE"
-        elif max_diff < 1e-1:
-            status = "⚠ DIFF"
+        rtol = 1e-2
+        atol = 1e-4
+        close = np.allclose(jax_np, torch_np, rtol=rtol, atol=atol)
+        if close:
+            print(f"\n✅ Outputs match within tolerance (rtol={rtol}, atol={atol})")
         else:
-            status = "✗ LARGE DIFF"
+            print(f"\n❌ Outputs do NOT match (rtol={rtol}, atol={atol})")
+            # Show some mismatched locations
+            mismatch_mask = ~np.isclose(jax_np, torch_np, rtol=rtol, atol=atol)
+            n_mismatches = np.sum(mismatch_mask)
+            print(f"  Number of mismatches: {n_mismatches} / {jax_np.size} ({100 * n_mismatches / jax_np.size:.2f}%)")
+        # # Status
+        # if max_diff < 1e-5:
+        #     status = "✓ EXACT"
+        # elif max_diff < 1e-3:
+        #     status = "✓ CLOSE"
+        # elif max_diff < 1e-1:
+        #     status = "⚠ DIFF"
+        # else:
+        #     status = "✗ LARGE DIFF"
 
-        print(f"{status:12s} {name:40s}: max={max_diff:.2e}, mean={mean_diff:.2e}, rel={rel_diff:.2e}")
+        print(f"{name:40s}: max={max_diff:.2e}, mean={mean_diff:.2e}, rel={rel_diff:.2e}")
 
     # Compare final output
     torch_output = outputs_dict_torch['output']
