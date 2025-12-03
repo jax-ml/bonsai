@@ -172,6 +172,7 @@ def test_vae_decoder():
 
     output_jax= {}
     z = vae_jax.conv2(latents_jax)
+    compare_outputs(z, outputs['post_quant_conv'], 'post_quant_conv', rtol=1e-2, atol=1e-4)
     output_jax['post_quant_conv'] = z
     t = z.shape[1]
     frames = []
@@ -180,42 +181,55 @@ def test_vae_decoder():
         frame_latent = z[:, i : i + 1, :, :, :]
         if i==0:
             x = decoder.conv_in(frame_latent)
+            compare_outputs(x, outputs['conv_in'], 'conv_in', rtol=1e-2, atol=1e-4)
             output_jax['conv_in'] = x
             x= decoder.mid_block1(x)
+            compare_outputs(x, outputs['mid_block'], 'mid_block', rtol=1e-2, atol=1e-4)
             output_jax['mid_block_res_0'] = x
             x = decoder.mid_attn(x)
+            compare_outputs(x, outputs['mid_block_attn_0'], 'mid_block_attn_0', rtol=1e-2, atol=1e-4)
             output_jax['mid_block_attn_0'] = x
             x = decoder.mid_block2(x)
+            compare_outputs(x, outputs['mid_block_res_1'], 'mid_block_res_1', rtol=1e-2, atol=1e-4)
             output_jax['mid_block_res_1'] = x
             for i, block in enumerate(decoder.up_blocks_0):
                 x = block(x)
+                compare_outputs(x, outputs[f'up_block_0_res_{i}'], f'up_block_0_res_{i}', rtol=1e-2, atol=1e-4)
                 output_jax[f'up_block_0_res_{i}'] = x
             x = decoder.up_sample_0(x)
+            compare_outputs(x, outputs['up_block_0_upsample'], 'up_block_0_upsample', rtol=1e-2, atol=1e-4)
             output_jax['up_block_0_upsample'] = x
 
             # Upsample stage 1
             for i, block in enumerate(decoder.up_blocks_1):
                 x = block(x)
+                compare_outputs(x, outputs[f'up_block_1_res_{i}'], f'up_block_1_res_{i}', rtol=1e-2, atol=1e-4)
                 output_jax[f'up_block_1_res_{i}'] = x
             x = decoder.up_sample_1(x)
+            compare_outputs(x, outputs['up_block_1_upsample'], 'up_block_1_upsample', rtol=1e-2, atol=1e-4)
             output_jax['up_block_1_upsample'] = x
 
             # Upsample stage 2
             for i, block in enumerate(decoder.up_blocks_2):
                 x = block(x)
+                compare_outputs(x, outputs[f'up_block_2_res_{i}'], f'up_block_2_res_{i}', rtol=1e-2, atol=1e-4)
                 output_jax[f'up_block_2_res_{i}'] = x
             x = decoder.up_sample_2(x)
+            compare_outputs(x, outputs['up_block_2_upsample'], 'up_block_2_upsample', rtol=1e-2, atol=1e-4)
             output_jax['up_block_2_upsample'] = x
 
             # Upsample stage 3 (no spatial upsample)
             for i, block in enumerate(decoder.up_blocks_3):
                 x = block(x)
+                compare_outputs(x, outputs[f'up_block_3_res_{i}'], f'up_block_3_res_{i}', rtol=1e-2, atol=1e-4)
                 output_jax[f'up_block_3_res_{i}'] = x
 
             x = decoder.norm_out(x)
+            compare_outputs(x, outputs['norm_out'], 'norm_out', rtol=1e-2, atol=1e-4)
             output_jax['norm_out'] = x
             x = nnx.silu(x)
             x = decoder.conv_out(x)
+            compare_outputs(x, outputs['conv_out'], 'conv_out', rtol=1e-2, atol=1e-4)
             output_jax['conv_out'] = x
             frames.append(x)
         else:
@@ -240,7 +254,7 @@ def test_vae_decoder():
         'intermediate': output_jax
     }
 
-    compare_with_jax_decoder(outputs_dict, outputs_dict_jax)
+    # compare_with_jax_decoder(outputs_dict, outputs_dict_jax)
 
     # torch.save(outputs_dict, 'wan_vae_decoder_outputs.pt')
     # print("\n✓ Saved outputs to 'wan_vae_decoder_outputs.pt'")
@@ -250,6 +264,58 @@ def test_vae_decoder():
 
     return outputs_dict
 
+def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-2, atol: float = 1e-4):
+    if torch_output.dtype == torch.bfloat16:
+        torch_output = torch_output.float()
+
+    if isinstance(torch_output, torch.Tensor):
+        torch_np = torch_output.detach().cpu().numpy()
+    else:
+        torch_np = np.array(torch_output)
+
+    jax_np = np.array(jax_output)
+
+    print(f"\n{'=' * 80}")
+    print(f"Comparing: {name}")
+    print(f"{'=' * 80}")
+    print(f"JAX shape:   {jax_np.shape}")
+    print(f"Torch shape: {torch_np.shape}")
+    print(f"JAX dtype:   {jax_np.dtype}")
+    print(f"Torch dtype: {torch_np.dtype}")
+
+    if jax_np.shape != torch_np.shape:
+        print("Shape mismatch!")
+        return False
+
+    abs_diff = np.abs(jax_np - torch_np)
+    rel_diff = abs_diff / (np.abs(torch_np) + 1e-10)
+
+    max_abs_diff = np.max(abs_diff)
+    max_rel_diff = np.max(rel_diff)
+    mean_abs_diff = np.mean(abs_diff)
+    mean_rel_diff = np.mean(rel_diff)
+
+    print("\nStatistics:")
+    print(f"  Max absolute difference: {max_abs_diff:.2e}")
+    print(f"  Max relative difference: {max_rel_diff:.2e}")
+    print(f"  Mean absolute difference: {mean_abs_diff:.2e}")
+    print(f"  Mean relative difference: {mean_rel_diff:.2e}")
+
+    print(f"\nJAX output range:   [{np.min(jax_np):.4f}, {np.max(jax_np):.4f}]")
+    print(f"Torch output range: [{np.min(torch_np):.4f}, {np.max(torch_np):.4f}]")
+
+    close = np.allclose(jax_np, torch_np, rtol=rtol, atol=atol)
+
+    if close:
+        print(f"\n✅ Outputs match within tolerance (rtol={rtol}, atol={atol})")
+    else:
+        print(f"\n❌ Outputs do NOT match (rtol={rtol}, atol={atol})")
+        # Show some mismatched locations
+        mismatch_mask = ~np.isclose(jax_np, torch_np, rtol=rtol, atol=atol)
+        n_mismatches = np.sum(mismatch_mask)
+        print(f"  Number of mismatches: {n_mismatches} / {jax_np.size} ({100 * n_mismatches / jax_np.size:.2f}%)")
+
+    return close
 
 def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
     """
