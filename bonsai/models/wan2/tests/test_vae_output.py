@@ -140,11 +140,11 @@ def test_vae_decoder():
     width = 52
 
     latents_mean = (
-        torch.tensor(vae_lib.VAEConfig.latents_mean)
+        torch.tensor(vae_lib.VAEConfig.latent_mean)
         .view(1, 16, 1, 1, 1)
         .to(dtype=torch.float32)
     )
-    latents_std = 1.0 / torch.tensor(vae_lib.VAEConfig.latents_std).view(
+    latents_std = 1.0 / torch.tensor(vae_lib.VAEConfig.latent_std).view(
         1, 16, 1, 1, 1
     ).to(dtype=torch.float32)
     latents = latents / latents_std + latents_mean
