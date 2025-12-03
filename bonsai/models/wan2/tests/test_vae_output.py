@@ -219,7 +219,7 @@ def test_vae_decoder():
             compare_outputs(x, outputs['conv_in'], 'conv_in', rtol=1e-2, atol=1e-4)
             output_jax['conv_in'] = x
             x= decoder.mid_block1(x)
-            compare_outputs(x, outputs['mid_block'], 'mid_block', rtol=1e-2, atol=1e-4)
+            compare_outputs(x, outputs['mid_block_res_0'], 'mid_block', rtol=1e-2, atol=1e-4)
             output_jax['mid_block_res_0'] = x
             x = decoder.mid_attn(x)
             compare_outputs(x, outputs['mid_block_attn_0'], 'mid_block_attn_0', rtol=1e-2, atol=1e-4)
