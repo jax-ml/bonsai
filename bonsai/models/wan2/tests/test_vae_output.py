@@ -180,7 +180,7 @@ def test_vae_decoder():
         frame_latent = z[:, i : i + 1, :, :, :]
         if i==0:
             x = decoder.conv_in(frame_latent)
-            output_jax['conv_in'] = frame_out
+            output_jax['conv_in'] = x
             x= decoder.mid_block1(x)
             output_jax['mid_block_res_0'] = x
             x = decoder.mid_attn(x)
@@ -218,9 +218,9 @@ def test_vae_decoder():
             x = decoder.conv_out(x)
             output_jax['conv_out'] = x
 
-        else:
-            frame_out = vae_jax.decoder(frame_latent)
-        frames.append(frame_out)
+        # else:
+        #     frame_out = vae_jax.decoder(frame_latent)
+        #     frames.append(frame_out)
 
     print("\n" + "=" * 80)
     print(f"Final decoded output shape: {decoded.shape}")
