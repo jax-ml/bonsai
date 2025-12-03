@@ -147,10 +147,10 @@ def test_vae_decoder():
     latents_std = 1.0 / torch.tensor(vae_lib.VAEConfig.latent_std).view(
         1, 16, 1, 1, 1
     ).to(dtype=torch.float32)
-    latents = latents / latents_std + latents_mean
 
     latents = torch.randn(batch_size, z_dim, num_frames, height, width,dtype=torch.float32)
     latents_jax = jnp.array(latents.numpy().transpose(0,2,3,4,1))
+    latents = latents / latents_std + latents_mean
 
 
     print(f"\nInput latents shape: {latents.shape}")
