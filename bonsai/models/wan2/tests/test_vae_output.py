@@ -19,25 +19,26 @@ class WanVAEDecoderHooks:
         self.decoder = vae.decoder
         self.outputs = OrderedDict()
         self.hooks = []
+        self.capture_enabled = False  # Control when to capture
 
     def register_decoder_hooks(self):
         """Register hooks on all decoder layers"""
 
         # 1. Hook post_quant_conv (before decoder)
         h = self.vae.post_quant_conv.register_forward_hook(
-            lambda m, inp, out: self.outputs.update({'post_quant_conv': out.detach().cpu()})
+            self._make_conditional_hook('post_quant_conv')
         )
         self.hooks.append(h)
 
         # 2. Hook conv_in
         h = self.decoder.conv_in.register_forward_hook(
-            lambda m, inp, out: self.outputs.update({'conv_in': out.detach().cpu()})
+            self._make_conditional_hook('conv_in')
         )
         self.hooks.append(h)
 
         # 3. Hook mid_block
         h = self.decoder.mid_block.register_forward_hook(
-            lambda m, inp, out: self.outputs.update({'mid_block': out.detach().cpu()})
+            self._make_conditional_hook('mid_block')
         )
         self.hooks.append(h)
 
@@ -45,20 +46,20 @@ class WanVAEDecoderHooks:
         if hasattr(self.decoder.mid_block, 'resnets'):
             for i, res_block in enumerate(self.decoder.mid_block.resnets):
                 h = res_block.register_forward_hook(
-                    self._make_hook(f'mid_block_res_{i}')
+                    self._make_conditional_hook(f'mid_block_res_{i}')
                 )
                 self.hooks.append(h)
         if hasattr(self.decoder.mid_block, 'attentions'):
             for i, attn_block in enumerate(self.decoder.mid_block.attentions):
                 h = attn_block.register_forward_hook(
-                    self._make_hook(f'mid_block_attn_{i}')
+                    self._make_conditional_hook(f'mid_block_attn_{i}')
                 )
                 self.hooks.append(h)
 
         # 5. Hook each up_block
         for i, up_block in enumerate(self.decoder.up_blocks):
             h = up_block.register_forward_hook(
-                self._make_hook(f'up_block_{i}')
+                self._make_conditional_hook(f'up_block_{i}')
             )
             self.hooks.append(h)
 
@@ -66,20 +67,20 @@ class WanVAEDecoderHooks:
             if hasattr(up_block, 'resnets'):
                 for j, res_block in enumerate(up_block.resnets):
                     h = res_block.register_forward_hook(
-                        self._make_hook(f'up_block_{i}_res_{j}')
+                        self._make_conditional_hook(f'up_block_{i}_res_{j}')
                     )
                     self.hooks.append(h)
 
             # Hook upsample layers
             if hasattr(up_block, 'upsamplers') and up_block.upsamplers is not None:
                 h = up_block.upsamplers[0].register_forward_hook(
-                    self._make_hook(f'up_block_{i}_upsample')
+                    self._make_conditional_hook(f'up_block_{i}_upsample')
                 )
                 self.hooks.append(h)
 
         # 6. Hook norm_out
         h = self.decoder.norm_out.register_forward_hook(
-            lambda m, inp, out: self.outputs.update({'norm_out': out.detach().cpu()})
+            self._make_conditional_hook('norm_out')
         )
         self.hooks.append(h)
 
@@ -89,9 +90,42 @@ class WanVAEDecoderHooks:
 
         # 8. Hook conv_out (final output)
         h = self.decoder.conv_out.register_forward_hook(
-            lambda m, inp, out: self.outputs.update({'conv_out': out.detach().cpu()})
+            self._make_conditional_hook('conv_out')
         )
         self.hooks.append(h)
+
+    def _make_conditional_hook(self, name):
+        """Create hook that only captures when enabled"""
+        def hook(module, input, output):
+            if self.capture_enabled:
+                self.outputs[name] = output.detach().cpu()
+        return hook
+
+
+    def decode_first_frame_only(self, latents):
+        """Decode only first frame with hooks enabled"""
+
+        # Extract first frame
+        z_first = latents[:, :, 0:1, :, :]  # (B, C, 1, H, W)
+
+        # Enable capture
+        self.capture_enabled = True
+
+        # Run through decoder directly (bypass frame loop)
+        with torch.no_grad():
+            x = self.vae.post_quant_conv(z_first)
+            out = self.decoder(
+                x,
+                feat_cache=None,  # No cache for single frame
+                feat_idx=[0],
+                first_chunk=True
+            )
+
+        # Disable capture
+        self.capture_enabled = False
+
+        return out
+
 
     def _make_hook(self, name):
         """Create a hook function with closure over name"""
@@ -160,6 +194,7 @@ def test_vae_decoder():
     with torch.no_grad():
         decoded = vae.decode(latents).sample
 
+    first_frame_output = hook_manager.decode_first_frame_only(latents)
     # Get captured outputs
     outputs = hook_manager.get_outputs()
 
