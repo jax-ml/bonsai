@@ -273,7 +273,7 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
     else:
         torch_np = np.array(torch_output)
 
-    jax_np = np.array(jax_output)
+    jax_np = np.array(jax_output).transpose(0,4,1,2,3)  # Convert JAX [B,T,H,W,C] to [B,C,T,H,W]
 
     print(f"\n{'=' * 80}")
     print(f"Comparing: {name}")
