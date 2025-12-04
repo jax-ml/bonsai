@@ -129,6 +129,7 @@ class CausalConv3d(nnx.Module):
 
         if cache is not None and cache_t > 0:
             x = jnp.concatenate([cache, x], axis=1)  # [B, T+CACHE_T, H, W, C]
+            jax.debug.print("feat cache in causalconv3d:", cache.shape, x.shape)
             padding = list(self.padding)
             padding[1] = (max(0, self.padding[1][0] - cache.shape[1]), 0)  # Reduce left padding
             padding = tuple(padding)
