@@ -199,6 +199,7 @@ def test_vae_decoder():
     cache_list = [None] * 50
 
     # Run decoder (through VAE decode)
+    vae.clear_cache()
     x = vae.post_quant_conv(latents)
     with torch.no_grad():
         for i in range(num_frames):
