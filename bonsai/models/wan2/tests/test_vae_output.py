@@ -215,7 +215,7 @@ def test_vae_decoder():
                 )
                 frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
                 compare_outputs(frame_out, out, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
-                print(cache_list)
+                # print(cache_list)
             elif i==1:
                 hook_manager.clear_outputs()
                 hook_manager.capture_enabled = True
