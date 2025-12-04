@@ -216,7 +216,12 @@ def test_vae_decoder():
                 frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
                 compare_outputs(frame_out, out, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
             elif i==1:
-                out_ = vae.decoder(x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx)
+                hook_manager.clear_outputs()
+                hook_manager.capture_enabled = True
+                try:
+                    out_ = vae.decoder(x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx)
+                finally:
+                    hook_manager.capture_enabled = False
                 outputs = hook_manager.get_outputs()
                 x, cache_list[idx] = decoder.conv_in(frame_latent, cache_list[idx])
                 cache_idx[0] += 1
