@@ -217,30 +217,34 @@ def test_vae_decoder():
                 out_ = vae.decoder(x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx)
                 compare_outputs(frame_out, out_, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
                 out = torch.cat([out, out_], 2)
+        out = torch.clamp(out, min=-1.0, max=1.0)
+        x = jnp.concatenate(frames, axis=1)  # [B, T_total, H_out, W_out, 3]
+        x = jnp.clip(x, -1.0, 1.0)
+        compare_outputs(x, out, "final_output", rtol=1e-2, atol=1e-4)
         # decoded = vae.decode(latents).sample
 
-    first_frame_output = hook_manager.decode_first_frame_only(latents)
+    # first_frame_output = hook_manager.decode_first_frame_only(latents)
     # Get captured outputs
-    outputs = hook_manager.get_outputs()
+    # outputs = hook_manager.get_outputs()
 
     print("=" * 80)
     print("CAPTURED VAE DECODER INTERMEDIATE OUTPUTS")
     print("=" * 80)
 
-    for name, tensor in outputs.items():
-        print(f"{name:40s}: {tuple(tensor.shape)}")
+    # for name, tensor in outputs.items():
+    #     print(f"{name:40s}: {tuple(tensor.shape)}")
 
-    output_jax = {}
-    z, _ = vae_jax.conv2(latents_jax, None)
-    compare_outputs(z, outputs['post_quant_conv'], 'post_quant_conv', rtol=1e-2, atol=1e-4)
-    output_jax['post_quant_conv'] = z
+    # output_jax = {}
+    # z, _ = vae_jax.conv2(latents_jax, None)
+    # compare_outputs(z, outputs['post_quant_conv'], 'post_quant_conv', rtol=1e-2, atol=1e-4)
+    # output_jax['post_quant_conv'] = z
 
-    t = z.shape[1]
-    frames = []
-    decoder = vae_jax.decoder
+    # t = z.shape[1]
+    # frames = []
+    # decoder = vae_jax.decoder
 
-    # Initialize cache list for feature caching
-    cache_list = [None] * 50
+    # # Initialize cache list for feature caching
+    # cache_list = [None] * 50
 
     # for i in range(t):
     #     print(f"\n{'='*80}")
@@ -323,22 +327,22 @@ def test_vae_decoder():
     #         frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
     #         frames.append(frame_out)
 
-    print("\n" + "=" * 80)
-    print(f"Final decoded output shape: {decoded.shape}")
-    print("=" * 80)
+    # print("\n" + "=" * 80)
+    # print(f"Final decoded output shape: {decoded.shape}")
+    # print("=" * 80)
 
-    # Save outputs for comparison
-    outputs_dict = {
-        'inputs': {
-            'latents': latents.cpu(),
-        },
-        'intermediate': outputs,
-        'output': decoded.cpu(),
-    }
+    # # Save outputs for comparison
+    # outputs_dict = {
+    #     'inputs': {
+    #         'latents': latents.cpu(),
+    #     },
+    #     'intermediate': outputs,
+    #     'output': decoded.cpu(),
+    # }
 
-    outputs_dict_jax = {
-        'intermediate': output_jax
-    }
+    # outputs_dict_jax = {
+    #     'intermediate': output_jax
+    # }
 
     # compare_with_jax_decoder(outputs_dict, outputs_dict_jax)
 
@@ -348,7 +352,7 @@ def test_vae_decoder():
     # Clean up
     hook_manager.remove_hooks()
 
-    return outputs_dict
+    # return outputs_dict
 
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-2, atol: float = 1e-4):
     if torch_output.dtype == torch.bfloat16:
