@@ -96,7 +96,7 @@ class CausalConv3d(nnx.Module):
         padding: Tuple[int, int, int] = (0, 0, 0),
     ):
         self.kernel_size = kernel_size
-        # Causal padding: pad past frames, no future frames
+        self.temporal_padding = padding[0]  # Save for cache size calculation
         self.conv = nnx.Conv(
             in_features=in_channels,
             out_features=out_channels,
@@ -113,12 +113,37 @@ class CausalConv3d(nnx.Module):
             (0, 0),
         )
 
-    def __call__(self, x: Array) -> Array:
-        # x: [B, T, H, W, C] (JAX channel-last format)
-        # Causal padding: (kernel_t - 1, 0) for temporal, symmetric for spatial
-        x_padded = jnp.pad(x, self.padding, mode="constant")
+    def __call__(self, x: Array, cache: Array | None = None) -> tuple[Array, Array | None]:
+        """Forward pass with optional caching.
+
+        Args:
+            x: [B, T, H, W, C] input (JAX channel-last format)
+            cache: [B, CACHE_T, H, W, C] cached frames from previous call, or None
+
+        Returns:
+            out: [B, T_out, H_out, W_out, C_out] output
+            new_cache: [B, CACHE_T, H, W, C] cache for next call, or None
+        """
+        cache_t = self.temporal_padding  # Number of past frames to cache
+
+        if cache is not None and cache_t > 0:
+            x = jnp.concatenate([cache, x], axis=1)  # [B, T+CACHE_T, H, W, C]
+            padding = list(self.padding)
+            padding[1] = (max(0, self.padding[1][0] - cache.shape[1]), 0)  # Reduce left padding
+            padding = tuple(padding)
+        else:
+            padding = self.padding
+
+        x_padded = jnp.pad(x, padding, mode="constant")
         out = self.conv(x_padded)
-        return out
+
+        # Extract cache for next iteration: last cache_t frames of INPUT (before conv)
+        if cache is not None and cache_t > 0:
+            new_cache = x[:, -cache_t:, :, :, :]  # [B, CACHE_T, H, W, C]
+        else:
+            new_cache = None
+
+        return out, new_cache
 
 
 class RMSNorm(nnx.Module):
@@ -156,21 +181,40 @@ class ResidualBlock(nnx.Module):
         else:
             self.skip_conv = None
 
-    def __call__(self, x: Array) -> Array:
+    def __call__(
+        self, x: Array, cache_list: list[Array | None] | None = None, cache_idx: list[int] | None = None
+    ) -> tuple[Array, list[Array | None] | None]:
         residual = x
 
         x = self.norm1(x)
         x = nnx.silu(x)
-        x = self.conv1(x)
+
+        if cache_list is not None:
+            idx = cache_idx[0]
+            x, cache_list[idx] = self.conv1(x, cache_list[idx])
+            cache_idx[0] += 1
+        else:
+            x, _ = self.conv1(x, None)
 
         x = self.norm2(x)
         x = nnx.silu(x)
-        x = self.conv2(x)
+
+        if cache_list is not None:
+            idx = cache_idx[0]
+            x, cache_list[idx] = self.conv2(x, cache_list[idx])
+            cache_idx[0] += 1
+        else:
+            x, _ = self.conv2(x, None)
 
         if self.skip_conv is not None:
-            residual = self.skip_conv(residual)
+            if cache_list is not None:
+                idx = cache_idx[0]
+                residual, cache_list[idx] = self.skip_conv(residual, cache_list[idx])
+                cache_idx[0] += 1
+            else:
+                residual, _ = self.skip_conv(residual, None)
 
-        return x + residual
+        return x + residual, cache_list
 
 
 class AttentionBlock(nnx.Module):
@@ -200,12 +244,8 @@ class AttentionBlock(nnx.Module):
         b, t, h, w, c = x.shape
         residual = x
 
-        # Batch process all frames together: [B, T, H, W, C] -> [B*T, H, W, C]
         x = x.reshape(b * t, h, w, c)
-
-        # Normalize
         x = self.norm(x)
-
         # QKV projection: [B*T, H, W, C] -> [B*T, H, W, 3*C]
         qkv = self.qkv(x)
 
@@ -273,24 +313,45 @@ class Upsample3D(nnx.Module):
             precision=Precision.HIGHEST,
         )
 
-    def __call__(self, x: Array) -> Array:
-        # x: [B, T, H, W, Cin]
+    def __call__(
+        self, x: Array, cache_list: list[Array | None] | None = None, cache_idx: list[int] | None = None
+    ) -> tuple[Array, list[Array | None] | None]:
         b, t, h, w, _ = x.shape
         orig_dtype = x.dtype
 
-        x = self.time_conv(x)  # [B, T, H, W, 2*Cin]
-        x = x.reshape(b, t, h, w, 2, self.in_channels)
-        x = jnp.moveaxis(x, 4, 2)
-        t2 = t * 2
-        x = x.reshape(b, t2, h, w, self.in_channels)
+        if cache_list is not None:
+            idx = cache_idx[0]
 
-        bt = b * t2
+            # First frame: skip time_conv, only do spatial upsampling
+            if cache_list[idx] is None:
+                cache_list[idx] = "Rep"
+                cache_idx[0] += 1
+                t_out = t
+            else:
+                cache_x = x[:, -1:, :, :, :]
+                # For second frame (cache is "Rep"), prepend zero padding
+                if cache_list[idx] == "Rep":
+                    x, _ = self.time_conv(x, None)
+                else:
+                    # Third+ frames: use real cached frame
+                    x, _ = self.time_conv(x, cache_list[idx])
+
+                cache_list[idx] = cache_x
+                cache_idx[0] += 1
+
+                x = x.reshape(b, t, h, w, 2, self.in_channels)
+                x = jnp.moveaxis(x, 4, 2)  # [B, T, 2, H, W, Cin] -> [B, 2, T, H, W, Cin]
+                t_out = t * 2
+                x = x.reshape(b, t_out, h, w, self.in_channels)
+
+        # Spatial upsampling (always applied)
+        bt = b * t_out
         x = x.reshape(bt, h, w, self.in_channels)
         x = jax.image.resize(x.astype(jnp.float32), (bt, h * 2, w * 2, self.in_channels), method="nearest").astype(
             orig_dtype
         )
         x = self.spatial_conv(x)
-        return x.reshape(b, t2, h * 2, w * 2, self.out_channels)
+        return x.reshape(b, t_out, h * 2, w * 2, self.out_channels), cache_list
 
 
 class Decoder3D(nnx.Module):
@@ -352,46 +413,64 @@ class Decoder3D(nnx.Module):
         self.norm_out = RMSNorm(96, rngs=rngs)
         self.conv_out = CausalConv3d(96, 3, kernel_size=(3, 3, 3), padding=(1, 1, 1), rngs=rngs)
 
-    def __call__(self, z: Array) -> Array:
-        """
+    def __call__(
+        self, z: Array, cache_list: list[Array | None] | None = None, cache_idx: list[int] | None = None
+    ) -> tuple[Array, list[Array | None] | None]:
+        """Forward pass with optional caching.
+
         Args:
             z: [B, T, H, W, C] latent (e.g., [1, 1, 104, 60, 16])
+            cache_list: List of cached features for all conv layers, or None
+            cache_idx: List containing current index in cache_list (mutable), or None
+
         Returns:
             x: [B, T_out, H_out, W_out, 3] RGB video (e.g., [1, 4, 832, 480, 3])
+            cache_list: Updated cache list (same reference)
         """
         # Initial convolution
-        x = self.conv_in(z)
+        if cache_list is not None:
+            idx = cache_idx[0]
+            x, cache_list[idx] = self.conv_in(z, cache_list[idx])
+            cache_idx[0] += 1
+        else:
+            x, _ = self.conv_in(z, None)
 
         # Middle blocks
-        x = self.mid_block1(x)
-        x = self.mid_attn(x)
-        x = self.mid_block2(x)
+        x, cache_list = self.mid_block1(x, cache_list, cache_idx)
+        x = self.mid_attn(x)  # Attention doesn't use cache
+        x, cache_list = self.mid_block2(x, cache_list, cache_idx)
 
         # Upsample stage 0
         for block in self.up_blocks_0:
-            x = block(x)
-        x = self.up_sample_0(x)
+            x, cache_list = block(x, cache_list, cache_idx)
+        x, cache_list = self.up_sample_0(x, cache_list, cache_idx)
 
         # Upsample stage 1
         for block in self.up_blocks_1:
-            x = block(x)
-        x = self.up_sample_1(x)
+            x, cache_list = block(x, cache_list, cache_idx)
+        x, cache_list = self.up_sample_1(x, cache_list, cache_idx)
 
         # Upsample stage 2
         for block in self.up_blocks_2:
-            x = block(x)
-        x = self.up_sample_2(x)
+            x, cache_list = block(x, cache_list, cache_idx)
+        x = self.up_sample_2(x)  # Spatial-only upsample, no cache
 
         # Upsample stage 3 (no spatial upsample)
         for block in self.up_blocks_3:
-            x = block(x)
+            x, cache_list = block(x, cache_list, cache_idx)
 
         # Output
         x = self.norm_out(x)
         x = nnx.silu(x)
-        x = self.conv_out(x)
 
-        return x
+        if cache_list is not None:
+            idx = cache_idx[0]
+            x, cache_list[idx] = self.conv_out(x, cache_list[idx])
+            cache_idx[0] += 1
+        else:
+            x, _ = self.conv_out(x, None)
+
+        return x, cache_list
 
 
 class WanVAEDecoder(nnx.Module):
@@ -424,7 +503,7 @@ class WanVAEDecoder(nnx.Module):
     @jax.jit
     def decode(self, latents: Array) -> Array:
         """
-        Decode latents to RGB video.
+        Decode latents to RGB video with feature caching.
 
         Args:
             latents: [B, T, H, W, C] latent representation (JAX format)
@@ -440,17 +519,17 @@ class WanVAEDecoder(nnx.Module):
         latent_std = jnp.array(self.latent_std_tuple).reshape(1, 1, 1, 1, 16)
         z = latents * latent_std + latent_mean
 
-        # Step 2: Conv 1x1
-        z = self.conv2(z)
+        z, _ = self.conv2(z, None)
 
-        # Step 3: Frame-by-frame decode
         _b, t, _h, _w, _c = z.shape
         frames = []
+        # Initialize cache list (50 slots should be enough for all conv layers)
+        cache_list = [None] * 50
         for i in range(t):
-            # Extract single frame: [B, 1, H, W, C]
+            cache_idx = [0]
             frame_latent = z[:, i : i + 1, :, :, :]
-            # Decode: [B, 1, H, W, C] -> [B, 4, H_out, W_out, 3]
-            frame_out = self.decoder(frame_latent)
+            frame_out, cache_list = self.decoder(frame_latent, cache_list, cache_idx)
+            # frame_out: [B, 4, H_out, W_out, 3] (4 frames per latent due to temporal upsampling)
             frames.append(frame_out)
 
         # Concatenate along time dimension

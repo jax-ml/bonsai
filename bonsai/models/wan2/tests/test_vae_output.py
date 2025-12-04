@@ -196,7 +196,8 @@ def test_vae_decoder():
 
     first_frame_output = hook_manager.decode_first_frame_only(latents)
     # Get captured outputs
-    outputs = hook_manager.get_outputs()
+    outputs = first_frame_output
+    # hook_manager.get_outputs()
 
     print("=" * 80)
     print("CAPTURED VAE DECODER INTERMEDIATE OUTPUTS")
