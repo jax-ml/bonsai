@@ -190,9 +190,34 @@ def test_vae_decoder():
     print(f"\nInput latents shape: {latents.shape}")
     print("Running decoder forward pass...\n")
 
+    z, _ = vae_jax.conv2(latents_jax, None)
+    t = z.shape[1]
+    frames = []
+    decoder = vae_jax.decoder
+
+    # Initialize cache list for feature caching
+    cache_list = [None] * 50
+
     # Run decoder (through VAE decode)
+    x = vae.post_quant_conv(latents)
     with torch.no_grad():
-        decoded = vae.decode(latents).sample
+        for i in range(num_frames):
+            vae._conv_idx = [0]
+            cache_idx = [0]
+            frame_latent = z[:, i : i + 1, :, :, :]
+            frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
+            # frame_out: [B, 4, H_out, W_out, 3] (4 frames per latent due to temporal upsampling)
+            frames.append(frame_out)
+            if i == 0:
+                out = vae.decoder(
+                    x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx, first_chunk=True
+                )
+                compare_outputs(frame_out, out, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
+            else:
+                out_ = vae.decoder(x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx)
+                compare_outputs(frame_out, out_, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
+                out = torch.cat([out, out_], 2)
+        # decoded = vae.decode(latents).sample
 
     first_frame_output = hook_manager.decode_first_frame_only(latents)
     # Get captured outputs
@@ -217,86 +242,86 @@ def test_vae_decoder():
     # Initialize cache list for feature caching
     cache_list = [None] * 50
 
-    for i in range(t):
-        print(f"\n{'='*80}")
-        print(f"Processing frame {i+1}/{t}")
-        print(f"{'='*80}")
+    # for i in range(t):
+    #     print(f"\n{'='*80}")
+    #     print(f"Processing frame {i+1}/{t}")
+    #     print(f"{'='*80}")
 
-        # Reset cache index for each frame
-        cache_idx = [0]
-        frame_latent = z[:, i : i + 1, :, :, :]
+    #     # Reset cache index for each frame
+    #     cache_idx = [0]
+    #     frame_latent = z[:, i : i + 1, :, :, :]
 
-        if i == 0:
-            idx = cache_idx[0]
-            x, cache_list[idx] = decoder.conv_in(frame_latent, cache_list[idx])
-            cache_idx[0] += 1
-            compare_outputs(x, outputs['conv_in'], 'conv_in', rtol=1e-2, atol=1e-4)
-            output_jax['conv_in'] = x
+    #     if i == 0:
+    #         idx = cache_idx[0]
+    #         x, cache_list[idx] = decoder.conv_in(frame_latent, cache_list[idx])
+    #         cache_idx[0] += 1
+    #         compare_outputs(x, outputs['conv_in'], 'conv_in', rtol=1e-2, atol=1e-4)
+    #         output_jax['conv_in'] = x
 
-            # Mid block 1
-            x, cache_list = decoder.mid_block1(x, cache_list, cache_idx)
-            compare_outputs(x, outputs['mid_block_res_0'], 'mid_block_res_0', rtol=1e-2, atol=1e-4)
-            output_jax['mid_block_res_0'] = x
+    #         # Mid block 1
+    #         x, cache_list = decoder.mid_block1(x, cache_list, cache_idx)
+    #         compare_outputs(x, outputs['mid_block_res_0'], 'mid_block_res_0', rtol=1e-2, atol=1e-4)
+    #         output_jax['mid_block_res_0'] = x
 
-            # Mid attention
-            x = decoder.mid_attn(x)
-            compare_outputs(x, outputs['mid_block_attn_0'], 'mid_block_attn_0', rtol=1e-2, atol=1e-4)
-            output_jax['mid_block_attn_0'] = x
+    #         # Mid attention
+    #         x = decoder.mid_attn(x)
+    #         compare_outputs(x, outputs['mid_block_attn_0'], 'mid_block_attn_0', rtol=1e-2, atol=1e-4)
+    #         output_jax['mid_block_attn_0'] = x
 
-            # Mid block 2
-            x, cache_list = decoder.mid_block2(x, cache_list, cache_idx)
-            compare_outputs(x, outputs['mid_block_res_1'], 'mid_block_res_1', rtol=1e-2, atol=1e-4)
-            output_jax['mid_block_res_1'] = x
+    #         # Mid block 2
+    #         x, cache_list = decoder.mid_block2(x, cache_list, cache_idx)
+    #         compare_outputs(x, outputs['mid_block_res_1'], 'mid_block_res_1', rtol=1e-2, atol=1e-4)
+    #         output_jax['mid_block_res_1'] = x
 
-            # Upsample stage 0
-            for j, block in enumerate(decoder.up_blocks_0):
-                x, cache_list = block(x, cache_list, cache_idx)
-                compare_outputs(x, outputs[f'up_block_0_res_{j}'], f'up_block_0_res_{j}', rtol=1e-2, atol=1e-4)
-                output_jax[f'up_block_0_res_{j}'] = x
-            x, cache_list = decoder.up_sample_0(x, cache_list, cache_idx)
-            compare_outputs(x, outputs['up_block_0_upsample'], 'up_block_0_upsample', rtol=1e-2, atol=1e-4)
-            output_jax['up_block_0_upsample'] = x
+    #         # Upsample stage 0
+    #         for j, block in enumerate(decoder.up_blocks_0):
+    #             x, cache_list = block(x, cache_list, cache_idx)
+    #             compare_outputs(x, outputs[f'up_block_0_res_{j}'], f'up_block_0_res_{j}', rtol=1e-2, atol=1e-4)
+    #             output_jax[f'up_block_0_res_{j}'] = x
+    #         x, cache_list = decoder.up_sample_0(x, cache_list, cache_idx)
+    #         compare_outputs(x, outputs['up_block_0_upsample'], 'up_block_0_upsample', rtol=1e-2, atol=1e-4)
+    #         output_jax['up_block_0_upsample'] = x
 
-            # Upsample stage 1
-            for j, block in enumerate(decoder.up_blocks_1):
-                x, cache_list = block(x, cache_list, cache_idx)
-                compare_outputs(x, outputs[f'up_block_1_res_{j}'], f'up_block_1_res_{j}', rtol=1e-2, atol=1e-4)
-                output_jax[f'up_block_1_res_{j}'] = x
-            x, cache_list = decoder.up_sample_1(x, cache_list, cache_idx)
-            compare_outputs(x, outputs['up_block_1_upsample'], 'up_block_1_upsample', rtol=1e-2, atol=1e-4)
-            output_jax['up_block_1_upsample'] = x
+    #         # Upsample stage 1
+    #         for j, block in enumerate(decoder.up_blocks_1):
+    #             x, cache_list = block(x, cache_list, cache_idx)
+    #             compare_outputs(x, outputs[f'up_block_1_res_{j}'], f'up_block_1_res_{j}', rtol=1e-2, atol=1e-4)
+    #             output_jax[f'up_block_1_res_{j}'] = x
+    #         x, cache_list = decoder.up_sample_1(x, cache_list, cache_idx)
+    #         compare_outputs(x, outputs['up_block_1_upsample'], 'up_block_1_upsample', rtol=1e-2, atol=1e-4)
+    #         output_jax['up_block_1_upsample'] = x
 
-            # Upsample stage 2 (spatial only, no cache)
-            for j, block in enumerate(decoder.up_blocks_2):
-                x, cache_list = block(x, cache_list, cache_idx)
-                compare_outputs(x, outputs[f'up_block_2_res_{j}'], f'up_block_2_res_{j}', rtol=1e-2, atol=1e-4)
-                output_jax[f'up_block_2_res_{j}'] = x
-            x = decoder.up_sample_2(x)  # Spatial-only, no cache
-            compare_outputs(x, outputs['up_block_2_upsample'], 'up_block_2_upsample', rtol=1e-2, atol=1e-4)
-            output_jax['up_block_2_upsample'] = x
+    #         # Upsample stage 2 (spatial only, no cache)
+    #         for j, block in enumerate(decoder.up_blocks_2):
+    #             x, cache_list = block(x, cache_list, cache_idx)
+    #             compare_outputs(x, outputs[f'up_block_2_res_{j}'], f'up_block_2_res_{j}', rtol=1e-2, atol=1e-4)
+    #             output_jax[f'up_block_2_res_{j}'] = x
+    #         x = decoder.up_sample_2(x)  # Spatial-only, no cache
+    #         compare_outputs(x, outputs['up_block_2_upsample'], 'up_block_2_upsample', rtol=1e-2, atol=1e-4)
+    #         output_jax['up_block_2_upsample'] = x
 
-            # Upsample stage 3 (no spatial upsample)
-            for j, block in enumerate(decoder.up_blocks_3):
-                x, cache_list = block(x, cache_list, cache_idx)
-                compare_outputs(x, outputs[f'up_block_3_res_{j}'], f'up_block_3_res_{j}', rtol=1e-2, atol=1e-4)
-                output_jax[f'up_block_3_res_{j}'] = x
+    #         # Upsample stage 3 (no spatial upsample)
+    #         for j, block in enumerate(decoder.up_blocks_3):
+    #             x, cache_list = block(x, cache_list, cache_idx)
+    #             compare_outputs(x, outputs[f'up_block_3_res_{j}'], f'up_block_3_res_{j}', rtol=1e-2, atol=1e-4)
+    #             output_jax[f'up_block_3_res_{j}'] = x
 
-            x = decoder.norm_out(x)
-            compare_outputs(x, outputs['norm_out'], 'norm_out', rtol=1e-2, atol=1e-4)
-            output_jax['norm_out'] = x
-            x = nnx.silu(x)
+    #         x = decoder.norm_out(x)
+    #         compare_outputs(x, outputs['norm_out'], 'norm_out', rtol=1e-2, atol=1e-4)
+    #         output_jax['norm_out'] = x
+    #         x = nnx.silu(x)
 
-            idx = cache_idx[0]
-            x, cache_list[idx] = decoder.conv_out(x, cache_list[idx])
-            cache_idx[0] += 1
-            compare_outputs(x, outputs['conv_out'], 'conv_out', rtol=1e-2, atol=1e-4)
-            output_jax['conv_out'] = x
-            frames.append(x)
-        else:
-            # Subsequent frames: use cached features
-            print(f"Subsequent frame: using feature cache")
-            frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
-            frames.append(frame_out)
+    #         idx = cache_idx[0]
+    #         x, cache_list[idx] = decoder.conv_out(x, cache_list[idx])
+    #         cache_idx[0] += 1
+    #         compare_outputs(x, outputs['conv_out'], 'conv_out', rtol=1e-2, atol=1e-4)
+    #         output_jax['conv_out'] = x
+    #         frames.append(x)
+    #     else:
+    #         # Subsequent frames: use cached features
+    #         print(f"Subsequent frame: using feature cache")
+    #         frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
+    #         frames.append(frame_out)
 
     print("\n" + "=" * 80)
     print(f"Final decoded output shape: {decoded.shape}")
