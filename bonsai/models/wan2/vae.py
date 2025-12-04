@@ -327,15 +327,13 @@ class Upsample3D(nnx.Module):
                 cache_idx[0] += 1
                 t_out = t
             else:
-                cache_x = x[:, -1:, :, :, :]
                 # For second frame (cache is "Rep"), prepend zero padding
                 if cache_list[idx] == "Rep":
-                    x, _ = self.time_conv(x, None)
+                    x, new_cache = self.time_conv(x, None)
                 else:
-                    # Third+ frames: use real cached frame
-                    x, _ = self.time_conv(x, cache_list[idx])
+                    x, new_cache = self.time_conv(x, cache_list[idx])
 
-                cache_list[idx] = cache_x
+                cache_list[idx] = new_cache
                 cache_idx[0] += 1
 
                 x = x.reshape(b, t, h, w, 2, self.in_channels)
