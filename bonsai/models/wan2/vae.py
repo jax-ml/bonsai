@@ -140,7 +140,8 @@ class CausalConv3d(nnx.Module):
         out = self.conv(x_padded)
 
         # Extract cache for next iteration: last cache_t frames of INPUT (before conv)
-        if cache is not None and cache_t > 0:
+        # Always create cache if we have temporal padding (even on first frame)
+        if cache_t > 0:
             new_cache = x[:, -cache_t:, :, :, :]  # [B, CACHE_T, H, W, C]
         else:
             new_cache = None
