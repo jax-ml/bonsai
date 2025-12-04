@@ -214,7 +214,6 @@ class ResidualBlock(nnx.Module):
             if cache_list is not None:
                 idx = cache_idx[0]
                 residual, cache_list[idx] = self.skip_conv(residual, cache_list[idx])
-                cache_idx[0] += 1
             else:
                 residual, _ = self.skip_conv(residual, None)
 
