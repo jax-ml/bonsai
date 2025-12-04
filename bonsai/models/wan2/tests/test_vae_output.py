@@ -1,7 +1,8 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from modelscope import snapshot_download
+from modelscope import snapshot_download as ms_snapshot_download
+from huggingface_hub import snapshot_download as hf_snapshot_download
 from bonsai.models.wan2 import params
 from bonsai.models.wan2 import vae as vae_lib
 import torch
@@ -9,6 +10,7 @@ from diffusers import AutoencoderKLWan
 from jax.lax import Precision
 from collections import OrderedDict
 from flax import nnx
+import sys
 import torch
 
 class WanVAEDecoderHooks:
@@ -148,10 +150,13 @@ class WanVAEDecoderHooks:
         return self.outputs
 
 
-def test_vae_decoder():
+def test_vae_decoder(src:str="modelscope"):
     # Load VAE model
     print("Loading AutoencoderKLWan...")
-    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",allow_patterns='vae/*',)
+    if src == "ms":
+        model_ckpt_path = ms_snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",allow_patterns='vae/*')
+    elif src == "hf":
+        model_ckpt_path = hf_snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",allow_patterns='vae/*')
 
     vae_jax = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
     vae = AutoencoderKLWan.from_pretrained(
@@ -488,6 +493,8 @@ def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
     # print(f"Final Output: max_diff={max_diff:.2e}, mean_diff={mean_diff:.2e}")
     # print("=" * 80)
 
-
 if __name__ == "__main__":
-    test_vae_decoder()
+    # add args for modelscope/huggingface model download
+    src = sys.argv[1] if len(sys.argv) > 1 else "ms"
+    assert src in ["ms", "hf"], "Invalid source specified. Use 'modelscope' or 'huggingface'."
+    test_vae_decoder(src)

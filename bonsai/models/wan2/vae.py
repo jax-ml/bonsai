@@ -211,11 +211,7 @@ class ResidualBlock(nnx.Module):
             x, _ = self.conv2(x, None)
 
         if self.skip_conv is not None:
-            if cache_list is not None:
-                idx = cache_idx[0]
-                residual, cache_list[idx] = self.skip_conv(residual, cache_list[idx])
-            else:
-                residual, _ = self.skip_conv(residual, None)
+            residual, _ = self.skip_conv(residual, None)
 
         return x + residual, cache_list
 
