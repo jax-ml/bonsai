@@ -98,6 +98,7 @@ class CausalConv3d(nnx.Module):
         padding: Tuple[int, int, int] = (0, 0, 0),
     ):
         self.kernel_size = kernel_size
+        self.temporal_padding = padding[0]  # Save for cache size calculation
         self.conv = nnx.Conv(
             in_features=in_channels,
             out_features=out_channels,
@@ -125,11 +126,11 @@ class CausalConv3d(nnx.Module):
             out: [B, T_out, H_out, W_out, C_out] output
             new_cache: [B, CACHE_T, H, W, C] cache for next call, or None
         """
-        cache_t = CACHE_T
-
+        cache_t = self.temporal_padding  # Use actual padding from init, not global constant
+        jax.debug.print("causalconv3d temporal_padding:{}", cache_t)
         if cache is not None and cache_t > 0:
             x = jnp.concatenate([cache, x], axis=1)  # [B, T+CACHE_T, H, W, C]
-            jax.debug.print("feat cache in causalconv3d:{},{}", cache.shape, x.shape)
+            # jax.debug.print("feat cache in causalconv3d:{},{}", cache.shape, x.shape)
             padding = list(self.padding)
             padding[1] = (max(0, self.padding[1][0] - cache.shape[1]), 0)  # Reduce left padding
             padding = tuple(padding)
