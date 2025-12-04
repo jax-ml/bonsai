@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from huggingface_hub import snapshot_download
+from modelscope import snapshot_download
 from bonsai.models.wan2 import params
 from bonsai.models.wan2 import vae as vae_lib
 import torch
