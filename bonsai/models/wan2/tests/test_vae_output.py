@@ -207,6 +207,7 @@ def test_vae_decoder():
             vae._conv_idx = [0]
             cache_idx = [0]
             frame_latent = z[:, i : i + 1, :, :, :]
+            idx = cache_idx[0]
             # frame_out: [B, 4, H_out, W_out, 3] (4 frames per latent due to temporal upsampling)
             if i == 0:
                 out = vae.decoder(
