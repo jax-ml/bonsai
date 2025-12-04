@@ -151,7 +151,7 @@ class WanVAEDecoderHooks:
 def test_vae_decoder():
     # Load VAE model
     print("Loading AutoencoderKLWan...")
-    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",allow_patterns='vae/*',)
 
     vae_jax = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
     vae = AutoencoderKLWan.from_pretrained(
