@@ -150,7 +150,7 @@ class WanVAEDecoderHooks:
         return self.outputs
 
 
-def test_vae_decoder(src:str="modelscope"):
+def test_vae_decoder(src:str="hf"):
     # Load VAE model
     print("Loading AutoencoderKLWan...")
     if src == "ms":
@@ -494,6 +494,6 @@ def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
 
 if __name__ == "__main__":
     # add args for modelscope/huggingface model download
-    src = sys.argv[1] if len(sys.argv) > 1 else "ms"
+    src = sys.argv[1] if len(sys.argv) > 1 else "hf"
     assert src in ["ms", "hf"], "Invalid source specified. Use 'modelscope' or 'huggingface'."
     test_vae_decoder(src)

@@ -186,8 +186,8 @@ class ResidualBlock(nnx.Module):
             self.skip_conv = None
 
     def __call__(
-        self, x: Array, cache_list: list[Array | None] | None = None, cache_idx: list[int] | None = None
-    ) -> tuple[Array, list[Array | None] | None]:
+        self, x: Array, cache_list: tuple[Array | None, ...] | None = None, cache_idx: list[int] | None = None
+    ) -> tuple[Array, tuple[Array | None, ...] | None]:
         residual = x
 
         x = self.norm1(x)
@@ -195,7 +195,8 @@ class ResidualBlock(nnx.Module):
 
         if cache_list is not None:
             idx = cache_idx[0]
-            x, cache_list[idx] = self.conv1(x, cache_list[idx])
+            x, new_cache = self.conv1(x, cache_list[idx])
+            cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
         else:
             x, _ = self.conv1(x, None)
@@ -205,7 +206,8 @@ class ResidualBlock(nnx.Module):
 
         if cache_list is not None:
             idx = cache_idx[0]
-            x, cache_list[idx] = self.conv2(x, cache_list[idx])
+            x, new_cache = self.conv2(x, cache_list[idx])
+            cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
         else:
             x, _ = self.conv2(x, None)
@@ -313,8 +315,8 @@ class Upsample3D(nnx.Module):
         )
 
     def __call__(
-        self, x: Array, cache_list: list[Array | None] | None = None, cache_idx: list[int] | None = None
-    ) -> tuple[Array, list[Array | None] | None]:
+        self, x: Array, cache_list: tuple[Array | None, ...] | None = None, cache_idx: list[int] | None = None
+    ) -> tuple[Array, tuple[Array | None, ...] | None]:
         b, t, h, w, _ = x.shape
         orig_dtype = x.dtype
 
@@ -323,17 +325,26 @@ class Upsample3D(nnx.Module):
 
             # First frame: skip time_conv, only do spatial upsampling
             if cache_list[idx] is None:
-                cache_list[idx] = "Rep"
+                # Use zero array as sentinel with SAME shape as real cache
+                # This ensures consistent pytree structure for JIT
+                # We use zeros with shape [B, 2, H, W, C] where 2 = cache size for 3x1x1 conv
+                sentinel = jnp.zeros((b, 2, h, w, self.in_channels), dtype=orig_dtype)
+                cache_list = (*cache_list[:idx], sentinel, *cache_list[idx + 1 :])
                 cache_idx[0] += 1
                 t_out = t
             else:
-                # For second frame (cache is "Rep"), prepend zero padding
-                if cache_list[idx] == "Rep":
+                # Check if this is first use after initialization (all zeros sentinel)
+                # vs real cached data (non-zero values)
+                is_sentinel = jnp.all(cache_list[idx] == 0)
+
+                # For second frame (cache is zero sentinel), prepend zero padding
+                # For third+ frames (cache has real data), use the cache
+                if is_sentinel:
                     x, new_cache = self.time_conv(x, None)
                 else:
                     x, new_cache = self.time_conv(x, cache_list[idx])
 
-                cache_list[idx] = new_cache
+                cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
                 cache_idx[0] += 1
 
                 x = x.reshape(b, t, h, w, 2, self.in_channels)
@@ -411,23 +422,24 @@ class Decoder3D(nnx.Module):
         self.conv_out = CausalConv3d(96, 3, kernel_size=(3, 3, 3), padding=(1, 1, 1), rngs=rngs)
 
     def __call__(
-        self, z: Array, cache_list: list[Array | None] | None = None, cache_idx: list[int] | None = None
-    ) -> tuple[Array, list[Array | None] | None]:
+        self, z: Array, cache_list: tuple[Array | None, ...] | None = None, cache_idx: list[int] | None = None
+    ) -> tuple[Array, tuple[Array | None, ...] | None]:
         """Forward pass with optional caching.
 
         Args:
             z: [B, T, H, W, C] latent (e.g., [1, 1, 104, 60, 16])
-            cache_list: List of cached features for all conv layers, or None
+            cache_list: Tuple of cached features for all conv layers, or None
             cache_idx: List containing current index in cache_list (mutable), or None
 
         Returns:
             x: [B, T_out, H_out, W_out, 3] RGB video (e.g., [1, 4, 832, 480, 3])
-            cache_list: Updated cache list (same reference)
+            cache_list: Updated cache tuple
         """
         # Initial convolution
         if cache_list is not None:
             idx = cache_idx[0]
-            x, cache_list[idx] = self.conv_in(z, cache_list[idx])
+            x, new_cache = self.conv_in(z, cache_list[idx])
+            cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
         else:
             x, _ = self.conv_in(z, None)
@@ -462,7 +474,8 @@ class Decoder3D(nnx.Module):
 
         if cache_list is not None:
             idx = cache_idx[0]
-            x, cache_list[idx] = self.conv_out(x, cache_list[idx])
+            x, new_cache = self.conv_out(x, cache_list[idx])
+            cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
         else:
             x, _ = self.conv_out(x, None)
@@ -497,7 +510,6 @@ class WanVAEDecoder(nnx.Module):
         # 3D decoder
         self.decoder = Decoder3D(rngs=rngs)
 
-    @jax.jit
     def decode(self, latents: Array) -> Array:
         """
         Decode latents to RGB video with feature caching.
@@ -518,19 +530,37 @@ class WanVAEDecoder(nnx.Module):
 
         z, _ = self.conv2(z, None)
 
-        _b, t, _h, _w, _c = z.shape
-        frames = []
-        # Initialize cache list (50 slots should be enough for all conv layers)
-        cache_list = [None] * 50
-        for i in range(t):
-            cache_idx = [0]
-            frame_latent = z[:, i : i + 1, :, :, :]
-            frame_out, cache_list = self.decoder(frame_latent, cache_list, cache_idx)
-            # frame_out: [B, 4, H_out, W_out, 3] (4 frames per latent due to temporal upsampling)
-            frames.append(frame_out)
+        # Scan over time dimension: z is [B, T, H, W, C], transpose to [T, B, H, W, C]
+        z_frames = jnp.moveaxis(z, 1, 0)  # [T, B, H, W, C]
+        # Add singleton time dimension for each frame: [T, B, 1, H, W, C]
+        z_frames = z_frames[:, :, None, :, :, :]
 
-        # Concatenate along time dimension
-        x = jnp.concatenate(frames, axis=1)  # [B, T_total, H_out, W_out, 3]
+        # Warm-up pass: process first frame to initialize cache with correct shapes
+        # This ensures consistent pytree structure for jax.lax.scan
+        cache_idx = [0]
+        cache_tuple = (None,) * 50
+        first_frame_out, cache_tuple = self.decoder(z_frames[0], cache_tuple, cache_idx)
+
+        # JIT-compiled scan function for remaining frames (now cache has concrete shapes)
+        @jax.jit
+        def scan_frames(cache_tuple, frame_latent):
+            """Process single frame with caching (JIT-compiled)."""
+            cache_idx = [0]
+            frame_out, new_cache_tuple = self.decoder(frame_latent, cache_tuple, cache_idx)
+            return new_cache_tuple, frame_out
+
+        # Process remaining frames with JIT
+        if z_frames.shape[0] > 1:
+            _final_cache, remaining_outputs = jax.lax.scan(scan_frames, cache_tuple, z_frames[1:])
+            # Concatenate first frame with remaining frames
+            frame_outputs = jnp.concatenate([first_frame_out[None, ...], remaining_outputs], axis=0)
+        else:
+            frame_outputs = first_frame_out[None, ...]
+
+        # frame_outputs: [T, B, T_out_per_frame, H_out, W_out, 3]
+        # Reshape to [B, T * T_out_per_frame, H_out, W_out, 3]
+        t, b, t_out_per_frame, h_out, w_out, c = frame_outputs.shape
+        x = frame_outputs.transpose(1, 0, 2, 3, 4, 5).reshape(b, t * t_out_per_frame, h_out, w_out, c)
 
         # Clamp to [-1, 1]
         x = jnp.clip(x, -1.0, 1.0)

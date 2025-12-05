@@ -1,17 +1,3 @@
-# Copyright 2025 The JAX Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """Example script for running Wan2.1-T2V-1.3B text-to-video generation."""
 
 import time
@@ -20,9 +6,10 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 from huggingface_hub import snapshot_download
+import traceback
 from transformers import AutoTokenizer
 
-from bonsai.models.wan2 import modeling, params, t5, vae
+from bonsai.models.wan2 import modeling, params, vae
 
 
 def get_t5_text_embeddings(
@@ -30,12 +17,8 @@ def get_t5_text_embeddings(
     model_ckpt_path: str,
     max_length: int = 512,
 ):
-    """Get text embeddings from T5 encoder with loaded weights."""
     try:
-        print("Loading UMT5-XXL tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
-
-        # Tokenize with padding
         inputs = tokenizer(
             prompt,
             max_length=max_length,
@@ -43,28 +26,15 @@ def get_t5_text_embeddings(
             truncation=True,
             return_tensors="np",  # Return numpy arrays
         )
-
-        print("Loading T5 encoder weights...")
         model = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-        print("✓ T5 encoder loaded successfully")
 
-        # Get embeddings
         input_ids = jnp.array(inputs["input_ids"])
         attention_mask = jnp.array(inputs["attention_mask"])
         embeddings = model(input_ids, attention_mask, deterministic=True)
 
-        print(f"Text embeddings shape: {embeddings.shape}")
         return embeddings
-
-    except ImportError as e:
-        print(f"Error loading dependencies: {e}")
-        print("Install with: pip install transformers")
-        # Return dummy embeddings
-        return jnp.zeros((1, max_length, 4096))
     except Exception as e:
         print(f"Error in text encoding: {e}")
-        import traceback
-
         traceback.print_exc()
         print("Using dummy embeddings")
         return jnp.zeros((1, max_length, 4096))
@@ -87,13 +57,10 @@ def decode_video_latents(latents: jax.Array, vae_decoder: vae.WanVAEDecoder):
 
 
 def run_model():
-    """Run Wan2.1-T2V-1.3B text-to-video generation."""
-
     print("=" * 60)
     print("Wan2.1-T2V-1.3B Text-to-Video Generation Demo")
     print("=" * 60)
 
-    # Configuration
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
     config = modeling.ModelConfig()
 
@@ -102,7 +69,6 @@ def run_model():
     # mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
     # jax.set_mesh(mesh)
 
-    # Text prompts
     prompts = [
         "A beautiful sunset over the ocean with waves crashing on the shore",
     ]
@@ -113,19 +79,16 @@ def run_model():
 
     print("\n[1/4] Encoding text with T5...")
     text_embeds = get_t5_text_embeddings(prompts[0], max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
-    print(f"      Text embeddings shape: {text_embeds.shape}")
 
     print("\n[2/5] Loading Diffusion Transformer weights...")
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None)
-    print("      Model loaded successfully")
-
     print("\n[2.5/5] Loading VAE decoder...")
     vae_decoder = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
-    print("      VAE decoder loaded")
+    print("Model loaded successfully")
 
     print("\n[3/4] Generating video latents...")
-    print(f"      Using {config.num_inference_steps} diffusion steps")
-    print(f"      Guidance scale: {config.guidance_scale}")
+    print(f"Using {config.num_inference_steps} diffusion steps")
+    print(f"Guidance scale: {config.guidance_scale}")
 
     key = jax.random.PRNGKey(42)
     start_time = time.time()
@@ -141,13 +104,14 @@ def run_model():
     )
 
     generation_time = time.time() - start_time
-    print(f"      ✓ Generated latents in {generation_time:.2f}s")
-    print(f"      Latents shape: {latents.shape}")
+    print(f"✓ Generated latents in {generation_time:.2f}s")
+    print(f"Latents shape: {latents.shape}")
 
     # Step 4: Decode to video
     print("\n[4/5] Decoding latents to video...")
     video = decode_video_latents(latents, vae_decoder)
-    print(f"      Video shape: {video.shape}")
+    generation_time = time.time() - start_time
+    print(f"Video shape: {video.shape}")
 
     # Summary
     print("\n" + "=" * 60)
@@ -157,7 +121,6 @@ def run_model():
     print(f"FPS: {config.num_frames / generation_time:.2f}")
     vae.save_video(video, "generated_video.mp4")
     print("Video saved to generated_video.mp4")
-    print()
 
     return video
 
@@ -263,16 +226,8 @@ def run_vae_decoder_test():
 
 
 if __name__ == "__main__":
-    # Choose which demo to run:
-
-    # Option 1: Full generation pipeline (requires checkpoint download)
     run_model()
 
-    # Option 2: Simple DiT forward pass test (no checkpoint required)
-    # run_simple_forward_pass()
-
-    # Option 3: Simple VAE decoder test (no checkpoint required)
-    # run_vae_decoder_test()
 
 
 __all__ = ["run_model", "run_simple_forward_pass", "run_vae_decoder_test"]

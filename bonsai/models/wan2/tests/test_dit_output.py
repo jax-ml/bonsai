@@ -724,7 +724,6 @@ class WanAttentionDebugger:
         """Clear captured states"""
         self.attention_states = OrderedDict()
 
-
 def test_attention_hooks():
     """Test attention hooks"""
 
