@@ -143,7 +143,11 @@ class CausalConv3d(nnx.Module):
         # Extract cache for next iteration: last cache_t frames of INPUT (before conv)
         # Always create cache if we have temporal padding (even on first frame)
         if cache_t > 0:
-            new_cache = x[:, -cache_t:, :, :, :]  # [B, CACHE_T, H, W, C]
+            new_cache = x[:, -cache_t:, :, :, :]  # [B, <=CACHE_T, H, W, C]
+            # Pad on the left if we do not yet have cache_t frames (e.g., first call with T=1).
+            if new_cache.shape[1] < cache_t:
+                pad_t = cache_t - new_cache.shape[1]
+                new_cache = jnp.pad(new_cache, ((0, 0), (pad_t, 0), (0, 0), (0, 0), (0, 0)), mode="constant")
         else:
             new_cache = None
 
