@@ -187,48 +187,50 @@ def test_vae_decoder(src:str="hf"):
         1, 16, 1, 1, 1
     ).to(dtype=torch.float32)
 
-    latents = torch.randn(batch_size, z_dim, num_frames, height, width,dtype=torch.float32)
-    latents = latents / latents_std + latents_mean
-    latents_jax = jnp.array(latents.numpy().transpose(0,2,3,4,1))
+    latents_original = torch.randn(batch_size, z_dim, num_frames, height, width,dtype=torch.float32)
+    latents = latents_original / latents_std + latents_mean
+    latents_jax = jnp.array(latents_original.numpy().transpose(0,2,3,4,1))
 
 
     print(f"\nInput latents shape: {latents.shape}")
     print("Running decoder forward pass...\n")
 
-    z, _ = vae_jax.conv2(latents_jax, None)
-    t = z.shape[1]
-    frames = []
-    decoder = vae_jax.decoder
-    output_jax = {}
+    # z, _ = vae_jax.conv2(latents_jax, None)
+    # t = z.shape[1]
+    # frames = []
+    # decoder = vae_jax.decoder
+    # output_jax = {}
 
     # Initialize cache list for feature caching
-    cache_list = [None] * 50
+    # cache_list = [None] * 50
 
     # Run decoder (through VAE decode)
-    vae.clear_cache()
-    x = vae.post_quant_conv(latents)
+    # vae.clear_cache()
+    # x = vae.post_quant_conv(latents)
     with torch.no_grad():
-        for i in range(num_frames):
-            vae._conv_idx = [0]
-            cache_idx = [0]
-            frame_latent = z[:, i : i + 1, :, :, :]
-            frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
-            print(i)
-            if i == 0:
-                out = vae.decoder(
-                    x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx, first_chunk=True
-                )
-                # compare_outputs(frame_out, out, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
-            else:
-                out_ = vae.decoder(x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx)
-                out = torch.cat([out, out_], 2)
-                # compare_outputs(frame_out, out_, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
-            frames.append(frame_out)
-        out = torch.clamp(out, min=-1.0, max=1.0)
-        x = jnp.concatenate(frames, axis=1)  # [B, T_total, H_out, W_out, 3]
-        x = jnp.clip(x, -1.0, 1.0)
-        compare_outputs(x, out, "final_output", rtol=1e-2, atol=1e-4)
-        # decoded = vae.decode(latents).sample
+        # for i in range(num_frames):
+        #     vae._conv_idx = [0]
+        #     cache_idx = [0]
+        #     frame_latent = z[:, i : i + 1, :, :, :]
+        #     frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
+        #     print(i)
+        #     if i == 0:
+        #         out = vae.decoder(
+        #             x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx, first_chunk=True
+        #         )
+        #         # compare_outputs(frame_out, out, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
+        #     else:
+        #         out_ = vae.decoder(x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx)
+        #         out = torch.cat([out, out_], 2)
+        #         # compare_outputs(frame_out, out_, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
+        #     frames.append(frame_out)
+        # out = torch.clamp(out, min=-1.0, max=1.0)
+        # x = jnp.concatenate(frames, axis=1)  # [B, T_total, H_out, W_out, 3]
+        # x = jnp.clip(x, -1.0, 1.0)
+        # compare_outputs(x, out, "final_output", rtol=1e-2, atol=1e-4)
+        decoded = vae.decode(latents).sample
+    decoded_jax = vae_jax.decode(latents_jax)
+    compare_outputs(decoded_jax, decoded, "final_output", rtol=1e-2, atol=1e-4)
 
     # first_frame_output = hook_manager.decode_first_frame_only(latents)
     # Get captured outputs
