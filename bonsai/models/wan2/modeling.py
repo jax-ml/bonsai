@@ -32,6 +32,7 @@ from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
+from diffusers import FlaxDPMSolverMultistepScheduler
 from flax import nnx
 from jax.lax import Precision
 from jaxtyping import Array
@@ -558,3 +559,56 @@ __all__ = [
     "Wan2DiT",
     "generate_video",
 ]
+
+# # 1. Initialize scheduler
+# scheduler, scheduler_state = FlaxDPMSolverMultistepScheduler.from_pretrained(
+#     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", subfolder="scheduler", dtype=jnp.bfloat16
+# )
+
+# # 2. Set timesteps
+# num_inference_steps = 50
+# latent_shape = (1, 16, 9, 60, 104)  # (B, C, T, H, W) for Wan
+# scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_inference_steps, shape=latent_shape)
+
+# # 3. Prepare initial latents (random noise)
+# rng = jax.random.PRNGKey(0)
+# latents = jax.random.normal(rng, latent_shape, dtype=jnp.bfloat16)
+# latents = latents * scheduler_state.init_noise_sigma
+
+# # 4. Get text embeddings (from your JAX UMT5)
+# # prompt_embeds = your_umt5_encoder(prompt)  # Shape: (B, 512, 4096)
+# # negative_prompt_embeds = your_umt5_encoder(negative_prompt)
+
+# # 5. Denoising loop
+# guidance_scale = 7.5
+# timesteps = scheduler_state.timesteps
+
+# for i, t in enumerate(timesteps):
+#     # Prepare timestep (broadcast to batch)
+#     timestep = jnp.array([t] * latents.shape[0], dtype=jnp.int32)
+
+#     # Conditional forward pass
+#     noise_pred_cond = your_wan_transformer(
+#         hidden_states=latents, timestep=timestep, encoder_hidden_states=prompt_embeds
+#     )
+
+#     # Unconditional forward pass (for CFG)
+#     noise_pred_uncond = your_wan_transformer(
+#         hidden_states=latents, timestep=timestep, encoder_hidden_states=negative_prompt_embeds
+#     )
+
+#     # Apply classifier-free guidance
+#     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+
+#     # Scheduler step: x_t -> x_{t-1}
+#     scheduler_output = scheduler.step(scheduler_state, model_output=noise_pred, timestep=t, sample=latents)
+
+#     latents = scheduler_output.prev_sample
+#     scheduler_state = scheduler_output.state
+
+# # 6. Decode latents to video
+# video_frames = your_wan_vae_decoder(latents)  # Shape: (B, C, T, H, W)
+
+# # 7. Post-process (denormalize from [-1, 1] to [0, 255])
+# video_frames = (video_frames / 2 + 0.5).clip(0, 1)
+# video_frames = (video_frames * 255).astype(jnp.uint8)
