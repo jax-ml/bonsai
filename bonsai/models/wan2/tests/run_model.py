@@ -8,9 +8,8 @@ from flax import nnx
 from huggingface_hub import snapshot_download
 import traceback
 from transformers import AutoTokenizer
-from ..scheduler import FlaxUniPCMultistepScheduler
-
-from bonsai.models.wan2 import modeling, params, vae
+from bonsai.models.wan2 import modeling, params, vae, scheduler
+from bonsai.models.wan2 import scheduler as scheduler_module
 
 
 def get_t5_text_embeddings(
@@ -69,7 +68,7 @@ def run_model():
     # from jax.sharding import AxisType
     # mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
     # jax.set_mesh(mesh)
-    scheduler = FlaxUniPCMultistepScheduler(
+    scheduler = scheduler_module.FlaxUniPCMultistepScheduler(
         num_train_timesteps=1000,
         beta_start=0.0001,
         beta_end=0.02,
