@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2023 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,11 +20,6 @@ from typing import ClassVar, Optional, Tuple, Union
 
 import flax
 import jax.numpy as jnp
-from huggingface_hub.utils import validate_hf_hub_args
-
-from ..utils import BaseOutput, PushToHubMixin, logging
-
-logger = logging.get_logger(__name__)
 
 SCHEDULER_CONFIG_NAME = "scheduler_config.json"
 
@@ -39,11 +34,10 @@ class FlaxKarrasDiffusionSchedulers(Enum):
     FlaxPNDMScheduler = 3
     FlaxLMSDiscreteScheduler = 4
     FlaxDPMSolverMultistepScheduler = 5
-    FlaxEulerDiscreteScheduler = 6
 
 
 @dataclass
-class FlaxSchedulerOutput(BaseOutput):
+class FlaxSchedulerOutput:
     """
     Base class for the scheduler's step function output.
 
@@ -56,7 +50,7 @@ class FlaxSchedulerOutput(BaseOutput):
     prev_sample: jnp.ndarray
 
 
-class FlaxSchedulerMixin(PushToHubMixin):
+class FlaxSchedulerMixin:
     """
     Mixin containing common functions for the schedulers.
 
@@ -66,13 +60,12 @@ class FlaxSchedulerMixin(PushToHubMixin):
           by parent class).
     """
 
-    config_name: ClassVar[str] = SCHEDULER_CONFIG_NAME
-    ignore_for_config: ClassVar[list[str]] = ["dtype"]
-    _compatibles: ClassVar[list] = []
-    has_compatibles: ClassVar[bool] = True
+    config_name = SCHEDULER_CONFIG_NAME
+    ignore_for_config: ClassVar = ["dtype"]
+    _compatibles: ClassVar = []
+    has_compatibles = True
 
     @classmethod
-    @validate_hf_hub_args
     def from_pretrained(
         cls,
         pretrained_model_name_or_path: Optional[Union[str, os.PathLike]] = None,
@@ -103,7 +96,9 @@ class FlaxSchedulerMixin(PushToHubMixin):
             force_download (`bool`, *optional*, defaults to `False`):
                 Whether or not to force the (re-)download of the model weights and configuration files, overriding the
                 cached versions if they exist.
-
+            resume_download (`bool`, *optional*, defaults to `False`):
+                Whether or not to delete incompletely received files. Will attempt to resume the download if such a
+                file exists.
             proxies (`Dict[str, str]`, *optional*):
                 A dictionary of proxy servers to use by protocol or endpoint, e.g., `{'http': 'foo.bar:3128',
                 'http://hostname': 'foo.bar:4012'}`. The proxies are used on each request.
@@ -111,7 +106,7 @@ class FlaxSchedulerMixin(PushToHubMixin):
                 Whether or not to also return a dictionary containing missing keys, unexpected keys and error messages.
             local_files_only(`bool`, *optional*, defaults to `False`):
                 Whether or not to only look at local files (i.e., do not try to download the model).
-            token (`str` or *bool*, *optional*):
+            use_auth_token (`str` or *bool*, *optional*):
                 The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
                 when running `transformers-cli login` (stored in `~/.huggingface`).
             revision (`str`, *optional*, defaults to `"main"`):
@@ -119,18 +114,21 @@ class FlaxSchedulerMixin(PushToHubMixin):
                 git-based system for storing models and other artifacts on huggingface.co, so `revision` can be any
                 identifier allowed by git.
 
-        > [!TIP] > It is required to be logged in (`hf auth login`) when you want to use private or [gated >
-        models](https://huggingface.co/docs/hub/models-gated#gated-models).
+        <Tip>
 
-        > [!TIP] > Activate the special
-        ["offline-mode"](https://huggingface.co/transformers/installation.html#offline-mode) to > use this method in a
-        firewalled environment.
+         It is required to be logged in (`huggingface-cli login`) when you want to use private or [gated
+         models](https://huggingface.co/docs/hub/models-gated#gated-models).
+
+        </Tip>
+
+        <Tip>
+
+        Activate the special ["offline-mode"](https://huggingface.co/transformers/installation.html#offline-mode) to
+        use this method in a firewalled environment.
+
+        </Tip>
 
         """
-        logger.warning(
-            "Flax classes are deprecated and will be removed in Diffusers v1.0.0. We "
-            "recommend migrating to PyTorch classes or pinning your version of Diffusers."
-        )
         config, kwargs = cls.load_config(
             pretrained_model_name_or_path=pretrained_model_name_or_path,
             subfolder=subfolder,
@@ -218,6 +216,34 @@ def betas_for_alpha_bar(num_diffusion_timesteps: int, max_beta=0.999, dtype=jnp.
     return jnp.array(betas, dtype=dtype)
 
 
+def rescale_betas_zero_snr(betas):
+    """
+    Rescales betas to have a zero terminal SNR Based on https://arxiv.org/pdf/2305.08891.pdf (Algorithm 1)
+    """
+
+    alphas = 1.0 - betas
+    alphas_cumprod = jnp.cumprod(alphas, axis=0)
+    alphas_bar_sqrt = jnp.sqrt(alphas_cumprod)
+
+    # Store old values.
+    alphas_bar_sqrt_0 = jnp.copy(alphas_bar_sqrt[0])
+    alphas_bar_sqrt_T = jnp.copy(alphas_bar_sqrt[-1])
+
+    # Shift so the last timestep is zero.
+    alphas_bar_sqrt -= alphas_bar_sqrt_T
+
+    # Scale so the first timestep is back to the old value.
+    alphas_bar_sqrt *= alphas_bar_sqrt_0 / (alphas_bar_sqrt_0 - alphas_bar_sqrt_T)
+
+    # Convert alphas_bar_sqrt to betas
+    alphas_bar = alphas_bar_sqrt**2  # Revert sqrt
+    alphas = alphas_bar[1:] / alphas_bar[:-1]  # Revert cumprod
+    alphas = jnp.concatenate([alphas_bar[0:1], alphas])
+    betas = 1 - alphas
+
+    return betas
+
+
 @flax.struct.dataclass
 class CommonSchedulerState:
     alphas: jnp.ndarray
@@ -247,6 +273,9 @@ class CommonSchedulerState:
             raise NotImplementedError(
                 f"beta_schedule {config.beta_schedule} is not implemented for scheduler {scheduler.__class__.__name__}"
             )
+
+        if config.get("rescale_zero_terminal_snr", False):
+            betas = rescale_betas_zero_snr(betas)
 
         alphas = 1.0 - betas
 

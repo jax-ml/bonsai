@@ -1,4 +1,4 @@
-# Copyright 2025 TSAIL Team and The HuggingFace Team. All rights reserved.
+# Copyright 2025 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# DISCLAIMER: check https://huggingface.co/papers/2302.04867 and https://github.com/wl-zhao/UniPC
+# DISCLAIMER: reference pytorch implementation: https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_unipc_multistep.py
 
-from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from functools import partial
+from typing import List, Optional, Tuple, Union
 
 import flax
 import jax
@@ -23,96 +23,80 @@ import jax.numpy as jnp
 
 from .scheduling_utils import (
     CommonSchedulerState,
-    FlaxKarrasDiffusionSchedulers,
     FlaxSchedulerMixin,
     FlaxSchedulerOutput,
+    add_noise_common,
 )
 
 
 @flax.struct.dataclass
 class UniPCMultistepSchedulerState:
+    """
+    Data class to hold the mutable state of the FlaxUniPCMultistepScheduler.
+    """
+
     common: CommonSchedulerState
+
+    # Core schedule parameters (derived from CommonSchedulerState in create_state)
+    sigmas: jnp.ndarray
     alpha_t: jnp.ndarray
     sigma_t: jnp.ndarray
     lambda_t: jnp.ndarray
+    init_noise_sigma: float
 
-    # setable values
-    init_noise_sigma: jnp.ndarray
-    timesteps: jnp.ndarray
-    sigmas: jnp.ndarray
-    num_inference_steps: Optional[int] = None
+    # History buffers for multi-step solver
+    # `model_outputs` stores previous converted model outputs (e.g., predicted x0 or epsilon)
+    timesteps: jnp.ndarray = None
+    model_outputs: jnp.ndarray = None
+    timestep_list: jnp.ndarray = None  # Stores corresponding timesteps for `model_outputs`
 
-    # running values
-    model_outputs: Optional[jnp.ndarray] = None
-    timestep_list: Optional[jnp.ndarray] = None
-    lower_order_nums: Optional[int] = None
-    this_order: Optional[int] = None
-    last_sample: Optional[jnp.ndarray] = None  # For UniC corrector
+    # State variables for tracking progress and solver order
+    lower_order_nums: int = 0
+    last_sample: Optional[jnp.ndarray] = None  # Sample from the previous predictor step
+    step_index: Optional[int] = None
+    begin_index: Optional[int] = None  # Used for img2img/inpaing
+    this_order: int = 0  # Current effective order of the UniPC solver for this step
 
     @classmethod
     def create(
         cls,
-        common: CommonSchedulerState,
+        common_state: CommonSchedulerState,
         alpha_t: jnp.ndarray,
         sigma_t: jnp.ndarray,
         lambda_t: jnp.ndarray,
-        init_noise_sigma: jnp.ndarray,
-        timesteps: jnp.ndarray,
         sigmas: jnp.ndarray,
+        init_noise_sigma: jnp.ndarray,
     ):
         return cls(
-            common=common,
+            common=common_state,
             alpha_t=alpha_t,
             sigma_t=sigma_t,
             lambda_t=lambda_t,
-            init_noise_sigma=init_noise_sigma,
-            timesteps=timesteps,
             sigmas=sigmas,
+            init_noise_sigma=init_noise_sigma,
+            lower_order_nums=0,
+            last_sample=None,
+            step_index=None,
+            begin_index=None,
+            this_order=0,
         )
 
 
-@dataclass
+@flax.struct.dataclass(frozen=False)
 class FlaxUniPCMultistepSchedulerOutput(FlaxSchedulerOutput):
     state: UniPCMultistepSchedulerState
 
 
 class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
     """
-    `FlaxUniPCMultistepScheduler` is a JAX/Flax port of the UniPC multistep scheduler.
-
-    This scheduler is designed for fast sampling of diffusion models with flow_shift support for Wan models.
-
-    Args:
-        num_train_timesteps (`int`, defaults to 1000):
-            The number of diffusion steps to train the model.
-        beta_start (`float`, defaults to 0.0001):
-            The starting `beta` value of inference.
-        beta_end (`float`, defaults to 0.02):
-            The final `beta` value.
-        beta_schedule (`str`, defaults to `"linear"`):
-            The beta schedule. Choose from `linear`, `scaled_linear`, or `squaredcos_cap_v2`.
-        solver_order (`int`, defaults to 2):
-            The UniPC order. Recommended to use 2 for guided sampling, 3 for unconditional.
-        prediction_type (`str`, defaults to `"epsilon"`):
-            Prediction type: `epsilon`, `sample`, or `v_prediction`.
-        use_flow_sigmas (`bool`, defaults to False):
-            Whether to use flow sigmas with flow_shift transformation.
-        flow_shift (`float`, defaults to 1.0):
-            Flow shift parameter for timestep transformation. Use 5.0 for 720P, 3.0 for 480P.
-        timestep_spacing (`str`, defaults to `"linspace"`):
-            How to scale timesteps. Choose from `linspace`, `leading`, or `trailing`.
-        predict_x0 (`bool`, defaults to True):
-            Whether to use the updating algorithm on the predicted x0.
-        solver_type (`str`, defaults to `"bh2"`):
-            Solver type. Use `bh1` for <10 steps, `bh2` otherwise.
-        dtype (`jnp.dtype`, defaults to `jnp.float32`):
-            The dtype used for params and computation.
+    `FlaxUniPCMultistepScheduler` is a JAX/Flax training-free framework designed for the fast sampling of diffusion models.
+    It implements the UniPC (Unified Predictor-Corrector) algorithm for efficient diffusion model sampling.
     """
 
     dtype: jnp.dtype
 
     @property
-    def has_state(self):
+    def has_state(self) -> bool:
         return True
 
     def __init__(
@@ -121,42 +105,91 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         beta_start: float = 0.0001,
         beta_end: float = 0.02,
         beta_schedule: str = "linear",
+        trained_betas: Optional[Union[jnp.ndarray, List[float]]] = None,
         solver_order: int = 2,
         prediction_type: str = "epsilon",
-        use_flow_sigmas: bool = False,
-        flow_shift: float = 1.0,
-        timestep_spacing: str = "linspace",
+        thresholding: bool = False,
+        dynamic_thresholding_ratio: float = 0.995,
+        sample_max_value: float = 1.0,
         predict_x0: bool = True,
         solver_type: str = "bh2",
         lower_order_final: bool = True,
+        disable_corrector: List[int] = [],
+        solver_p: Optional[FlaxSchedulerMixin] = None,
+        use_karras_sigmas: Optional[bool] = False,
+        use_exponential_sigmas: Optional[bool] = False,
+        use_beta_sigmas: Optional[bool] = False,
+        use_flow_sigmas: Optional[bool] = False,
+        flow_shift: Optional[float] = 1.0,
+        timestep_spacing: str = "linspace",
+        steps_offset: int = 0,
+        final_sigmas_type: Optional[str] = "zero",
+        rescale_zero_terminal_snr: bool = False,
         dtype: jnp.dtype = jnp.float32,
     ):
         self.dtype = dtype
+
+        # # Validation checks from original __init__
+        # if self.config.use_beta_sigmas and not is_scipy_available():
+        #   raise ImportError("Make sure to install scipy if you want to use beta sigmas.")
+        if (
+            sum(
+                [
+                    self.config.use_beta_sigmas,
+                    self.config.use_exponential_sigmas,
+                    self.config.use_karras_sigmas,
+                ]
+            )
+            > 1
+        ):
+            raise ValueError(
+                "Only one of `config.use_beta_sigmas`, `config.use_exponential_sigmas`, `config.use_karras_sigmas` can be used."
+            )
+        if self.config.solver_type not in ["bh1", "bh2"]:
+            raise NotImplementedError(f"{self.config.solver_type} is not implemented for {self.__class__}")
 
     def create_state(self, common: Optional[CommonSchedulerState] = None) -> UniPCMultistepSchedulerState:
         if common is None:
             common = CommonSchedulerState.create(self)
 
-        # VP-type noise schedule
+        if self.config.get("rescale_zero_terminal_snr", False):
+            # Close to 0 without being 0 so first sigma is not inf
+            # FP16 smallest positive subnormal works well here
+            alphas_cumprod = common.alphas_cumprod
+            alphas_cumprod = alphas_cumprod.at[-1].set(2**-24)
+            common = common.replace(alphas_cumprod=alphas_cumprod)
+
+        # Currently we only support VP-type noise schedule
         alpha_t = jnp.sqrt(common.alphas_cumprod)
         sigma_t = jnp.sqrt(1 - common.alphas_cumprod)
         lambda_t = jnp.log(alpha_t) - jnp.log(sigma_t)
-
-        # Sigmas for noise schedule
         sigmas = ((1 - common.alphas_cumprod) / common.alphas_cumprod) ** 0.5
 
+        # standard deviation of the initial noise distribution
         init_noise_sigma = jnp.array(1.0, dtype=self.dtype)
-        timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
+
+        if self.config.solver_type not in ["bh1", "bh2"]:
+            if self.config.solver_type in ["midpoint", "heun", "logrho"]:
+                self.config.solver_type = "bh2"
+            else:
+                raise NotImplementedError(f"{self.config.solver_type} is not implemented for {self.__class__}")
 
         return UniPCMultistepSchedulerState.create(
-            common=common,
+            common_state=common,
             alpha_t=alpha_t,
             sigma_t=sigma_t,
             lambda_t=lambda_t,
-            init_noise_sigma=init_noise_sigma,
-            timesteps=timesteps,
             sigmas=sigmas,
+            init_noise_sigma=init_noise_sigma,
         )
+
+    def set_begin_index(
+        self, state: UniPCMultistepSchedulerState, begin_index: int = 0
+    ) -> UniPCMultistepSchedulerState:
+        """
+        Sets the begin index for the scheduler. This function should be run from pipeline before the inference.
+        """
+        return state.replace(begin_index=begin_index)
 
     def set_timesteps(
         self,
@@ -165,82 +198,102 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         shape: Tuple,
     ) -> UniPCMultistepSchedulerState:
         """
-        Sets the discrete timesteps used for the diffusion chain.
-
-        Args:
-            state (`UniPCMultistepSchedulerState`):
-                The scheduler state.
-            num_inference_steps (`int`):
-                The number of diffusion steps.
-            shape (`Tuple`):
-                The shape of the samples to be generated.
+        Sets the discrete timesteps used for the diffusion chain (to be run before inference).
         """
-        # Timestep generation
+        #### Copied from scheduling_dmpsolver_multistep_flax
+        last_timestep = self.config.num_train_timesteps
         if self.config.timestep_spacing == "linspace":
-            timesteps = (
-                jnp.linspace(0, self.config.num_train_timesteps - 1, num_inference_steps + 1)
-                .round()[::-1][:-1]
-                .astype(jnp.int32)
-            )
+            timesteps = jnp.linspace(0, last_timestep - 1, num_inference_steps + 1).round()[::-1][:-1].astype(jnp.int32)
         elif self.config.timestep_spacing == "leading":
-            step_ratio = self.config.num_train_timesteps // (num_inference_steps + 1)
-            timesteps = (jnp.arange(0, num_inference_steps + 1) * step_ratio).round()[::-1][:-1].astype(jnp.int32)
+            step_ratio = last_timestep // (num_inference_steps + 1)
+            # creates integer timesteps by multiplying by ratio
+            # casting to int to avoid issues when num_inference_step is power of 3
+            timesteps = (
+                (jnp.arange(0, num_inference_steps + 1) * step_ratio).round()[::-1][:-1].copy().astype(jnp.int32)
+            )
+            timesteps += self.config.steps_offset
         elif self.config.timestep_spacing == "trailing":
             step_ratio = self.config.num_train_timesteps / num_inference_steps
-            timesteps = jnp.arange(self.config.num_train_timesteps, 0, -step_ratio).round().astype(jnp.int32)
+            # creates integer timesteps by multiplying by ratio
+            # casting to int to avoid issues when num_inference_step is power of 3
+            timesteps = jnp.arange(last_timestep, 0, -step_ratio).round().copy().astype(jnp.int32)
             timesteps -= 1
         else:
             raise ValueError(
-                f"{self.config.timestep_spacing} is not supported. Choose from 'linspace', 'leading', or 'trailing'."
+                f"{self.config.timestep_spacing} is not supported. Please make sure to choose one of 'linspace', 'leading' or 'trailing'."
             )
 
-        # Sigma calculation with flow_shift support
+        # initial running values
+        sigmas = state.sigmas
+
+        # TODO
+        # # Apply Karras/Exponential/Beta/Flow Sigmas if configured
+        if self.config.use_karras_sigmas:
+            # sigmas = _convert_to_karras_jax(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
+            # timesteps = jnp.array([_sigma_to_t_jax(s, log_sigmas_full) for s in sigmas]).round().astype(jnp.int64)
+            raise NotImplementedError("`use_karras_sigmas` is not implemented in JAX version yet.")
+        elif self.config.use_exponential_sigmas:
+            # sigmas = _convert_to_exponential_jax(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
+            # timesteps = jnp.array([_sigma_to_t_jax(s, log_sigmas_full) for s in sigmas]).round().astype(jnp.int64)
+            raise NotImplementedError("`use_exponential_sigmas` is not implemented in JAX version yet.")
+        elif self.config.use_beta_sigmas:
+            # sigmas = _convert_to_beta_jax(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
+            # timesteps = jnp.array([_sigma_to_t_jax(s, log_sigmas_full) for s in sigmas]).round().astype(jnp.int64)
+            raise NotImplementedError("`use_beta_sigmas` is not implemented in JAX version yet.")
         if self.config.use_flow_sigmas:
-            # Flow-based sigma schedule (for Wan models)
             alphas = jnp.linspace(1, 1 / self.config.num_train_timesteps, num_inference_steps + 1)
-            sigmas_raw = 1.0 - alphas
-            # Apply flow_shift transformation
-            flow_shift = self.config.flow_shift
-            sigmas = jnp.flip(flow_shift * sigmas_raw / (1 + (flow_shift - 1) * sigmas_raw))[:-1]
-            timesteps = (sigmas * self.config.num_train_timesteps).astype(jnp.int32)
-        else:
-            # Standard sigma schedule
-            sigmas = jnp.array(((1 - state.common.alphas_cumprod) / state.common.alphas_cumprod) ** 0.5)
-            sigmas = sigmas[timesteps]
+            sigmas = 1.0 - alphas
+            sigmas = jnp.flip(self.config.flow_shift * sigmas / (1 + (self.config.flow_shift - 1) * sigmas))[:-1].copy()
+            timesteps = (sigmas * self.config.num_train_timesteps).copy().astype(jnp.int64)
+            if self.config.final_sigmas_type == "sigma_min":
+                sigma_last = sigmas[-1]
+            elif self.config.final_sigmas_type == "zero":
+                sigma_last = 0
+            else:
+                raise ValueError(
+                    f"`final_sigmas_type` must be one of 'zero', or 'sigma_min', but got {self.config.final_sigmas_type}"
+                )
+            sigmas = jnp.concatenate([sigmas, jnp.array([sigma_last])]).astype(jnp.float32)
+        else:  # Default case if none of the specialized sigmas are used
+            sigmas = jnp.interp(timesteps, jnp.arange(0, len(sigmas)), sigmas)
+            if self.config.final_sigmas_type == "sigma_min":
+                sigma_last = ((1 - state.common.alphas_cumprod[0]) / state.common.alphas_cumprod[0]) ** 0.5
+            elif self.config.final_sigmas_type == "zero":
+                sigma_last = 0
+            else:
+                raise ValueError(
+                    f"`final_sigmas_type` must be one of 'zero', or 'sigma_min', but got {self.config.final_sigmas_type}"
+                )
+            sigmas = jnp.concatenate([sigmas, jnp.array([sigma_last])]).astype(jnp.float32)
 
-        # Initialize running values
         model_outputs = jnp.zeros((self.config.solver_order, *shape), dtype=self.dtype)
-        timestep_list = jnp.zeros((self.config.solver_order,), dtype=jnp.int32)
-        lower_order_nums = jnp.int32(0)
-        this_order = jnp.int32(self.config.solver_order)
-
+        timestep_list = jnp.zeros((self.config.solver_order,), dtype=jnp.int32)  # Timesteps are integers
+        # Update the state with the new schedule and re-initialized history
         return state.replace(
             timesteps=timesteps,
             sigmas=sigmas,
-            num_inference_steps=num_inference_steps,
             model_outputs=model_outputs,
             timestep_list=timestep_list,
-            lower_order_nums=lower_order_nums,
-            this_order=this_order,
+            lower_order_nums=0,  # Reset counters for a new inference run
+            step_index=None,
+            begin_index=None,
+            last_sample=None,
+            this_order=0,
         )
 
     def convert_model_output(
         self,
         state: UniPCMultistepSchedulerState,
         model_output: jnp.ndarray,
-        timestep: int,
         sample: jnp.ndarray,
-        step_index: int,
     ) -> jnp.ndarray:
         """
-        Convert the model output to the corresponding type the UniPC algorithm needs.
+        Converts the model output based on the prediction type and current state.
         """
-        # Get sigma for current step
-        sigma = state.sigmas[step_index]
+        sigma = state.sigmas[state.step_index]  # Current sigma
 
-        # sigma_to_alpha_sigma_t conversion
-        alpha_t = 1.0 / jnp.sqrt(1 + sigma**2)
-        sigma_t = sigma * alpha_t
+        # Ensure sigma is a JAX array for _sigma_to_alpha_sigma_t
+        alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma)
 
         if self.config.predict_x0:
             if self.config.prediction_type == "epsilon":
@@ -249,13 +302,21 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
                 x0_pred = model_output
             elif self.config.prediction_type == "v_prediction":
                 x0_pred = alpha_t * sample - sigma_t * model_output
+            elif self.config.prediction_type == "flow_prediction":
+                # Original code has `sigma_t = self.sigmas[self.step_index]`.
+                # This implies current sigma `sigma` is used as sigma_t for flow.
+                x0_pred = sample - sigma * model_output
             else:
                 raise ValueError(
-                    f"prediction_type {self.config.prediction_type} not supported. "
-                    "Choose from 'epsilon', 'sample', or 'v_prediction'."
+                    f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample`, "
+                    "`v_prediction`, or `flow_prediction` for the UniPCMultistepScheduler."
                 )
+
+            if self.config.thresholding:
+                raise NotImplementedError("Dynamic thresholding isn't implemented.")
+                # x0_pred = self._threshold_sample(x0_pred)
             return x0_pred
-        else:
+        else:  # self.config.predict_x0 is False
             if self.config.prediction_type == "epsilon":
                 return model_output
             elif self.config.prediction_type == "sample":
@@ -265,126 +326,10 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
                 epsilon = alpha_t * model_output + sigma_t * sample
                 return epsilon
             else:
-                raise ValueError(f"prediction_type {self.config.prediction_type} not supported.")
-
-    def multistep_uni_c_bh_update(
-        self,
-        state: UniPCMultistepSchedulerState,
-        this_model_output: jnp.ndarray,
-        last_sample: jnp.ndarray,
-        this_sample: jnp.ndarray,
-        order: int,
-        step_index: int,
-    ) -> jnp.ndarray:
-        """
-        One step for the UniC (B(h) version) corrector.
-
-        Args:
-            state: The scheduler state
-            this_model_output: The model outputs at current timestep x_t
-            last_sample: The generated sample before last predictor x_{t-1}
-            this_sample: The generated sample after last predictor x_{t}
-            order: The order of UniC at this step
-            step_index: Current step index
-
-        Returns:
-            The corrected sample tensor at the current timestep.
-        """
-        model_output_list = state.model_outputs
-
-        m0 = model_output_list[-1]
-        x = last_sample
-        x_t = this_sample
-        model_t = this_model_output
-
-        sigma_t = state.sigmas[step_index]
-        sigma_s0 = state.sigmas[step_index - 1]
-
-        # sigma_to_alpha_sigma_t conversion
-        alpha_t = 1.0 / jnp.sqrt(1 + sigma_t**2)
-        sigma_t_converted = sigma_t * alpha_t
-        alpha_s0 = 1.0 / jnp.sqrt(1 + sigma_s0**2)
-        sigma_s0_converted = sigma_s0 * alpha_s0
-
-        lambda_t = jnp.log(alpha_t) - jnp.log(sigma_t_converted)
-        lambda_s0 = jnp.log(alpha_s0) - jnp.log(sigma_s0_converted)
-
-        h = lambda_t - lambda_s0
-
-        # Build rks and D1s for higher order
-        rks = []
-        D1s = []
-        for i in range(1, order):
-            si = step_index - (i + 1)
-            mi = model_output_list[-(i + 1)]
-            sigma_si = state.sigmas[si]
-            alpha_si = 1.0 / jnp.sqrt(1 + sigma_si**2)
-            sigma_si_converted = sigma_si * alpha_si
-            lambda_si = jnp.log(alpha_si) - jnp.log(sigma_si_converted)
-            rk = (lambda_si - lambda_s0) / h
-            rks.append(rk)
-            D1s.append((mi - m0) / rk)
-
-        rks.append(1.0)
-        rks = jnp.array(rks)
-
-        # Build R matrix and b vector
-        hh = -h if self.config.predict_x0 else h
-        h_phi_1 = jnp.expm1(hh)  # e^h - 1
-        h_phi_k = h_phi_1 / hh - 1
-
-        if self.config.solver_type == "bh1":
-            B_h = hh
-        elif self.config.solver_type == "bh2":
-            B_h = jnp.expm1(hh)
-        else:
-            raise NotImplementedError(f"solver_type {self.config.solver_type} not implemented")
-
-        R = []
-        b = []
-        factorial_i = 1
-
-        for i in range(1, order + 1):
-            R.append(rks ** (i - 1))
-            b.append(h_phi_k * factorial_i / B_h)
-            factorial_i *= i + 1
-            h_phi_k = h_phi_k / hh - 1 / factorial_i
-
-        R = jnp.stack(R)
-        b = jnp.array(b)
-
-        # Solve for correction coefficients
-        if order == 1:
-            rhos_c = jnp.array([0.5])
-        else:
-            rhos_c = jnp.linalg.solve(R, b)
-
-        # Apply correction
-        if self.config.predict_x0:
-            x_t_ = sigma_t_converted / sigma_s0_converted * x - alpha_t * h_phi_1 * m0
-
-            if len(D1s) > 0:
-                D1s_stack = jnp.stack(D1s, axis=0)  # (order-1, *sample_shape)
-                # Compute correction residual: sum of rhos_c[:-1] * D1s
-                corr_res = jnp.tensordot(rhos_c[:-1], D1s_stack, axes=[[0], [0]])
-            else:
-                corr_res = 0
-
-            D1_t = model_t - m0
-            x_t = x_t_ - alpha_t * B_h * (corr_res + rhos_c[-1] * D1_t)
-        else:
-            x_t_ = alpha_t / alpha_s0 * x - sigma_t_converted * h_phi_1 * m0
-
-            if len(D1s) > 0:
-                D1s_stack = jnp.stack(D1s, axis=0)
-                corr_res = jnp.tensordot(rhos_c[:-1], D1s_stack, axes=[[0], [0]])
-            else:
-                corr_res = 0
-
-            D1_t = model_t - m0
-            x_t = x_t_ - sigma_t_converted * B_h * (corr_res + rhos_c[-1] * D1_t)
-
-        return x_t
+                raise ValueError(
+                    f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample`, or"
+                    " `v_prediction` for the UniPCMultistepScheduler."
+                )
 
     def multistep_uni_p_bh_update(
         self,
@@ -392,188 +337,455 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         model_output: jnp.ndarray,
         sample: jnp.ndarray,
         order: int,
-        step_index: int,
     ) -> jnp.ndarray:
         """
-        One step for the UniP (B(h) version) predictor.
+        One step for the UniP (B(h) version) - the Predictor.
         """
-        timestep = state.timesteps[step_index]
-        prev_timestep = jax.lax.select(
-            step_index == len(state.timesteps) - 1, jnp.int32(0), state.timesteps[step_index + 1]
+        if self.config.solver_p:
+            raise NotImplementedError("Nested `solver_p` is not implemented in JAX version yet.")
+
+        m0 = state.model_outputs[self.config.solver_order - 1]  # Most recent stored converted model output
+        x = sample
+
+        sigma_t_val, sigma_s0_val = (
+            state.sigmas[state.step_index + 1],
+            state.sigmas[state.step_index],
         )
 
-        model_output_list = [state.model_outputs[-(i + 1)] for i in range(order)]
+        alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma_t_val)
+        alpha_s0, sigma_s0 = self._sigma_to_alpha_sigma_t(sigma_s0_val)
 
-        # Get lambda values
-        lambda_t = state.lambda_t[timestep]
-        lambda_s = state.lambda_t[prev_timestep]
+        lambda_t = jnp.log(alpha_t + 1e-10) - jnp.log(sigma_t + 1e-10)
+        lambda_s0 = jnp.log(alpha_s0 + 1e-10) - jnp.log(sigma_s0 + 1e-10)
 
-        h = lambda_t - lambda_s
+        h = lambda_t - lambda_s0
 
-        # First order update
-        def order_1_update():
-            _sigma_t = state.sigma_t[timestep]
-            sigma_s = state.sigma_t[prev_timestep]
-            alpha_t = state.alpha_t[timestep]
-            alpha_s = state.alpha_t[prev_timestep]
+        def rk_d1_loop_body(i, carry):
+            # Loop from i = 0 to order-2
+            rks, D1s = carry
+            history_idx = self.config.solver_order - 2 - i
+            mi = state.model_outputs[history_idx]
+            si_val = state.timestep_list[history_idx]
 
-            x_t = sample
-            if self.config.predict_x0:
-                x0_t = model_output_list[0]
-                x_s = (alpha_s / alpha_t) * x_t - (sigma_s * jnp.expm1(-h)) * x0_t
-            else:
-                epsilon_t = model_output_list[0]
-                x_s = (alpha_s / alpha_t) * x_t - (sigma_s * jnp.expm1(-h)) * epsilon_t
-            return x_s
+            alpha_si, sigma_si = self._sigma_to_alpha_sigma_t(state.sigmas[self.index_for_timestep(state, si_val)])
+            lambda_si = jnp.log(alpha_si + 1e-10) - jnp.log(sigma_si + 1e-10)
 
-        # Second order update
-        def order_2_update():
-            timestep_prev = state.timestep_list[-(order - 1)]
+            rk = (lambda_si - lambda_s0) / h
+            Di = (mi - m0) / rk
 
-            lambda_s1 = state.lambda_t[timestep_prev]
-            h_0 = lambda_t - lambda_s1
+            rks = rks.at[i].set(rk)
+            D1s = D1s.at[i].set(Di)
+            return rks, D1s
 
-            r0 = h_0 / h
+        rks_init = jnp.zeros(self.config.solver_order, dtype=h.dtype)
+        D1s_init = jnp.zeros((self.config.solver_order - 1, *m0.shape), dtype=m0.dtype)
+        if self.config.solver_order == 1:
+            # Dummy D1s array. It will not be used if order == 1
+            D1s_init = jnp.zeros((1, *m0.shape), dtype=m0.dtype)
+        rks, D1s = jax.lax.fori_loop(0, order - 1, rk_d1_loop_body, (rks_init, D1s_init))
+        rks = rks.at[order - 1].set(1.0)
 
-            _sigma_t = state.sigma_t[timestep]
-            sigma_s = state.sigma_t[prev_timestep]
-            alpha_t = state.alpha_t[timestep]
-            alpha_s = state.alpha_t[prev_timestep]
+        hh = -h if self.config.predict_x0 else h
+        h_phi_1 = jnp.expm1(hh)
 
-            x_t = sample
+        if self.config.solver_type == "bh1":
+            B_h = hh
+        elif self.config.solver_type == "bh2":
+            B_h = jnp.expm1(hh)
+        else:
+            raise NotImplementedError()
 
-            if self.config.predict_x0:
-                if self.config.solver_type == "bh1":
-                    x0_t = model_output_list[0]
-                    x0_s1 = model_output_list[1]
+        def rb_loop_body(i, carry):
+            R, b, current_h_phi_k, factorial_val = carry
+            R = R.at[i].set(jnp.power(rks, i))
+            b = b.at[i].set(current_h_phi_k * factorial_val / B_h)
 
-                    D1 = (1.0 / r0) * (x0_t - x0_s1)
-                    x_s = (
-                        (alpha_s / alpha_t) * x_t
-                        - (sigma_s * jnp.expm1(-h)) * x0_t
-                        - 0.5 * (sigma_s * jnp.expm1(-h)) * D1
-                    )
-                elif self.config.solver_type == "bh2":
-                    x0_t = model_output_list[0]
-                    x0_s1 = model_output_list[1]
+            def update_fn(vals):
+                _h_phi_k, _fac = vals
+                next_fac = _fac * (i + 2)
+                next_h_phi_k = _h_phi_k / hh - 1.0 / next_fac
+                return next_h_phi_k, next_fac
 
-                    D1 = (1.0 / r0) * (x0_t - x0_s1)
-                    corr_res = (1.0 / (2.0 * r0)) * D1
-                    x_s = (alpha_s / alpha_t) * x_t - (sigma_s * jnp.expm1(-h)) * x0_t + (sigma_s / alpha_s) * corr_res
-                else:
-                    raise NotImplementedError(f"solver_type {self.config.solver_type} not implemented")
-            else:
-                # Epsilon prediction (not commonly used with UniPC)
-                epsilon_t = model_output_list[0]
-                epsilon_s1 = model_output_list[1]
+            current_h_phi_k, factorial_val = jax.lax.cond(
+                i < order - 1,
+                update_fn,
+                lambda vals: vals,
+                (current_h_phi_k, factorial_val),
+            )
+            return R, b, current_h_phi_k, factorial_val
 
-                D1 = (1.0 / r0) * (epsilon_t - epsilon_s1)
-                x_s = (
-                    (alpha_s / alpha_t) * x_t
-                    - (sigma_s * jnp.expm1(-h)) * epsilon_t
-                    - 0.5 * (sigma_s * jnp.expm1(-h)) * D1
-                )
-            return x_s
+        R_init = jnp.zeros((self.config.solver_order, self.config.solver_order), dtype=h.dtype)
+        b_init = jnp.zeros(self.config.solver_order, dtype=h.dtype)
+        init_h_phi_k = h_phi_1 / hh - 1.0
+        init_factorial = 1.0
+        R, b, _, _ = jax.lax.fori_loop(0, order, rb_loop_body, (R_init, b_init, init_h_phi_k, init_factorial))
 
-        # Use conditional to select order
-        return jax.lax.cond(
-            order == 1,
-            order_1_update,
-            order_2_update,
+        if len(D1s) > 0:
+            D1s = jnp.stack(D1s, axis=1)  # Resulting shape (B, K, C, H, W)
+
+        def solve_for_rhos_p(R_mat, b_vec, current_order):
+            # Create a mask for the top-left (current_order - 1) x (current_order - 1) sub-matrix
+            mask_size = self.config.solver_order - 1
+            mask = jnp.arange(mask_size) < (current_order - 1)
+            mask_2d = mask[:, None] & mask[None, :]
+
+            # Pad R with identity and b with zeros for a safe solve
+            R_safe = jnp.where(
+                mask_2d,
+                R_mat[:mask_size, :mask_size],
+                jnp.eye(mask_size, dtype=R_mat.dtype),
+            )
+            b_safe = jnp.where(mask, b_vec[:mask_size], 0.0)
+
+            # Solve the system and mask the result
+            solved_rhos = jnp.linalg.solve(R_safe, b_safe)
+            return jnp.where(mask, solved_rhos, 0.0)
+
+        # Handle the special case for order == 2
+        if self.config.solver_order == 1:
+            # Dummy rhos_p_padded for tracing.
+            rhos_p_order2 = jnp.zeros(1, dtype=x.dtype)
+        else:
+            rhos_p_order2 = jnp.zeros(self.config.solver_order - 1, dtype=x.dtype).at[0].set(0.5)
+
+        # Get the result for the general case
+        rhos_p_general = solve_for_rhos_p(R, b, order)
+
+        # Select the appropriate result based on the order
+        rhos_p = jnp.where(order == 2, rhos_p_order2, rhos_p_general)
+
+        pred_res = jax.lax.cond(
+            order > 1,
+            lambda _: jnp.einsum("k,bkc...->bc...", rhos_p, D1s).astype(x.dtype),
+            # False branch: return a zero tensor with the correct shape.
+            lambda _: jnp.zeros_like(x),
+            operand=None,
         )
 
+        if self.config.predict_x0:
+            x_t_ = sigma_t / sigma_s0 * x - alpha_t * h_phi_1 * m0
+            x_t = x_t_ - alpha_t * B_h * pred_res
+        else:  # Predict epsilon
+            x_t_ = alpha_t / alpha_s0 * x - sigma_t * h_phi_1 * m0
+            x_t = x_t_ - sigma_t * B_h * pred_res
+
+        return x_t.astype(x.dtype)
+
+    def multistep_uni_c_bh_update(
+        self,
+        state: UniPCMultistepSchedulerState,
+        this_model_output: jnp.ndarray,
+        last_sample: jnp.ndarray,  # Sample after predictor `x_{t-1}`
+        this_sample: jnp.ndarray,  # Sample before corrector `x_t` (after predictor step)
+        order: int,
+    ) -> jnp.ndarray:
+        """
+        One step for the UniC (B(h) version) - the Corrector.
+        """
+        model_output_list = state.model_outputs
+        m0 = model_output_list[self.config.solver_order - 1]  # Most recent model output from history
+
+        if last_sample is not None:
+            x = last_sample
+        else:
+            # If it's None, create dummy data. This is for the tracing purpose
+            x = jnp.zeros_like(this_sample)
+
+        x_t = this_sample
+
+        model_t = this_model_output
+
+        sigma_t_val = state.sigmas[state.step_index]
+        sigma_s0_val = state.sigmas[state.step_index - 1]
+
+        alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma_t_val)
+        alpha_s0, sigma_s0 = self._sigma_to_alpha_sigma_t(sigma_s0_val)
+
+        lambda_t = jnp.log(alpha_t + 1e-10) - jnp.log(sigma_t + 1e-10)
+        lambda_s0 = jnp.log(alpha_s0 + 1e-10) - jnp.log(sigma_s0 + 1e-10)
+
+        h = lambda_t - lambda_s0
+
+        def rk_d1_loop_body(i, carry):
+            # Loop from i = 0 to order-1.
+            rks, D1s = carry
+
+            # Get history from state buffer
+            history_idx = self.config.solver_order - (i + 2)
+            mi = state.model_outputs[history_idx]
+            si_val = state.timestep_list[history_idx]  # This is the actual timestep value
+
+            alpha_si, sigma_si = self._sigma_to_alpha_sigma_t(state.sigmas[self.index_for_timestep(state, si_val)])
+            lambda_si = jnp.log(alpha_si + 1e-10) - jnp.log(sigma_si + 1e-10)
+
+            rk = (lambda_si - lambda_s0) / h
+            Di = (mi - m0) / rk
+
+            # Update pre-allocated arrays
+            rks = rks.at[i].set(rk)
+            D1s = D1s.at[i].set(Di)
+            return rks, D1s
+
+        # Pre-allocate arrays to max possible size
+        rks_init = jnp.zeros(self.config.solver_order, dtype=h.dtype)
+        D1s_init = jnp.zeros((self.config.solver_order - 1, *m0.shape), dtype=m0.dtype)
+        if self.config.solver_order == 1:
+            # Dummy D1s array. It will not be used if order == 1. This is for tracing.
+            D1s_init = jnp.zeros((1, *m0.shape), dtype=m0.dtype)
+
+        # Run the loop up to `order - 1`
+        rks, D1s = jax.lax.fori_loop(0, order - 1, rk_d1_loop_body, (rks_init, D1s_init))
+
+        rks = rks.at[order - 1].set(1.0)
+
+        hh = -h if self.config.predict_x0 else h
+        h_phi_1 = jnp.expm1(hh)
+
+        if self.config.solver_type == "bh1":
+            B_h = hh
+        elif self.config.solver_type == "bh2":
+            B_h = jnp.expm1(hh)
+        else:
+            raise NotImplementedError()
+
+        def rb_loop_body(i, carry):
+            # Loop from i = 0 to order-1
+            R, b, current_h_phi_k, factorial_val = carry
+
+            R = R.at[i].set(jnp.power(rks, i))
+            b = b.at[i].set(current_h_phi_k * factorial_val / B_h)
+
+            # Conditionally update phi_k and factorial for the next iteration
+            def update_fn(vals):
+                # This branch is taken if i < order - 1
+                _h_phi_k, _fac = vals
+                next_fac = _fac * (i + 2)
+                next_h_phi_k = _h_phi_k / hh - 1.0 / next_fac
+                return next_h_phi_k, next_fac
+
+            current_h_phi_k, factorial_val = jax.lax.cond(
+                i < order - 1,
+                update_fn,  # If true, update values
+                lambda vals: vals,  # If false, pass through
+                (current_h_phi_k, factorial_val),
+            )
+            return R, b, current_h_phi_k, factorial_val
+
+        # Pre-allocate R and b to max size
+        R_init = jnp.zeros((self.config.solver_order, self.config.solver_order), dtype=h.dtype)
+        b_init = jnp.zeros(self.config.solver_order, dtype=h.dtype)
+
+        # Initialize loop carriers
+        init_h_phi_k = h_phi_1 / hh - 1.0
+        init_factorial = 1.0
+
+        R, b, _, _ = jax.lax.fori_loop(0, order, rb_loop_body, (R_init, b_init, init_h_phi_k, init_factorial))
+
+        if len(D1s) > 0:
+            D1s = jnp.stack(D1s, axis=1)  # (B, K, C, H, W)
+
+        def solve_for_rhos(R_mat, b_vec, current_order):
+            # Create a mask to select the first `current_order` elements
+            mask = jnp.arange(self.config.solver_order) < current_order
+            mask_2d = mask[:, None] & mask[None, :]
+
+            # Pad R with identity and b with zeros to create a safe, full-sized system
+            R_safe = jnp.where(mask_2d, R_mat, jnp.eye(self.config.solver_order, dtype=R_mat.dtype))
+            b_safe = jnp.where(mask, b_vec, 0.0)
+
+            # Solve the full-size system and mask the result
+            solved_rhos = jnp.linalg.solve(R_safe, b_safe)
+            return jnp.where(mask, solved_rhos, 0.0)
+
+        rhos_c_order1 = jnp.zeros(self.config.solver_order, dtype=x_t.dtype).at[0].set(0.5)
+        rhos_c_general = solve_for_rhos(R, b, order)
+        rhos_c = jnp.where(order == 1, rhos_c_order1, rhos_c_general)
+
+        D1_t = model_t - m0
+
+        corr_res = jax.lax.cond(
+            order > 1,
+            lambda _: (jnp.einsum("k,bkc...->bc...", rhos_c[:-1], D1s)),
+            lambda _: jnp.zeros_like(D1_t),
+            operand=None,
+        )
+
+        final_rho = jnp.dot(
+            rhos_c,
+            jax.nn.one_hot(order - 1, self.config.solver_order, dtype=rhos_c.dtype),
+        )
+
+        if self.config.predict_x0:
+            x_t_ = sigma_t / sigma_s0 * x - alpha_t * h_phi_1 * m0
+            x_t = x_t_ - alpha_t * B_h * (corr_res + final_rho * D1_t)
+        else:
+            x_t_ = alpha_t / alpha_s0 * x - sigma_t * h_phi_1 * m0
+            x_t = x_t_ - sigma_t * B_h * (corr_res + final_rho * D1_t)
+
+        return x_t.astype(x.dtype)
+
+    def index_for_timestep(
+        self,
+        state: UniPCMultistepSchedulerState,
+        timestep: Union[int, jnp.ndarray],
+        schedule_timesteps: Optional[jnp.ndarray] = None,
+    ) -> int:
+        """ "Gets the step_index for timestep."""
+        if schedule_timesteps is None:
+            schedule_timesteps = state.timesteps
+
+        # QUINN!!
+        # timestep_val = (
+        #     timestep.item()
+        #     if isinstance(timestep, jnp.ndarray) and timestep.ndim == 0
+        #     else timestep
+        # )
+        timestep_val = timestep
+
+        index_candidates = jnp.where(schedule_timesteps == timestep_val, size=1, fill_value=-1)[0]
+
+        step_index = jnp.where(
+            index_candidates[0] == -1,  # No match found
+            len(schedule_timesteps) - 1,  # Default to last index
+            index_candidates[0],
+        )
+        return step_index
+
+    def _init_step_index(
+        self, state: UniPCMultistepSchedulerState, timestep: Union[int, jnp.ndarray]
+    ) -> UniPCMultistepSchedulerState:
+        """Initializes the step_index counter for the scheduler."""
+        if state.begin_index is None:
+            step_index_val = self.index_for_timestep(state, timestep)
+            return state.replace(step_index=step_index_val)
+        else:
+            return state.replace(step_index=state.begin_index)
+
+    @partial(jax.jit, static_argnums=(0, 5))  # self is static_argnum=0
     def step(
         self,
         state: UniPCMultistepSchedulerState,
-        model_output: jnp.ndarray,
-        timestep: int,
-        sample: jnp.ndarray,
+        model_output: jnp.ndarray,  # This is the direct output from the diffusion model (e.g., noise prediction)
+        timestep: Union[int, jnp.ndarray],  # Current discrete timestep from the scheduler's sequence
+        sample: jnp.ndarray,  # Current noisy sample (latent)
         return_dict: bool = True,
-    ) -> Union[FlaxUniPCMultistepSchedulerOutput, Tuple]:
+        generator: Optional[jax.random.PRNGKey] = None,  # JAX random key
+    ) -> Union[FlaxUniPCMultistepSchedulerOutput, Tuple[jnp.ndarray]]:
         """
-        Predict the sample at the previous timestep by UniPC multistep.
-
-        Args:
-            state (`UniPCMultistepSchedulerState`):
-                The scheduler state.
-            model_output (`jnp.ndarray`):
-                Direct output from learned diffusion model.
-            timestep (`int`):
-                Current discrete timestep in the diffusion chain.
-            sample (`jnp.ndarray`):
-                Current instance of sample being created by diffusion process.
-            return_dict (`bool`):
-                Whether to return dict or tuple.
-
-        Returns:
-            [`FlaxUniPCMultistepSchedulerOutput`] or `tuple`:
-                Updated sample and state.
+        Predict the sample from the previous timestep by reversing the SDE. This function propagates the sample with
+        the multistep UniPC.
         """
-        if state.num_inference_steps is None:
+
+        sample = sample.astype(jnp.float32)
+
+        if state.timesteps is None:
             raise ValueError(
                 "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
             )
 
-        # Find step index
-        step_index = jnp.where(state.timesteps == timestep, size=1)[0][0]
+        timestep_scalar = jnp.array(timestep)
 
-        # Convert model output
-        model_output_convert = self.convert_model_output(state, model_output, timestep, sample, step_index)
+        # Initialize step_index if it's the first step
+        if state.step_index is None:
+            state = self._init_step_index(state, timestep_scalar)
 
-        # Apply UniC corrector (if not first step and last_sample exists)
-        use_corrector = jnp.logical_and(step_index > 0, state.last_sample is not None)
+        # Determine if corrector should be used
+        use_corrector = (
+            (state.step_index > 0)
+            & (~jnp.isin(state.step_index - 1, jnp.array(self.config.disable_corrector)))
+            & (state.last_sample is not None)
+        )
 
-        sample_corrected = jax.lax.cond(
+        # Convert model_output (noise/v_pred) to x0_pred or epsilon_pred, based on prediction_type
+        model_output_for_history = self.convert_model_output(state, model_output, sample)
+
+        # Apply corrector if applicable
+        sample = jax.lax.cond(
             use_corrector,
             lambda: self.multistep_uni_c_bh_update(
-                state,
-                model_output_convert,
-                state.last_sample,
-                sample,
-                jnp.minimum(state.this_order, state.lower_order_nums + 1),
-                step_index,
+                state=state,
+                this_model_output=model_output_for_history,
+                last_sample=state.last_sample,
+                this_sample=sample,
+                order=state.this_order,
             ),
-            lambda: sample,  # No correction on first step
+            lambda: sample,
         )
 
-        # Update model outputs buffer (rolling)
-        model_outputs_new = jnp.roll(state.model_outputs, -1, axis=0)
-        model_outputs_new = model_outputs_new.at[-1].set(model_output_convert)
+        # Update history buffers (model_outputs and timestep_list)
+        # Shift existing elements to the left and add new one at the end.
+        # `state.model_outputs` and `state.timestep_list` are fixed-size arrays.
+        # Example:
+        # t0:[None,...,model_output0]
+        # t1:[None,..model_output0,model_output1]
+        # ...
+        # tn:[model_output0,model_output1,...,model_output_n]
+        def step_idx0_branch():
+            updated_model_outputs_history = state.model_outputs.at[-1].set(model_output_for_history)
+            updated_timestep_list_history = state.timestep_list.at[-1].set(timestep_scalar)
+            return updated_model_outputs_history, updated_timestep_list_history
 
-        # Update timestep list buffer (rolling)
-        timestep_list_new = jnp.roll(state.timestep_list, -1, axis=0)
-        timestep_list_new = timestep_list_new.at[-1].set(timestep)
+        def non_step_idx0_branch():
+            updated_model_outputs_history = jnp.roll(state.model_outputs, shift=-1, axis=0)
+            updated_model_outputs_history = updated_model_outputs_history.at[-1].set(model_output_for_history)
 
-        # Determine order for this step
-        this_order = jax.lax.select(
-            self.config.lower_order_final,
-            jnp.minimum(self.config.solver_order, len(state.timesteps) - step_index),
-            jnp.int32(self.config.solver_order),
+            updated_timestep_list_history = jnp.roll(state.timestep_list, shift=-1)
+            updated_timestep_list_history = updated_timestep_list_history.at[-1].set(timestep_scalar)
+            return updated_model_outputs_history, updated_timestep_list_history
+
+        updated_model_outputs_history, updated_timestep_list_history = jax.lax.cond(
+            state.step_index == 0, step_idx0_branch, non_step_idx0_branch
         )
-        this_order = jnp.minimum(this_order, state.lower_order_nums + 1)
-
-        # Apply UniP predictor (using corrected sample)
-        prev_sample = self.multistep_uni_p_bh_update(
-            state.replace(model_outputs=model_outputs_new, timestep_list=timestep_list_new),
-            model_output,
-            sample_corrected,  # Use corrected sample!
-            this_order,
-            step_index,
-        )
-
-        # Update state (store current sample for next corrector step)
         state = state.replace(
-            model_outputs=model_outputs_new,
-            timestep_list=timestep_list_new,
-            lower_order_nums=jnp.minimum(state.lower_order_nums + 1, self.config.solver_order),
-            this_order=this_order,
-            last_sample=sample_corrected,  # Save for next corrector
+            model_outputs=updated_model_outputs_history,
+            timestep_list=updated_timestep_list_history,
         )
 
+        # Determine the order for the current step (warmup phase logic)
+        this_order = jnp.where(
+            self.config.lower_order_final,
+            jnp.minimum(self.config.solver_order, len(state.timesteps) - state.step_index),
+            self.config.solver_order,
+        )
+
+        # Warmup for multistep: `this_order` can't exceed `lower_order_nums + 1`
+        new_this_order = jnp.minimum(this_order, state.lower_order_nums + 1)
+        state = state.replace(this_order=new_this_order)
+
+        # Store current sample as `last_sample` for the *next* step's corrector
+        state = state.replace(last_sample=sample)
+
+        # UniP predictor step
+        prev_sample = self.multistep_uni_p_bh_update(
+            state=state,
+            model_output=model_output,
+            sample=sample,
+            order=state.this_order,
+        )
+
+        # Update lower_order_nums for warmup
+        new_lower_order_nums = jnp.where(
+            state.lower_order_nums < self.config.solver_order,
+            state.lower_order_nums + 1,
+            state.lower_order_nums,
+        )
+        state = state.replace(lower_order_nums=new_lower_order_nums)
+        # Upon completion, increase step index by one
+        state = state.replace(step_index=state.step_index + 1)
+
+        # Return the updated sample and state
         if not return_dict:
             return (prev_sample, state)
 
         return FlaxUniPCMultistepSchedulerOutput(prev_sample=prev_sample, state=state)
+
+    def scale_model_input(
+        self, state: UniPCMultistepSchedulerState, sample: jnp.ndarray, *args, **kwargs
+    ) -> jnp.ndarray:
+        """
+        UniPC does not scale model input, so it returns the sample unchanged.
+        """
+        return sample
 
     def add_noise(
         self,
@@ -582,16 +794,17 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         noise: jnp.ndarray,
         timesteps: jnp.ndarray,
     ) -> jnp.ndarray:
-        sqrt_alpha_prod = state.common.alphas_cumprod[timesteps] ** 0.5
-        sqrt_alpha_prod = sqrt_alpha_prod.flatten()
-        sqrt_alpha_prod = self.match_shape(sqrt_alpha_prod, original_samples)
+        return add_noise_common(state.common, original_samples, noise, timesteps)
 
-        sqrt_one_minus_alpha_prod = (1 - state.common.alphas_cumprod[timesteps]) ** 0.5
-        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
-        sqrt_one_minus_alpha_prod = self.match_shape(sqrt_one_minus_alpha_prod, original_samples)
+    def _sigma_to_alpha_sigma_t(self, sigma):
+        if self.config.use_flow_sigmas:
+            alpha_t = 1 - sigma
+            sigma_t = sigma
+        else:
+            alpha_t = 1 / ((sigma**2 + 1) ** 0.5)
+            sigma_t = sigma * alpha_t
 
-        noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
-        return noisy_samples
+        return alpha_t, sigma_t
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.config.num_train_timesteps

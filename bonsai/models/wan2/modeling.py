@@ -32,10 +32,11 @@ from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
-from diffusers import FlaxDPMSolverMultistepScheduler
 from flax import nnx
 from jax.lax import Precision
 from jaxtyping import Array
+
+from .scheduler import FlaxUniPCMultistepScheduler, UniPCMultistepSchedulerState
 
 
 class WanLayerNorm(nnx.LayerNorm):
@@ -499,6 +500,8 @@ def generate_video(
     num_steps: int = 50,
     guidance_scale: float = 5.5,
     key: Optional[jax.Array] = None,
+    scheduler: Optional[FlaxUniPCMultistepScheduler] = None,
+    scheduler_state: Optional[UniPCMultistepSchedulerState] = None,
 ) -> Array:
     """
     Generate video from text embeddings using the diffusion model.
@@ -525,13 +528,8 @@ def generate_video(
     # Initialize random noise
     latents = jax.random.normal(key, (b, num_frames, h, w, c))
 
-    # Create scheduler
-    scheduler = FlowMatchingScheduler(num_steps)
-
-    # Denoising loop
     for t_idx in reversed(range(num_steps)):
-        # Current timestep
-        t = jnp.full((b,), t_idx, dtype=jnp.int32)
+        t = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[t_idx]
 
         # Classifier-free guidance
         if guidance_scale != 1.0:
@@ -547,8 +545,7 @@ def generate_video(
         else:
             noise_pred = model.forward(latents, text_embeds, t, deterministic=True)
 
-        # Update latents
-        latents = scheduler.step(noise_pred, latents, t_idx)
+        latents, scheduler_state = scheduler.step(scheduler_state, noise_pred, t, latents).to_tuple()
 
     return latents
 

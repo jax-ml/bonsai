@@ -8,6 +8,7 @@ from flax import nnx
 from huggingface_hub import snapshot_download
 import traceback
 from transformers import AutoTokenizer
+from ..scheduler import FlaxUniPCMultistepScheduler
 
 from bonsai.models.wan2 import modeling, params, vae
 
@@ -68,6 +69,28 @@ def run_model():
     # from jax.sharding import AxisType
     # mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
     # jax.set_mesh(mesh)
+    scheduler = FlaxUniPCMultistepScheduler(
+        num_train_timesteps=1000,
+        beta_start=0.0001,
+        beta_end=0.02,
+        beta_schedule="linear",
+        solver_order=2,  # Order 2 for guided sampling
+        prediction_type="flow_prediction",
+        use_flow_sigmas=True,  # Enable flow-based sigma schedule
+        flow_shift=3.0,  # 5.0 for 720P, 3.0 for 480P
+        timestep_spacing="linspace",
+        predict_x0=True,
+        solver_type="bh2",
+        lower_order_final=True,
+        dtype=jnp.float32,
+    )
+
+    # Create initial state
+    scheduler_state = scheduler.create_state()
+
+    scheduler_state = scheduler.set_timesteps(
+        scheduler_state, num_inference_steps=1000, shape=latents.shape
+    )
 
     prompts = [
         "A beautiful sunset over the ocean with waves crashing on the shore",
@@ -101,6 +124,8 @@ def run_model():
         num_steps=config.num_inference_steps,
         guidance_scale=config.guidance_scale,
         key=key,
+        scheduler=scheduler,
+        scheduler_state=scheduler_state,
     )
 
     generation_time = time.time() - start_time
