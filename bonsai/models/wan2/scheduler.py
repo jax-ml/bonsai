@@ -154,16 +154,6 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         if self.config.solver_type not in ["bh1", "bh2"]:
             raise NotImplementedError(f"{self.config.solver_type} is not implemented for {self.config.__class__}")
 
-    @property
-    def config(self) -> Dict[str, Any]:
-        """
-        Returns the config of the class as a frozen dictionary
-
-        Returns:
-            `Dict[str, Any]`: Config of the class.
-        """
-        return self._internal_dict
-
     def create_state(self, common: Optional[CommonSchedulerState] = None) -> UniPCMultistepSchedulerState:
         if common is None:
             common = CommonSchedulerState.create(self)
