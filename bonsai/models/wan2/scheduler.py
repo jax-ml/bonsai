@@ -15,7 +15,8 @@
 # DISCLAIMER: reference pytorch implementation: https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_unipc_multistep.py
 
 from functools import partial
-from typing import List, Optional, Tuple, Union
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import flax
 import jax
@@ -128,6 +129,11 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         dtype: jnp.dtype = jnp.float32,
     ):
         self.dtype = dtype
+        params = locals().copy()
+        params.pop("self")  # 移除 self
+        self.dtype = params.pop("dtype")  # dtype 不放在 config 里
+
+        self.config = SimpleNamespace(**params)
 
         # # Validation checks from original __init__
         # if self.config.use_beta_sigmas and not is_scipy_available():
@@ -143,10 +149,20 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
             > 1
         ):
             raise ValueError(
-                "Only one of `config.use_beta_sigmas`, `config.use_exponential_sigmas`, `config.use_karras_sigmas` can be used."
+                "Only one of `use_beta_sigmas`, `use_exponential_sigmas`, `use_karras_sigmas` can be used."
             )
         if self.config.solver_type not in ["bh1", "bh2"]:
-            raise NotImplementedError(f"{self.config.solver_type} is not implemented for {self.__class__}")
+            raise NotImplementedError(f"{self.config.solver_type} is not implemented for {self.config.__class__}")
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        """
+        Returns the config of the class as a frozen dictionary
+
+        Returns:
+            `Dict[str, Any]`: Config of the class.
+        """
+        return self._internal_dict
 
     def create_state(self, common: Optional[CommonSchedulerState] = None) -> UniPCMultistepSchedulerState:
         if common is None:
