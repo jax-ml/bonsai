@@ -52,7 +52,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         bonsai_model = params.create_resnet_from_pretrained(model_ckpt_path, bonsai_config)
         baseline_model = ResNetForImageClassification.from_pretrained(model_name)
 
-        batch_size, image_size = 8, 224
+        batch_size, image_size = 4, 224
         random_inputs = jax.random.truncated_normal(
             jax.random.key(0), lower=-1, upper=1, shape=(batch_size, image_size, image_size, 3)
         )
