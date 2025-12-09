@@ -8,7 +8,7 @@ from flax import nnx
 from huggingface_hub import snapshot_download
 import traceback
 from transformers import AutoTokenizer
-from bonsai.models.wan2 import modeling, params, vae, scheduler
+from bonsai.models.wan2 import modeling, params, vae
 from bonsai.models.wan2 import scheduler as scheduler_module
 
 

@@ -1,5 +1,6 @@
 # sglang-jax.sky.yaml
 resources:
+  region: asia-northeast1
   accelerators: tpu-v6e-1
   accelerator_args:
     tpu_vm: True
@@ -10,7 +11,7 @@ resources:
 run: |
   rm -rf bonsai
   git clone https://github.com/primatrix/bonsai
-  cd bonsai && git checkout test-wan
+  cd bonsai && git checkout feat/wan-denoise
   uv venv --python 3.12
   source .venv/bin/activate
   uv pip install -e .
@@ -18,10 +19,10 @@ run: |
   cd bonsai/models/wan2/tests
   python run_model.py
 
-cd sky_workdir/bonsai
-git fetch origin
-git checkout origin/feat/wan-denoise
-source .venv/bin/activate
-cd bonsai/models/wan2/tests
-python test_vae_output.py
+# cd sky_workdir/bonsai
+# git fetch origin
+# git checkout origin/feat/wan-denoise
+# source .venv/bin/activate
+# cd bonsai/models/wan2/tests
+# python test_vae_output.py
 
