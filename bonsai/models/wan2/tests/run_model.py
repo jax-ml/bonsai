@@ -88,7 +88,7 @@ def run_model():
     scheduler_state = scheduler.create_state()
 
     prompts = [
-        "A beautiful sunset over the ocean with waves crashing on the shore",
+        "A curious racoon",
     ]
 
     print(f"\nPrompt: {prompts[0]}")

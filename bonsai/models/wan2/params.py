@@ -467,7 +467,7 @@ def create_vae_decoder_from_safe_tensors(
 
                 if jax_key is None:
                     skipped_keys.append(torch_key)
-                    print(f"{torch_key} is not mapped")
+                    # print(f"{torch_key} is not mapped")
                     continue
 
                 keys = [_stoi(k) for k in jax_key.split(".")]
@@ -621,7 +621,7 @@ def create_t5_encoder_from_safe_tensors(
                     if jax_key is None:
                         # Skip keys not in our mapping
                         skipped_keys.append(torch_key)
-                        print(f"{torch_key} is not mapped")
+                        # print(f"{torch_key} is not mapped")
                         continue
 
                     keys = [_stoi(k) for k in jax_key.split(".")]
@@ -643,7 +643,7 @@ def create_t5_encoder_from_safe_tensors(
             if jax_key is None:
                 # Skip keys not in our mapping
                 skipped_keys.append(torch_key)
-                print(f"{torch_key} is not mapped")
+                # print(f"{torch_key} is not mapped")
                 continue
 
             keys = [_stoi(k) for k in jax_key.split(".")]

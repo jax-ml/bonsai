@@ -426,18 +426,25 @@ class Wan2DiT(nnx.Module):
         Reconstruct video tensors from patch embeddings.
 
         Args:
-            x: [B, T*H*W, C] flattened patch embeddings
+            x: [B, T*H*W, patch_t*patch_h*patch_w*C] flattened patch embeddings
             grid_sizes: (T_patches, H_patches, W_patches) grid dimensions
 
         Returns:
             [B, T, H, W, C] reconstructed video tensor (channel-last)
         """
-        b, _seq_len, _c = x.shape
+        b, seq_len, feature_dim = x.shape
         t_patches, h_patches, w_patches = grid_sizes
         patch_size = (1, 2, 2)  # Patch size from the 3D Conv kernel
         c = self.cfg.output_dim
 
-        # Rearrange dimensions for unpatchify
+        print(f"unpatchify input: x.shape={x.shape}, grid_sizes={grid_sizes}")
+        print(
+            f"expected: seq_len={seq_len} should be {t_patches * h_patches * w_patches}, feature_dim={feature_dim} should be {patch_size[0] * patch_size[1] * patch_size[2] * c}"
+        )
+
+        # First, separate the sequence and feature dimensions
+        # x: [B, T*H*W, patch_t*patch_h*patch_w*C]
+        # Reshape to: [B, T, H, W, patch_t, patch_h, patch_w, C]
         x = x.reshape(
             b,
             t_patches,
@@ -448,10 +455,12 @@ class Wan2DiT(nnx.Module):
             patch_size[2],
             c,
         )
+        print(f"after first reshape: {x.shape}")
 
         # Merge patches: einsum 'bthwpqrc->btphqwrc'
         # This interleaves the patch dimensions with the grid dimensions
         x = jnp.einsum("bthwpqrc->btphqwrc", x)
+        print(f"after einsum: {x.shape}")
 
         # Reshape to final video format: [B, T*patch_t, H*patch_h, W*patch_w, C]
         x = x.reshape(
@@ -461,6 +470,7 @@ class Wan2DiT(nnx.Module):
             w_patches * patch_size[2],
             c,
         )
+        print(f"final unpatchify output: {x.shape}")
 
         return x
 
@@ -527,7 +537,7 @@ def generate_video(
 
     # Initialize random noise
     latents = jax.random.normal(key, (b, num_frames, h, w, c))
-    scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=1000, shape=latents.shape)
+    scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=50, shape=latents.shape)
 
     for t_idx in reversed(range(num_steps)):
         # Scheduler needs scalar timestep, model needs batched timestep
