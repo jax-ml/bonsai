@@ -162,6 +162,14 @@ def run_model():
     # Create initial state
     scheduler_state = scheduler.create_state()
 
+    # Test parameters
+    prompt = "A cat walking in a garden"
+    negative_prompt = "blurry, low quality"
+    height, width = 480, 832
+    num_frames = 81
+    guidance_scale = 5.0
+    num_inference_steps = 50
+
     prompts = [
         "A curious racoon",
     ]
@@ -190,6 +198,25 @@ def run_model():
     compare_outputs(text_embeds, prompt_embeds, "T5 Text Embeddings")
     compare_outputs(negative_embeds, negative_prompt_embeds, "T5 Negative Text Embeddings")
 
+    latent_height = height // pipe.vae_scale_factor_spatial
+    latent_width = width // pipe.vae_scale_factor_spatial
+    latent_frames = (num_frames - 1) // pipe.vae_scale_factor_temporal + 1
+    print(f"Latent video size: {latent_frames} x {latent_height} x {latent_width}")
+
+    # Generate same random noise (use same seed!)
+    key = jax.random.PRNGKey(42)
+    generator = torch.Generator(device="cpu").manual_seed(42)
+    latents = torch.randn(
+        (1, vae.config.latent_channels, latent_frames, latent_height, latent_width),
+        generator=generator,
+        device="cpu",
+        dtype=torch.float32
+    )
+    latents_jax = jnp.array(latents.numpy()).transpose(0, 2, 3, 4, 1)  # 调整维度顺序
+
+    print("Initial latents shape:", latents.shape)
+    print("Initial latents range:", latents.min().item(), latents.max().item())
+
     print("\n[2/5] Loading Diffusion Transformer weights...")
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None)
     print("\n[2.5/5] Loading VAE decoder...")
@@ -197,24 +224,36 @@ def run_model():
     print("Model loaded successfully")
 
     print("\n[3/4] Generating video latents...")
-    print(f"Using {config.num_inference_steps} diffusion steps")
+    print(f"Using {num_inference_steps} diffusion steps")
     print(f"Guidance scale: {config.guidance_scale}")
 
-    key = jax.random.PRNGKey(42)
+    output = pipe(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        height=height,
+        width=width,
+        latents=latents,
+        num_frames=num_frames,
+        guidance_scale=guidance_scale,
+        num_inference_steps=num_inference_steps,
+        generator=generator,
+        output_type="latent",  # Important! Get latents instead of decoded video
+    )
+    denoised_latents = output.frames.transpose(0,2,3,4,1)  # Shape: (B, C, T, H, W)
+
     start_time = time.time()
 
-    latents = modeling.generate_video(
+    latents_jax = modeling.generate_video(
         model=model,
+        latents=latents_jax,
         text_embeds=text_embeds,
         negative_embeds=negative_embeds,
-        num_frames=config.num_frames,
-        latent_size=config.latent_size,
-        num_steps=config.num_inference_steps,
-        guidance_scale=config.guidance_scale,
-        key=key,
+        num_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
         scheduler=scheduler,
         scheduler_state=scheduler_state,
     )
+    compare_outputs(latents_jax, denoised_latents, "Final Generated Latents", rtol=1e-2, atol=1e-3)
 
     generation_time = time.time() - start_time
     print(f"✓ Generated latents in {generation_time:.2f}s")

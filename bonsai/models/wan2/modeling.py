@@ -477,13 +477,11 @@ class Wan2DiT(nnx.Module):
 
 def generate_video(
     model: Wan2DiT,
+    latents: Array,
     text_embeds: Array,
     negative_embeds: Array,
-    num_frames: int = 81,
-    latent_size: Tuple[int, int] = (60, 60),
     num_steps: int = 50,
     guidance_scale: float = 5.5,
-    key: Optional[jax.Array] = None,
     scheduler: Optional[FlaxUniPCMultistepScheduler] = None,
     scheduler_state: Optional[UniPCMultistepSchedulerState] = None,
 ) -> Array:
@@ -502,15 +500,9 @@ def generate_video(
     Returns:
         latents: [B, T, H, W, C] generated video latents
     """
-    if key is None:
-        key = jax.random.PRNGKey(0)
-
     b = text_embeds.shape[0]
-    h, w = latent_size
-    c = model.cfg.input_dim
 
     # Initialize random noise
-    latents = jax.random.normal(key, (b, num_frames, h, w, c))
     scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_steps, shape=latents.shape)
     print(f"schecduler_state: {scheduler_state}")
 
