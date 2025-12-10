@@ -530,7 +530,7 @@ def generate_video(
     scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=1000, shape=latents.shape)
 
     for t_idx in reversed(range(num_steps)):
-        t = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[t_idx]
+        t = jnp.full((b,), scheduler_state.timesteps[t_idx], dtype=jnp.int32)
 
         # Classifier-free guidance
         if guidance_scale != 1.0:
