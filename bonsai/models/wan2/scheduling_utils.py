@@ -274,7 +274,7 @@ class CommonSchedulerState:
                 f"beta_schedule {config.beta_schedule} is not implemented for scheduler {scheduler.__class__.__name__}"
             )
 
-        if config.get("rescale_zero_terminal_snr", False):
+        if not config.rescale_zero_terminal_snr:
             betas = rescale_betas_zero_snr(betas)
 
         alphas = 1.0 - betas
