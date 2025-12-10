@@ -203,19 +203,7 @@ def run_model():
     latent_frames = (num_frames - 1) // pipe.vae_scale_factor_temporal + 1
     print(f"Latent video size: {latent_frames} x {latent_height} x {latent_width}")
 
-    # Generate same random noise (use same seed!)
-    key = jax.random.PRNGKey(42)
-    generator = torch.Generator(device="cpu").manual_seed(42)
-    latents = torch.randn(
-        (1, vae.config.latent_channels, latent_frames, latent_height, latent_width),
-        generator=generator,
-        device="cpu",
-        dtype=torch.float32
-    )
-    latents_jax = jnp.array(latents.numpy()).transpose(0, 2, 3, 4, 1)  # 调整维度顺序
 
-    print("Initial latents shape:", latents.shape)
-    print("Initial latents range:", latents.min().item(), latents.max().item())
 
     print("\n[2/5] Loading Diffusion Transformer weights...")
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None)
@@ -226,6 +214,20 @@ def run_model():
     print("\n[3/4] Generating video latents...")
     print(f"Using {num_inference_steps} diffusion steps")
     print(f"Guidance scale: {config.guidance_scale}")
+
+    # Generate same random noise (use same seed!)
+    key = jax.random.PRNGKey(42)
+    generator = torch.Generator(device="cpu").manual_seed(42)
+    latents = torch.randn(
+        (1, config.input_dim, latent_frames, latent_height, latent_width),
+        generator=generator,
+        device="cpu",
+        dtype=torch.float32
+    )
+    latents_jax = jnp.array(latents.numpy()).transpose(0, 2, 3, 4, 1)  # 调整维度顺序
+
+    print("Initial latents shape:", latents.shape)
+    print("Initial latents range:", latents.min().item(), latents.max().item())
 
     output = pipe(
         prompt=prompt,
