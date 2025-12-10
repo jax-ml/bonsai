@@ -572,14 +572,9 @@ class WanVAEDecoder(nnx.Module):
 
             # Concatenate along time dimension: [1+T-1*4, B, H, W, 3]
             # Concatenate first frame with remaining frames
-            frame_outputs = jnp.concatenate([first_flat, remaining_flat], axis=0).transpose(1, 0, 2, 3, 4)
+            x = jnp.concatenate([first_flat, remaining_flat], axis=0).transpose(1, 0, 2, 3, 4)
         else:
-            frame_outputs = first_frame_out[None, ...]
-
-        # frame_outputs: [T, B, T_out_per_frame, H_out, W_out, 3]
-        # Reshape to [B, T * T_out_per_frame, H_out, W_out, 3]
-        t, b, t_out_per_frame, h_out, w_out, c = frame_outputs.shape
-        x = frame_outputs.transpose(1, 0, 2, 3, 4, 5).reshape(b, t * t_out_per_frame, h_out, w_out, c)
+            x = first_frame_out
 
         # Clamp to [-1, 1]
         x = jnp.clip(x, -1.0, 1.0)
