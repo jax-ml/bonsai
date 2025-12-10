@@ -158,7 +158,7 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         if common is None:
             common = CommonSchedulerState.create(self)
 
-        if not self.configrescale_zero_terminal_snr:
+        if not self.config.rescale_zero_terminal_snr:
             # Close to 0 without being 0 so first sigma is not inf
             # FP16 smallest positive subnormal works well here
             alphas_cumprod = common.alphas_cumprod
