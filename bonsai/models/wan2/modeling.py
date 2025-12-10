@@ -530,23 +530,25 @@ def generate_video(
     scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=1000, shape=latents.shape)
 
     for t_idx in reversed(range(num_steps)):
-        t = jnp.full((b,), scheduler_state.timesteps[t_idx], dtype=jnp.int32)
+        # Scheduler needs scalar timestep, model needs batched timestep
+        t_scalar = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[t_idx]
+        t_batch = jnp.full((b,), t_scalar, dtype=jnp.int32)
 
         # Classifier-free guidance
         if guidance_scale != 1.0:
             # Predict with text conditioning
-            noise_pred_cond = model.forward(latents, text_embeds, t, deterministic=True)
+            noise_pred_cond = model.forward(latents, text_embeds, t_batch, deterministic=True)
 
             # Predict without text (null text)
             null_embeds = jnp.zeros_like(text_embeds)
-            noise_pred_uncond = model.forward(latents, null_embeds, t, deterministic=True)
+            noise_pred_uncond = model.forward(latents, null_embeds, t_batch, deterministic=True)
 
             # Apply guidance
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
         else:
-            noise_pred = model.forward(latents, text_embeds, t, deterministic=True)
+            noise_pred = model.forward(latents, text_embeds, t_batch, deterministic=True)
 
-        latents, scheduler_state = scheduler.step(scheduler_state, noise_pred, t, latents).to_tuple()
+        latents, scheduler_state = scheduler.step(scheduler_state, noise_pred, t_scalar, latents).to_tuple()
 
     return latents
 
