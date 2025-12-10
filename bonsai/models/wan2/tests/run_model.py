@@ -87,10 +87,6 @@ def run_model():
     # Create initial state
     scheduler_state = scheduler.create_state()
 
-    scheduler_state = scheduler.set_timesteps(
-        scheduler_state, num_inference_steps=1000, shape=latents.shape
-    )
-
     prompts = [
         "A beautiful sunset over the ocean with waves crashing on the shore",
     ]

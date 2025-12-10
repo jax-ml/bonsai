@@ -527,6 +527,7 @@ def generate_video(
 
     # Initialize random noise
     latents = jax.random.normal(key, (b, num_frames, h, w, c))
+    scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=1000, shape=latents.shape)
 
     for t_idx in reversed(range(num_steps)):
         t = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[t_idx]
