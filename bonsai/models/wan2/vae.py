@@ -622,8 +622,10 @@ def decode_latents_to_video(vae_decoder: WanVAEDecoder, latents: Array, normaliz
     video = vae_decoder.decode(latents)
 
     if normalize:
-        # Convert from [-1, 1] to [0, 255] uint8
-        video = (video + 1.0) * 127.5
+        video = (video + 1.0) / 2.0
+        video = jnp.clip(video, 0.0, 1.0)
+
+        video = jnp.round(video * 255.0)
         video = jnp.clip(video, 0, 255).astype(jnp.uint8)
 
     return video

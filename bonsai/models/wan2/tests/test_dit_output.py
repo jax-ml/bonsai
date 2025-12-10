@@ -137,9 +137,10 @@ def test_dit_output():
             attention_kwargs=None,
         )
     pred_noise = jax_dit.forward(hidden_states_jax, encoder_hidden_states_jax, timestep_jax, deterministic=True)
+    expected_output = np.transpose(output.sample.numpy(), (0, 2, 3, 4, 1))
     
     # Compare final output
-    return compare_outputs(pred_noise.transpose(0,4,1,2,3), output, "Final DiT Output", rtol=1e-3, atol=1e-4)
+    return compare_outputs(pred_noise, expected_output, "Final DiT Output", rtol=1e-3, atol=1e-4)
 def test_dit():
     print("\n" + "=" * 80)
     print("TEST 2: DiT")
@@ -780,4 +781,5 @@ class WanAttentionDebugger:
         self.attention_states = OrderedDict()
 
 if __name__ == "__main__":
-    test_dit()
+    test_dit_output()
+    # test_dit()
