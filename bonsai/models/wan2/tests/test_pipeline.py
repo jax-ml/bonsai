@@ -10,7 +10,7 @@ import traceback
 from transformers import AutoTokenizer
 from bonsai.models.wan2 import modeling, params, vae, t5
 from bonsai.models.wan2 import scheduler as scheduler_module
-from diffusers import AutoModel, AutoencoderKLWan, WanPipeline
+from diffusers import AutoModel, AutoencoderKLWan, WanPipeline, WanTransformer3DModel
 from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
 from diffusers.utils import export_to_video
 import torch
@@ -165,8 +165,8 @@ def run_model():
     # Test parameters
     prompt = "A cat walking in a garden"
     negative_prompt = "blurry, low quality"
-    height, width = 480, 832
-    num_frames = 81
+    height, width = 240, 240
+    num_frames = 41
     guidance_scale = 5.0
     num_inference_steps = 50
 
@@ -227,6 +227,53 @@ def run_model():
 
     print("Initial latents shape:", latents.shape)
     print("Initial latents range:", latents.min().item(), latents.max().item())
+
+    pipe.scheduler.set_timesteps(num_inference_steps, device="cpu")
+    timesteps = pipe.scheduler.timesteps
+    scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_inference_steps, shape=latents.shape)
+    print(f"schecduler_state: {scheduler_state}")
+    b=1
+
+    for i, t in enumerate(timesteps):
+        print(f"Step {i}: Timestep {t}")
+        pipe._current_timestep = t
+        current_model = pipe.transformer
+        timestep = t.expand(latents.shape[0])
+
+        t_scalar = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[i]
+        t_batch = jnp.full((b,), t_scalar, dtype=jnp.int32)
+
+        compare_outputs(t_batch, timestep, f"Timestep Batch at step {i}")
+
+        with current_model.cache_context("cond"):
+            noise_pred = current_model(
+                hidden_states=latents,
+                timestep=timestep,
+                encoder_hidden_states=prompt_embeds,
+                attention_kwargs=None,
+                return_dict=False,
+            )[0]
+        noise_pred_cond = model.forward(latents_jax, text_embeds, t_batch, deterministic=True)
+        compare_outputs(noise_pred_cond, noise_pred.transpose(0,2,3,4,1), f"Noise Prediction Cond at step {i}", rtol=1e-2, atol=1e-3)
+        with current_model.cache_context("uncond"):
+            noise_uncond = current_model(
+                hidden_states=latents,
+                timestep=timestep,
+                encoder_hidden_states=negative_prompt_embeds,
+                attention_kwargs=None,
+                return_dict=False,
+            )[0]
+        noise_pred_uncond = model.forward(latents_jax, negative_embeds, t_batch, deterministic=True)
+        compare_outputs(noise_pred_uncond, noise_uncond.transpose(0,2,3,4,1), f"Noise Prediction Uncond at step {i}", rtol=1e-2, atol=1e-3)
+
+        noise_pred_jax = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+        noise_pred_torch = noise_uncond + guidance_scale * (noise_pred - noise_uncond)
+
+        latents = pipe.scheduler.step(noise_pred_torch, t, latents, return_dict=False)[0]
+        latents_jax, scheduler_state = scheduler.step(scheduler_state, noise_pred_jax, t_scalar, latents)
+
+        compare_outputs(latents_jax, latents, f"Latents at step {i}", rtol=1e-2, atol=1e-3)
+
 
     output = pipe(
         prompt=prompt,
