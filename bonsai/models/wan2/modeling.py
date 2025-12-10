@@ -504,7 +504,7 @@ def generate_video(
 
     # Initialize random noise
     scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_steps, shape=latents.shape)
-    print(f"schecduler_state: {scheduler_state}")
+    # print(f"schecduler_state: {scheduler_state}")
 
     for t_idx in range(num_steps):
         # Scheduler needs scalar timestep, model needs batched timestep

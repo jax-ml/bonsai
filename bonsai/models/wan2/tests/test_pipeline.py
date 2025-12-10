@@ -231,7 +231,7 @@ def run_model():
     pipe.scheduler.set_timesteps(num_inference_steps, device="cpu")
     timesteps = pipe.scheduler.timesteps
     scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_inference_steps, shape=latents.shape)
-    print(f"schecduler_state: {scheduler_state}")
+    # print(f"schecduler_state: {scheduler_state}")
     b=1
 
     for i, t in enumerate(timesteps):
@@ -244,10 +244,10 @@ def run_model():
         t_batch = jnp.full((b,), t_scalar, dtype=jnp.int32)
 
         compare_outputs(t_batch, timestep, f"Timestep Batch at step {i}")
-
+        latent_model_input = latents.to(torch.bfloat16)
         with current_model.cache_context("cond"):
             noise_pred = current_model(
-                hidden_states=latents,
+                hidden_states=latent_model_input,
                 timestep=timestep,
                 encoder_hidden_states=prompt_embeds,
                 attention_kwargs=None,
@@ -257,7 +257,7 @@ def run_model():
         compare_outputs(noise_pred_cond, noise_pred.transpose(0,2,3,4,1), f"Noise Prediction Cond at step {i}", rtol=1e-2, atol=1e-3)
         with current_model.cache_context("uncond"):
             noise_uncond = current_model(
-                hidden_states=latents,
+                hidden_states=latent_model_input,
                 timestep=timestep,
                 encoder_hidden_states=negative_prompt_embeds,
                 attention_kwargs=None,
