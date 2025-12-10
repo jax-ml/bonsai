@@ -23,4 +23,3 @@ run: |
 # source .venv/bin/activate
 # cd bonsai/models/wan2/tests
 # python run_model.py
-

@@ -192,7 +192,7 @@ def run_model():
             negative_prompt=negative_prompts,
             do_classifier_free_guidance=True,
             num_videos_per_prompt=1,
-            device="cuda"
+            device="cpu"
         )
     
     compare_outputs(text_embeds, prompt_embeds, "T5 Text Embeddings")
