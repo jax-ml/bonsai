@@ -188,8 +188,9 @@ def run_model():
 
     with torch.no_grad():
         prompt_embeds, negative_prompt_embeds = pipe.encode_prompt(
-            prompt=prompts,
-            negative_prompt=negative_prompts,
+            prompt=prompts[0],
+            max_sequence_length=config.max_text_len,
+            negative_prompt=negative_prompts[0],
             do_classifier_free_guidance=True,
             num_videos_per_prompt=1,
             device="cpu"
@@ -202,8 +203,6 @@ def run_model():
     latent_width = width // pipe.vae_scale_factor_spatial
     latent_frames = (num_frames - 1) // pipe.vae_scale_factor_temporal + 1
     print(f"Latent video size: {latent_frames} x {latent_height} x {latent_width}")
-
-
 
     print("\n[2/5] Loading Diffusion Transformer weights...")
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None)
