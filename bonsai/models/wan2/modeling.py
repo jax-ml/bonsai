@@ -506,7 +506,7 @@ def generate_video(
     scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_steps, shape=latents.shape)
     print(f"schecduler_state: {scheduler_state}")
 
-    for t_idx in reversed(range(num_steps)):
+    for t_idx in range(num_steps):
         # Scheduler needs scalar timestep, model needs batched timestep
         t_scalar = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[t_idx]
         t_batch = jnp.full((b,), t_scalar, dtype=jnp.int32)

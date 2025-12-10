@@ -19,7 +19,7 @@ run: |
   cd bonsai/models/wan2/tests
   python test_pipeline.py
 
-cd sky_workdir/bonsai
-source .venv/bin/activate
-cd bonsai/models/wan2/tests
-python run_model.py
+# cd sky_workdir/bonsai
+# source .venv/bin/activate
+# cd bonsai/models/wan2/tests
+# python run_model.py
