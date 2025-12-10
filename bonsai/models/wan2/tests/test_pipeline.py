@@ -182,9 +182,9 @@ def run_model():
     umt5_encoder = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
     
     print("\n[1/4] Encoding text with T5...")
-    text_embeds = get_t5_text_embeddings(prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
+    text_embeds = get_t5_text_embeddings(prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len)
     negative_prompts = [""]  # Empty negative prompt
-    negative_embeds = get_t5_text_embeddings(negative_prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
+    negative_embeds = get_t5_text_embeddings(negative_prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len)
 
     with torch.no_grad():
         prompt_embeds, negative_prompt_embeds = pipe.encode_prompt(
