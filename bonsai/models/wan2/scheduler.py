@@ -83,11 +83,6 @@ class UniPCMultistepSchedulerState:
         )
 
 
-@flax.struct.dataclass(frozen=False)
-class FlaxUniPCMultistepSchedulerOutput(FlaxSchedulerOutput):
-    state: UniPCMultistepSchedulerState
-
-
 class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
     """
     `FlaxUniPCMultistepScheduler` is a JAX/Flax training-free framework designed for the fast sampling of diffusion models.
@@ -676,7 +671,7 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         sample: jnp.ndarray,  # Current noisy sample (latent)
         return_dict: bool = True,
         generator: Optional[jax.random.PRNGKey] = None,  # JAX random key
-    ) -> Union[FlaxUniPCMultistepSchedulerOutput, Tuple[jnp.ndarray]]:
+    ):
         """
         Predict the sample from the previous timestep by reversing the SDE. This function propagates the sample with
         the multistep UniPC.
@@ -783,7 +778,7 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         if not return_dict:
             return (prev_sample, state)
 
-        return FlaxUniPCMultistepSchedulerOutput(prev_sample=prev_sample, state=state)
+        return prev_sample, state
 
     def scale_model_input(
         self, state: UniPCMultistepSchedulerState, sample: jnp.ndarray, *args, **kwargs
