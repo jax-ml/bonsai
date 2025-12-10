@@ -15,6 +15,7 @@
 # DISCLAIMER: reference pytorch implementation: https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_unipc_multistep.py
 
 from functools import partial
+from types import SimpleNamespace
 from typing import List, Optional, Tuple, Union
 
 import flax
@@ -128,6 +129,11 @@ class FlaxUniPCMultistepScheduler(FlaxSchedulerMixin):
         dtype: jnp.dtype = jnp.float32,
     ):
         self.dtype = dtype
+        params = locals().copy()
+        params.pop("self")  # 移除 self
+        self.dtype = params.pop("dtype")  # dtype 不放在 config 里
+
+        self.config = SimpleNamespace(**params)
 
         # # Validation checks from original __init__
         # if self.config.use_beta_sigmas and not is_scipy_available():
