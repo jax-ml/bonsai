@@ -475,36 +475,10 @@ class Wan2DiT(nnx.Module):
         return x
 
 
-# Flow Matching Scheduler (simplified version)
-class FlowMatchingScheduler:
-    """Flow matching scheduler for diffusion sampling."""
-
-    def __init__(self, num_steps: int = 50):
-        self.num_steps = num_steps
-        # Linear schedule from 0 to 1
-        self.timesteps = jnp.linspace(0, 1, num_steps)
-
-    def add_noise(self, latents: Array, noise: Array, t: Array) -> Array:
-        """Add noise to latents according to flow matching."""
-        # Flow matching: x_t = (1-t) * x_0 + t * noise
-        t = t.reshape(-1, 1, 1, 1, 1)
-        return (1 - t) * latents + t * noise
-
-    def step(self, model_output: Array, sample: Array, t_idx: int) -> Array:
-        """Single denoising step."""
-        t = self.timesteps[t_idx]
-        t_next = self.timesteps[t_idx - 1] if t_idx > 0 else 0.0
-
-        # Flow matching step
-        dt = t - t_next
-        sample = sample - dt * model_output
-
-        return sample
-
-
 def generate_video(
     model: Wan2DiT,
     text_embeds: Array,
+    negative_embeds: Array,
     num_frames: int = 81,
     latent_size: Tuple[int, int] = (60, 60),
     num_steps: int = 50,
@@ -537,7 +511,8 @@ def generate_video(
 
     # Initialize random noise
     latents = jax.random.normal(key, (b, num_frames, h, w, c))
-    scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=50, shape=latents.shape)
+    scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_steps, shape=latents.shape)
+    print(f"schecduler_state: {scheduler_state}")
 
     for t_idx in reversed(range(num_steps)):
         # Scheduler needs scalar timestep, model needs batched timestep
@@ -549,9 +524,7 @@ def generate_video(
             # Predict with text conditioning
             noise_pred_cond = model.forward(latents, text_embeds, t_batch, deterministic=True)
 
-            # Predict without text (null text)
-            null_embeds = jnp.zeros_like(text_embeds)
-            noise_pred_uncond = model.forward(latents, null_embeds, t_batch, deterministic=True)
+            noise_pred_uncond = model.forward(latents, negative_embeds, t_batch, deterministic=True)
 
             # Apply guidance
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
@@ -564,7 +537,6 @@ def generate_video(
 
 
 __all__ = [
-    "FlowMatchingScheduler",
     "ModelConfig",
     "Wan2DiT",
     "generate_video",

@@ -8,17 +8,18 @@ from flax import nnx
 from huggingface_hub import snapshot_download
 import traceback
 from transformers import AutoTokenizer
-from bonsai.models.wan2 import modeling, params, vae
+from bonsai.models.wan2 import modeling, params, vae, t5
 from bonsai.models.wan2 import scheduler as scheduler_module
 
 
 def get_t5_text_embeddings(
     prompt: str,
-    model_ckpt_path: str,
+    tokenizer: AutoTokenizer = None,
+    text_encoder: t5.T5EncoderModel = None,
     max_length: int = 512,
+    dtype: jnp.dtype = jnp.float32,
 ):
     try:
-        tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
         inputs = tokenizer(
             prompt,
             max_length=max_length,
@@ -26,19 +27,27 @@ def get_t5_text_embeddings(
             truncation=True,
             return_tensors="np",  # Return numpy arrays
         )
-        model = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-
         input_ids = jnp.array(inputs["input_ids"])
         attention_mask = jnp.array(inputs["attention_mask"])
-        embeddings = model(input_ids, attention_mask, deterministic=True)
-
-        return embeddings
+        seq_lens = jnp.sum(attention_mask, axis=1).astype(jnp.int32)
+        print(f"seq_lens: {seq_lens}")
+        embeddings = text_encoder(input_ids, attention_mask, deterministic=True)
+        prompt_embeds = jnp.asarray(embeddings, dtype=dtype)
+        prompt_embeds = [u[:v] for u, v in zip(prompt_embeds, seq_lens)]
+        prompt_embeds = jnp.stack(
+            [
+                jnp.concatenate(
+                    [u, jnp.zeros((max_length - u.shape[0], u.shape[1]), dtype=u.dtype)],
+                    axis=0,
+                )
+                for u in prompt_embeds
+            ],
+            axis=0,
+        )
+        return prompt_embeds
     except Exception as e:
         print(f"Error in text encoding: {e}")
         traceback.print_exc()
-        print("Using dummy embeddings")
-        return jnp.zeros((1, max_length, 4096))
-
 
 def decode_video_latents(latents: jax.Array, vae_decoder: vae.WanVAEDecoder):
     """
@@ -95,8 +104,13 @@ def run_model():
     print(f"Model: Wan2.1-T2V-1.3B ({config.num_layers} layers, {config.hidden_dim} dim)")
     print(f"Video: {config.num_frames} frames @ 480p")
 
+    tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
+    umt5_encoder = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
+    
     print("\n[1/4] Encoding text with T5...")
-    text_embeds = get_t5_text_embeddings(prompts[0], max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
+    text_embeds = get_t5_text_embeddings(prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
+    negative_prompts = [""]  # Empty negative prompt
+    negative_embeds = get_t5_text_embeddings(negative_prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
 
     print("\n[2/5] Loading Diffusion Transformer weights...")
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None)
@@ -114,6 +128,7 @@ def run_model():
     latents = modeling.generate_video(
         model=model,
         text_embeds=text_embeds,
+        negative_embeds=negative_embeds,
         num_frames=config.num_frames,
         latent_size=config.latent_size,
         num_steps=config.num_inference_steps,

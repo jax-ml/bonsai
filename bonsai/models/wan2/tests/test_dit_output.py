@@ -85,6 +85,61 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
 
     return close
 
+def test_dit_output():
+    print("\n" + "=" * 80)
+    print("TEST 2: DiT")
+    print("=" * 80)
+
+    model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
+    config = modeling.ModelConfig
+
+    print("\n[1/2] Loading transformer")
+    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.float32)
+
+    jax_dit = params.create_model_from_safe_tensors(model_ckpt_path, config,mesh=None)
+    print("transformer loaded:", transformer, transformer.config)
+
+    batch_size = 1
+    num_channels = 16  # in_channels
+    num_frames = 9 
+    height = 30      
+    width = 30      
+    text_seq_len = 128  
+    text_dim = 4096     # UMT5 hidden dimension
+
+    # Create dummy inputs
+    hidden_states = torch.randn(
+        batch_size, num_channels, num_frames, height, width,
+        dtype=torch.float32
+    )
+    # jax channels last
+    hidden_states_jax = jnp.array(np.transpose(hidden_states.numpy(), (0, 2, 3, 4, 1)))    
+    timestep = torch.randint(
+        0, 1000,
+        (batch_size,),
+        dtype=torch.long
+    )
+    timestep_jax = jnp.array(timestep.numpy())
+    encoder_hidden_states = torch.randn(
+        batch_size, text_seq_len, text_dim,
+        dtype=torch.float32
+    )
+    encoder_hidden_states_jax = jnp.array(encoder_hidden_states.numpy())
+
+    print("\n[2/2] Running forward pass")
+    with torch.no_grad():
+        output = transformer(
+            hidden_states=hidden_states,
+            timestep=timestep,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states_image=None,  # Only for I2V models
+            return_dict=True,
+            attention_kwargs=None,
+        )
+    pred_noise = jax_dit.forward(hidden_states_jax, encoder_hidden_states_jax, timestep_jax, deterministic=True)
+    
+    # Compare final output
+    return compare_outputs(pred_noise.transpose(0,4,1,2,3), output, "Final DiT Output", rtol=1e-3, atol=1e-4)
 def test_dit():
     print("\n" + "=" * 80)
     print("TEST 2: DiT")

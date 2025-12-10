@@ -105,7 +105,7 @@ class CausalConv3d(nnx.Module):
             kernel_size=kernel_size,
             padding="VALID",  # We'll handle padding manually
             rngs=rngs,
-            # precision=Precision.HIGHEST,
+            precision=Precision.HIGHEST,
         )
         self.padding = (
             (0, 0),
@@ -233,7 +233,7 @@ class AttentionBlock(nnx.Module):
             kernel_size=(1, 1),
             use_bias=True,
             rngs=rngs,
-            # precision=Precision.HIGHEST,
+            precision=Precision.HIGHEST,
         )
         self.proj = nnx.Conv(
             in_features=channels,
@@ -241,7 +241,7 @@ class AttentionBlock(nnx.Module):
             kernel_size=(1, 1),
             use_bias=True,
             rngs=rngs,
-            # precision=Precision.HIGHEST,
+            precision=Precision.HIGHEST,
         )
 
     def __call__(self, x: Array) -> Array:
@@ -287,7 +287,7 @@ class Upsample2D(nnx.Module):
             kernel_size=(3, 3),
             padding=1,
             rngs=rngs,
-            # precision=Precision.HIGHEST,
+            precision=Precision.HIGHEST,
         )
 
     def __call__(self, x: Array) -> Array:
@@ -315,7 +315,7 @@ class Upsample3D(nnx.Module):
             kernel_size=(3, 3),
             padding=1,
             rngs=rngs,
-            # precision=Precision.HIGHEST,
+            precision=Precision.HIGHEST,
         )
 
     def __call__(
