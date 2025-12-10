@@ -550,8 +550,29 @@ class WanVAEDecoder(nnx.Module):
         # Process remaining frames with JIT
         if z_frames.shape[0] > 1:
             _final_cache, remaining_outputs = jax.lax.scan(scan_frames, cache_tuple, z_frames[1:])
+            # Frame 0 outputs 1 frame: [B, 1, H, W, 3]
+            # Frames 1+ each output 4 frames: [T-1, B, 4, H, W, 3]
+            # Flatten temporal dimensions before concatenating
+            b, h_out, w_out, c = (
+                first_frame_out.shape[0],
+                first_frame_out.shape[2],
+                first_frame_out.shape[3],
+                first_frame_out.shape[4],
+            )
+
+            # Flatten first frame: [B, 1, H, W, 3] -> [1, B, H, W, 3]
+            first_flat = first_frame_out.transpose(1, 0, 2, 3, 4)  # [1, B, H, W, 3]
+
+            # Flatten remaining frames: [T-1, B, 4, H, W, 3] -> [T-1*4, B, H, W, 3]
+            t_minus_1 = remaining_outputs.shape[0]
+            t_out_per_frame = remaining_outputs.shape[2]
+            remaining_flat = remaining_outputs.transpose(0, 2, 1, 3, 4, 5).reshape(
+                t_minus_1 * t_out_per_frame, b, h_out, w_out, c
+            )
+
+            # Concatenate along time dimension: [1+T-1*4, B, H, W, 3]
             # Concatenate first frame with remaining frames
-            frame_outputs = jnp.concatenate([first_frame_out[None, ...], remaining_outputs], axis=0)
+            frame_outputs = jnp.concatenate([first_flat, remaining_flat], axis=0).transpose(1, 0, 2, 3, 4)
         else:
             frame_outputs = first_frame_out[None, ...]
 
