@@ -246,25 +246,31 @@ def run_model():
         compare_outputs(t_batch, timestep, f"Timestep Batch at step {i}")
         latent_model_input = latents.to(torch.bfloat16)
         with current_model.cache_context("cond"):
-            noise_pred = current_model(
+            noise_pred_original = current_model(
                 hidden_states=latent_model_input,
                 timestep=timestep,
                 encoder_hidden_states=prompt_embeds,
                 attention_kwargs=None,
                 return_dict=False,
-            )[0]
+            )
+        noise_pred = noise_pred_original[0]
+        noise_sample = noise_pred_original.sample
+        print(f"noise_pred shape (torch): {noise_pred.shape}")
         noise_pred_cond = model.forward(latents_jax, text_embeds, t_batch, deterministic=True)
-        compare_outputs(noise_pred_cond, noise_pred.transpose(0,2,3,4,1), f"Noise Prediction Cond at step {i}", rtol=1e-2, atol=1e-3)
+        compare_outputs(noise_pred_cond, noise_sample.transpose(0,2,3,4,1), f"Noise Prediction Cond at step {i}", rtol=1e-2, atol=1e-3)
         with current_model.cache_context("uncond"):
-            noise_uncond = current_model(
+            noise_uncond_original = current_model(
                 hidden_states=latent_model_input,
                 timestep=timestep,
                 encoder_hidden_states=negative_prompt_embeds,
                 attention_kwargs=None,
                 return_dict=False,
-            )[0]
+            )
+        noise_uncond = noise_uncond_original[0]
+        noise_uncond_sample = noise_uncond_original.sample
+        print(f"noise_uncond shape (torch): {noise_uncond.shape}")
         noise_pred_uncond = model.forward(latents_jax, negative_embeds, t_batch, deterministic=True)
-        compare_outputs(noise_pred_uncond, noise_uncond.transpose(0,2,3,4,1), f"Noise Prediction Uncond at step {i}", rtol=1e-2, atol=1e-3)
+        compare_outputs(noise_pred_uncond, noise_uncond_sample.transpose(0,2,3,4,1), f"Noise Prediction Uncond at step {i}", rtol=1e-2, atol=1e-3)
 
         noise_pred_jax = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
         noise_pred_torch = noise_uncond + guidance_scale * (noise_pred - noise_uncond)
