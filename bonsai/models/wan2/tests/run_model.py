@@ -142,6 +142,8 @@ def run_model():
     print(f"✓ Generated latents in {generation_time:.2f}s")
     print(f"Latents shape: {latents.shape}")
     print(latents[0,1:,:,25:,:].mean())
+    print(f"Has NaN: {jnp.isnan(latents).any()}")
+    print(f"Has Inf: {jnp.isinf(latents).any()}")
 
     # Step 4: Decode to video
     print("\n[4/5] Decoding latents to video...")
