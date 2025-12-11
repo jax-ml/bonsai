@@ -19,6 +19,7 @@ import re
 from enum import Enum
 
 import jax
+import jax.numpy as jnp
 import safetensors
 from etils import epath
 from flax import nnx
@@ -26,6 +27,28 @@ from flax import nnx
 from bonsai.models.wan2 import modeling as model_lib
 from bonsai.models.wan2 import t5 as t5_lib
 from bonsai.models.wan2 import vae as vae_lib
+
+
+def cast_with_exclusion(path, x, dtype_to_cast):
+    """
+    Casts arrays to dtype_to_cast, but keeps params from any 'norm' layer in float32.
+    """
+
+    exclusion_keywords = [
+        "norm",  # For all LayerNorm/GroupNorm layers
+        "condition_embedder",  # The entire time/text conditioning module
+        "scale_shift_table",  # Catches both the final and the AdaLN tables
+    ]
+
+    path_str = ".".join(str(k.key) if isinstance(k, jax.tree_util.DictKey) else str(k) for k in path)
+
+    if any(keyword in path_str.lower() for keyword in exclusion_keywords):
+        print("is_norm_path: ", path)
+        # Keep LayerNorm/GroupNorm weights and biases in full precision
+        return x.astype(jnp.float32)
+    else:
+        # Cast everything else to dtype_to_cast
+        return x.astype(dtype_to_cast)
 
 
 def _get_dit_mapping(cfg: model_lib.ModelConfig):
@@ -338,6 +361,10 @@ def create_model_from_safe_tensors(
 
     # Setup sharding if mesh provided
     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
+
+    # _params = jax.tree_util.tree_map_with_path(
+    #     lambda path, x: cast_with_exclusion(path, x, dtype_to_cast=cfg.weights_dtype), params
+    # )
 
     key_mapping = _get_dit_mapping(cfg)
     conversion_errors = []

@@ -54,6 +54,7 @@ class WanLayerNorm(nnx.LayerNorm):
 class ModelConfig:
     """Configuration for Wan2.1-T2V-1.3B Diffusion Transformer."""
 
+    weights_dtype: jnp.dtype = jnp.bfloat16
     num_layers: int = 30
     hidden_dim: int = 1536
     input_dim: int = 16

@@ -545,14 +545,16 @@ class WanVAEDecoder(nnx.Module):
             """Process single frame with caching (JIT-compiled)."""
             cache_idx = [0]
             frame_out, new_cache_tuple = self.decoder(frame_latent, cache_tuple, cache_idx)
+            print(f"frame_out shape:{frame_out.shape}")
+            print(f"frame_out mean:{frame_out[0, :, :, 235:, :].mean()} ")
             return new_cache_tuple, frame_out
 
         # Process remaining frames with JIT
         if z_frames.shape[0] > 1:
             _final_cache, remaining_outputs = jax.lax.scan(scan_frames, cache_tuple, z_frames[1:])
 
-            print(remaining_outputs.shape)
-            print(remaining_outputs[0, :, :, 235:, :].mean())
+            print(f"remaining output shape: {remaining_outputs.shape}")
+            print(f"remaining output mean:{remaining_outputs[:, 0, :, :, 235:, :].mean()} ")
             # Frame 0 outputs 1 frame: [B, 1, H, W, 3]
             # Frames 1+ each output 4 frames: [T-1, B, 4, H, W, 3]
             # Flatten temporal dimensions before concatenating
@@ -572,6 +574,8 @@ class WanVAEDecoder(nnx.Module):
             remaining_flat = remaining_outputs.transpose(0, 2, 1, 3, 4, 5).reshape(
                 t_minus_1 * t_out_per_frame, b, h_out, w_out, c
             )
+            print(f"remaining flat shape:{remaining_flat.shape}")
+            print(f"remaining flat mean:{remaining_flat[:, 0, :, 235:, :].mean()} ")
 
             # Concatenate along time dimension: [1+T-1*4, B, H, W, 3]
             # Concatenate first frame with remaining frames
@@ -623,7 +627,8 @@ def decode_latents_to_video(vae_decoder: WanVAEDecoder, latents: Array, normaliz
     """
     # Decode
     video = vae_decoder.decode(latents)
-    print(video[0, 1:, :, 235:, :].mean())
+    print(f"video shape:{video.shape}")
+    print(f"video mean:{video[0, 1:, :, 235:, :].mean()}")
 
     if normalize:
         video = (video + 1.0) / 2.0
