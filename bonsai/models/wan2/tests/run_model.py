@@ -141,12 +141,14 @@ def run_model():
     generation_time = time.time() - start_time
     print(f"✓ Generated latents in {generation_time:.2f}s")
     print(f"Latents shape: {latents.shape}")
+    print(latents[0,1:,:,25:,:].mean())
 
     # Step 4: Decode to video
     print("\n[4/5] Decoding latents to video...")
     video = decode_video_latents(latents, vae_decoder)
     generation_time = time.time() - start_time
     print(f"Video shape: {video.shape}")
+    print(video[0,1:,:,235:,:].mean())
 
     # Summary
     print("\n" + "=" * 60)

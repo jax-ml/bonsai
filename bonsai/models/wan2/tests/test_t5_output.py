@@ -92,7 +92,6 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
 
     return close
 
-
 def test_t5_encoder():
     """Test T5 encoder output against Wan T5 reference implementation."""
     print("\n" + "=" * 80)
@@ -115,7 +114,7 @@ def test_t5_encoder():
 
     print("\n[1/2] Loading T5 encoder...")
     jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-    hf_t5 = UMT5EncoderModel.from_pretrained(model_ckpt_path, subfolder="text_encoder", torch_dtype=torch.float32)
+    hf_t5 = UMT5EncoderModel.from_pretrained(model_ckpt_path, subfolder="text_encoder", torch_dtype=torch.bfloat16)
 
     check_weight_loading(jax_t5, hf_t5)
 
