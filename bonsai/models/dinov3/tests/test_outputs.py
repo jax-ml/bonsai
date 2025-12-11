@@ -1,12 +1,11 @@
 import jax 
 import jax.numpy as jnp 
-from flax import nnx
+
 import torch 
 from huggingface_hub import snapshot_download
 from transformers import DINOv3ViTModel 
 import numpy as np
 
-from bonsai.models.dinov3 import modeling as model_lib
 from bonsai.models.dinov3 import params
 from absl.testing import absltest
 
