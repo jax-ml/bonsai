@@ -173,17 +173,17 @@ class RMSNorm(nnx.Module):
         rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True) + self.eps)
         # if jnp.isnan(x).any():
         nan_mask_x = jnp.isnan(x)
-        nan_indices_x = jnp.argwhere(nan_mask_x, size=100, fill_value=-1)
+        nan_indices_x = jnp.argwhere(nan_mask_x, size=5, fill_value=-1)
         x_normalized = x / rms
         nan_mask = jnp.isnan(x_normalized)
-        nan_indices = jnp.argwhere(nan_mask, size=100, fill_value=-1)
+        nan_indices = jnp.argwhere(nan_mask, size=5, fill_value=-1)
         jax.debug.print(
             "x_normalized NaN at indices?:{}, nan indices:{}, rum values:{}, x NaN?: {}, x NaN indices:{}, ",
             nan_mask.any(),
-            nan_indices[:10],
+            nan_indices[:5],
             rms.mean(),
             nan_mask_x.any(),
-            nan_indices_x[:10],
+            nan_indices_x[:5],
         )
         # jax.debug.print("x_normalized has nan: {}", jnp.isnan(x_normalized).any())
         # jax.debug.print("scale values: {} {}", self.scale_factor, self.scale.value.mean())
@@ -221,7 +221,7 @@ class ResidualBlock(nnx.Module):
             cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
             # if self.skip_conv is not None:
-            # jax.debug.print("Residual block conv1 output has nan:{}", jnp.isnan(x).any())
+            jax.debug.print("Residual block conv1 output has nan:{}", jnp.isnan(x).any())
         else:
             x, _ = self.conv1(x, None)
             # if self.skip_conv is not None:
