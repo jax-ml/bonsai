@@ -11,6 +11,13 @@ from jax.lax import Precision
 from collections import OrderedDict
 
 def check_weight_loading(jax_model, torch_model):
+
+    text_proj_torch = torch_model.condition_embedder.text_embedder.linear_1.weight.detach().cpu().float().numpy().T
+    text_proj_jax = np.array(jax_model.text_proj.layers[0].kernel.value)
+    print("Text projection weights:")
+    print(f"  Shapes: torch={text_proj_torch.shape}, jax={text_proj_jax.shape}")
+    print(f"  Max diff: {np.abs(text_proj_torch - text_proj_jax).max():.2e}")
+    print(f"  Mean diff: {np.abs(text_proj_torch - text_proj_jax).mean():.2e}")
     # torch :(out, in, t, h, w)
     torch_emb = torch_model.patch_embedding.weight.detach().cpu().float().numpy()
     # jax: (t, h, w, in, out)
@@ -33,9 +40,16 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Mean diff: {np.abs(torch_kv - jax_kv_weight).mean():.2e}")
     
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-2, atol: float = 1e-4):
-    print(f"before convert: {torch_output.dtype}")
+
+    print(f"\n{'=' * 80}")
+    print(f"Comparing: {name}")
+    print(f"{'=' * 80}")
+
+    print(f"before convert torch: {torch_output.dtype}, jax: {jax_output.dtype}")
     if torch_output.dtype == torch.bfloat16:
         torch_output = torch_output.float()
+    if jax_output.dtype == jnp.bfloat16:
+        jax_output = jax_output.astype(jnp.float32)
 
     if isinstance(torch_output, torch.Tensor):
         torch_np = torch_output.detach().cpu().numpy()
@@ -44,9 +58,6 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
 
     jax_np = np.array(jax_output)
 
-    print(f"\n{'=' * 80}")
-    print(f"Comparing: {name}")
-    print(f"{'=' * 80}")
     print(f"JAX shape:   {jax_np.shape}")
     print(f"Torch shape: {torch_np.shape}")
     print(f"JAX dtype:   {jax_np.dtype}")
