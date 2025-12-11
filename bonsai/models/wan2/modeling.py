@@ -523,7 +523,10 @@ def generate_video(
         else:
             noise_pred = model.forward(latents, text_embeds, t_batch, deterministic=True)
 
-        latents, scheduler_state = scheduler.step(scheduler_state, noise_pred, t_scalar, latents)
+        latents, scheduler_state = scheduler.step(
+            scheduler_state, noise_pred.transpose(0, 4, 1, 2, 3), t_scalar, latents
+        )
+        latents = latents.transpose(0, 2, 3, 4, 1)  # back to channel-last
 
     return latents
 
