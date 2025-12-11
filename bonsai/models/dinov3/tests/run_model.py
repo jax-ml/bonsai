@@ -5,7 +5,6 @@ from transformers import AutoImageProcessor
 from PIL import Image
 import requests 
 
-from bonsai.models.dinov3 import modeling as model_lib
 from bonsai.models.dinov3 import params
 
 def run_model():
