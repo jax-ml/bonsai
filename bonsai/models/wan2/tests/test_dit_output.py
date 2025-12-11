@@ -12,7 +12,7 @@ from collections import OrderedDict
 
 def check_weight_loading(jax_model, torch_model):
     # torch :(out, in, t, h, w)
-    torch_emb = torch_model.patch_embedding.weight.detach().cpu().numpy()
+    torch_emb = torch_model.patch_embedding.weight.detach().cpu().float().numpy()
     # jax: (t, h, w, in, out)
     jax_emb = np.array(jax_model.patch_embed.kernel.value).transpose(4,3,0,1,2)
 
@@ -22,8 +22,8 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Mean diff: {np.abs(torch_emb - jax_emb).mean():.2e}")
 
     # check fused kv projection weights in first block
-    torch_k_weight = torch_model.blocks[0].attn2.to_k.weight.detach().cpu().numpy().T
-    torch_v_weight = torch_model.blocks[0].attn2.to_v.weight.detach().cpu().numpy().T
+    torch_k_weight = torch_model.blocks[0].attn2.to_k.weight.detach().cpu().float().numpy().T
+    torch_v_weight = torch_model.blocks[0].attn2.to_v.weight.detach().cpu().float().numpy().T
     torch_kv = np.concatenate([torch_k_weight, torch_v_weight], axis=1)
 
     jax_kv_weight = np.array(jax_model.blocks[0].cross_attn.kv_proj.kernel.value)
