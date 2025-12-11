@@ -125,6 +125,8 @@ def run_model():
     key = jax.random.PRNGKey(42)
     start_time = time.time()
 
+    latents = jax.random.normal(key, (1, config.num_frames, config.latent_size[0], config.latent_size[1], config.input_dim))
+
     latents = modeling.generate_video(
         model=model,
         latents=latents,
