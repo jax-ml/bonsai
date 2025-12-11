@@ -10,7 +10,7 @@ import safetensors
 from etils import epath 
 
 from transformers import DINOv3ViTConfig
-from modeling import Dinov3ViTModel
+from bonsai.models.dinov3.modeling import Dinov3ViTModel
 
 def _get_key_and_transform_mapping(cfg: DINOv3ViTConfig):
     class Transform(Enum):
@@ -161,7 +161,5 @@ def load_model_config(model_path: str) -> DINOv3ViTConfig:
 
     with config_path.open("r") as f:
         config_dict = json.load(f)
-
-    print(config_dict)
 
     return DINOv3ViTConfig(**config_dict)
