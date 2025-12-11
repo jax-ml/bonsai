@@ -218,6 +218,9 @@ class ResidualBlock(nnx.Module):
 
         if self.skip_conv is not None:
             residual, _ = self.skip_conv(residual, None)
+            jax.debug.print("Residual conv output has nan:{}", jnp.isnan(residual).any())
+
+        jax.debug.print("Residual block output has nan:{}", jnp.isnan(x).any())
 
         return x + residual, cache_list
 
