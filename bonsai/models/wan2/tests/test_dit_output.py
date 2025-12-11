@@ -228,15 +228,15 @@ def test_dit():
 
     # 1. Text projection
     text_embeds_jax = jax_dit.text_proj(encoder_hidden_states_jax)
-    # text_embeds_torch = intermediate_outputs['condition_encoder_hidden_states']
-    # compare_outputs(text_embeds_jax, text_embeds_torch, "Text Projection", rtol=1e-3, atol=1e-4)
+    text_embeds_torch = intermediate_outputs['condition_encoder_hidden_states']
+    compare_outputs(text_embeds_jax, text_embeds_torch, "Text Projection", rtol=1e-3, atol=1e-4)
 
     # 2. Patch embedding
     x_jax = jax_dit.patch_embed(hidden_states_jax)
     # PyTorch is BCTHW, need to convert to BTHWC for comparison
-    # patch_embed_torch = intermediate_outputs['patch_embed_output']
-    # patch_embed_torch_channels_last = np.transpose(patch_embed_torch.numpy(), (0, 2, 3, 4, 1))
-    # compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
+    patch_embed_torch = intermediate_outputs['patch_embed_output']
+    patch_embed_torch_channels_last = np.transpose(patch_embed_torch.numpy(), (0, 2, 3, 4, 1))
+    compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
 
     # Reshape to sequence
     b, t_out, h_out, w_out, d = x_jax.shape
@@ -272,14 +272,14 @@ def test_dit():
 
     # PyTorch RoPE freqs are in BCHW format, convert to sequence format
     rope_freqs_cos_torch = intermediate_outputs['rope_freqs_cos']
-    # compare_outputs(rope_freqs_cos_jax, rope_freqs_cos_torch, "RoPE Freqs Cos", rtol=1e-5, atol=1e-6)
+    compare_outputs(rope_freqs_cos_jax, rope_freqs_cos_torch, "RoPE Freqs Cos", rtol=1e-5, atol=1e-6)
 
     # 4. Time embeddings
     time_emb_jax, time_proj_jax = jax_dit.time_embed(timestep_jax)
     time_emb_torch = intermediate_outputs['condition_temb']
     time_proj_torch = intermediate_outputs['condition_timestep_proj']
-    # compare_outputs(time_emb_jax, time_emb_torch, "Time Embedding", rtol=1e-3, atol=1e-4)
-    # compare_outputs(time_proj_jax, time_proj_torch, "Time Projection", rtol=1e-3, atol=1e-4)
+    compare_outputs(time_emb_jax, time_emb_torch, "Time Embedding", rtol=1e-3, atol=1e-4)
+    compare_outputs(time_proj_jax, time_proj_torch, "Time Projection", rtol=1e-3, atol=1e-4)
 
     # 5. Process through transformer blocks with detailed attention comparison
     for i, block in enumerate(jax_dit.blocks):
