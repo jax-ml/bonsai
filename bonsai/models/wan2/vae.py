@@ -549,7 +549,7 @@ class WanVAEDecoder(nnx.Module):
             right_part_frame = frame_out[:, :, :, 235:, :]
             print(f"Has NaN: {jnp.isnan(right_part_frame).any()}")
             print(f"Has Inf: {jnp.isinf(right_part_frame).any()}")
-            jax.debug.print(f"frame_out mean:{right_part_frame.mean()} ")
+            jax.debug.print("frame_out mean: {}", right_part_frame.mean())
             return new_cache_tuple, frame_out
 
         # Process remaining frames with JIT
