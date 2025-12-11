@@ -503,7 +503,9 @@ def generate_video(
     b = text_embeds.shape[0]
 
     # Initialize random noise
-    scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_steps, shape=latents.shape)
+    scheduler_state = scheduler.set_timesteps(
+        scheduler_state, num_inference_steps=num_steps, shape=latents.transpose(0, 4, 1, 2, 3).shape
+    )
     # print(f"schecduler_state: {scheduler_state}")
 
     for t_idx in range(num_steps):
@@ -524,7 +526,7 @@ def generate_video(
             noise_pred = model.forward(latents, text_embeds, t_batch, deterministic=True)
 
         latents, scheduler_state = scheduler.step(
-            scheduler_state, noise_pred.transpose(0, 4, 1, 2, 3), t_scalar, latents
+            scheduler_state, noise_pred.transpose(0, 4, 1, 2, 3), t_scalar, latents.transpose(0, 4, 1, 2, 3)
         )
         latents = latents.transpose(0, 2, 3, 4, 1)  # back to channel-last
 
