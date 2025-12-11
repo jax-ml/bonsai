@@ -173,10 +173,10 @@ class RMSNorm(nnx.Module):
         rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True) + self.eps)
         # if jnp.isnan(x).any():
         nan_mask_x = jnp.isnan(x)
-        nan_indices_x = jnp.argwhere(nan_mask_x)
+        nan_indices_x = jnp.argwhere(nan_mask_x, size=100, fill_value=-1)
         x_normalized = x / rms
         nan_mask = jnp.isnan(x_normalized)
-        nan_indices = jnp.argwhere(nan_mask)
+        nan_indices = jnp.argwhere(nan_mask, size=100, fill_value=-1)
         jax.debug.print(
             "x_normalized NaN at indices?:{}, nan indices:{}, rum values:{}, x NaN?: {}, x NaN indices:{}, ",
             nan_mask.any(),
