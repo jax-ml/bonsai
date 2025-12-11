@@ -209,48 +209,48 @@ class ResidualBlock(nnx.Module):
     ) -> tuple[Array, tuple[Array | None, ...] | None]:
         residual = x
         x = self.norm1(x)
-        # if self.skip_conv is not None:
-        # jax.debug.print("Residual block norm1 output has nan:{}", jnp.isnan(x).any())
+        if self.skip_conv is not None:
+            jax.debug.print("Residual block norm1 output has nan:{}", jnp.isnan(x).any(), ordered=True)
         x = nnx.silu(x)
-        # if self.skip_conv is not None:
-        # jax.debug.print("Residual block activation output has nan:{}", jnp.isnan(x).any())
+        if self.skip_conv is not None:
+            jax.debug.print("Residual block activation output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         if cache_list is not None:
             idx = cache_idx[0]
             x, new_cache = self.conv1(x, cache_list[idx])
             cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
-            # if self.skip_conv is not None:
-            jax.debug.print("Residual block conv1 output has nan:{}", jnp.isnan(x).any())
+            if self.skip_conv is not None:
+                jax.debug.print("Residual block conv1 output has nan:{}", jnp.isnan(x).any(), ordered=True)
         else:
             x, _ = self.conv1(x, None)
-            # if self.skip_conv is not None:
-            # jax.debug.print("no cache: Residual block conv1 output has nan:{}", jnp.isnan(x).any())
+            if self.skip_conv is not None:
+                jax.debug.print("no cache: Residual block conv1 output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         x = self.norm2(x)
-        # if self.skip_conv is not None:
-        # jax.debug.print("Residual block norm2 output has nan:{}", jnp.isnan(x).any())
+        if self.skip_conv is not None:
+            jax.debug.print("Residual block norm2 output has nan:{}", jnp.isnan(x).any(), ordered=True)
         x = nnx.silu(x)
-        # if self.skip_conv is not None:
-        # jax.debug.print("Residual block activation2 output has nan:{}", jnp.isnan(x).any())
+        if self.skip_conv is not None:
+            jax.debug.print("Residual block activation2 output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         if cache_list is not None:
             idx = cache_idx[0]
             x, new_cache = self.conv2(x, cache_list[idx])
             cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
-            # if self.skip_conv is not None:
-            # jax.debug.print("Residual block conv2 output has nan:{}", jnp.isnan(x).any())
+            if self.skip_conv is not None:
+                jax.debug.print("Residual block conv2 output has nan:{}", jnp.isnan(x).any(), ordered=True)
         else:
             x, _ = self.conv2(x, None)
-            # if self.skip_conv is not None:
-            # jax.debug.print("no cache: Residual block conv2 output has nan:{}", jnp.isnan(x).any())
+            if self.skip_conv is not None:
+                jax.debug.print("no cache: Residual block conv2 output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         if self.skip_conv is not None:
             residual, _ = self.skip_conv(residual, None)
-            # jax.debug.print("Residual conv output has nan:{}", jnp.isnan(residual).any())
+            jax.debug.print("Residual conv output has nan:{}", jnp.isnan(residual).any(), ordered=True)
 
-        # jax.debug.print("Residual block output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Residual block output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         return x + residual, cache_list
 
