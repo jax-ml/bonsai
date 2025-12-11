@@ -228,14 +228,14 @@ def test_dit():
 
     # 1. Text projection
     text_embeds_jax = jax_dit.text_proj(encoder_hidden_states_jax)
-    text_embeds_torch = intermediate_outputs['condition_encoder_hidden_states']
+    # text_embeds_torch = intermediate_outputs['condition_encoder_hidden_states']
     # compare_outputs(text_embeds_jax, text_embeds_torch, "Text Projection", rtol=1e-3, atol=1e-4)
 
     # 2. Patch embedding
     x_jax = jax_dit.patch_embed(hidden_states_jax)
     # PyTorch is BCTHW, need to convert to BTHWC for comparison
-    patch_embed_torch = intermediate_outputs['patch_embed_output']
-    patch_embed_torch_channels_last = np.transpose(patch_embed_torch.numpy(), (0, 2, 3, 4, 1))
+    # patch_embed_torch = intermediate_outputs['patch_embed_output']
+    # patch_embed_torch_channels_last = np.transpose(patch_embed_torch.numpy(), (0, 2, 3, 4, 1))
     # compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
 
     # Reshape to sequence
@@ -367,7 +367,7 @@ def test_dit():
     assert output.sample.shape == expected_shape
 
     # change to channels last for comparison
-    expected_output = np.transpose(output.sample.numpy(), (0, 2, 3, 4, 1))
+    expected_output = np.transpose(output.sample.float().numpy(), (0, 2, 3, 4, 1))
 
     debugger.remove_hooks()
     # Compare final output
