@@ -235,7 +235,7 @@ def test_dit():
     x_jax = jax_dit.patch_embed(hidden_states_jax)
     # PyTorch is BCTHW, need to convert to BTHWC for comparison
     patch_embed_torch = intermediate_outputs['patch_embed_output']
-    patch_embed_torch_channels_last = np.transpose(patch_embed_torch.numpy(), (0, 2, 3, 4, 1))
+    patch_embed_torch_channels_last = np.transpose(patch_embed_torch.float().numpy(), (0, 2, 3, 4, 1))
     compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
 
     # Reshape to sequence
