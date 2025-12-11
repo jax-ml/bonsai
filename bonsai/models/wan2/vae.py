@@ -620,6 +620,7 @@ def decode_latents_to_video(vae_decoder: WanVAEDecoder, latents: Array, normaliz
     """
     # Decode
     video = vae_decoder.decode(latents)
+    print(video[0, 1:, :, 235:, :].mean())
 
     if normalize:
         video = (video + 1.0) / 2.0

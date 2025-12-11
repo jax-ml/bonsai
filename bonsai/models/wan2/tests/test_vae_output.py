@@ -191,7 +191,6 @@ def test_vae_decoder(src:str="hf"):
     latents = latents_original / latents_std + latents_mean
     latents_jax = jnp.array(latents_original.numpy().transpose(0,2,3,4,1))
 
-
     print(f"\nInput latents shape: {latents.shape}")
     print("Running decoder forward pass...\n")
 
@@ -208,6 +207,7 @@ def test_vae_decoder(src:str="hf"):
     # vae.clear_cache()
     # x = vae.post_quant_conv(latents)
     decoded_jax = vae_jax.decode(latents_jax)
+    print(decoded_jax[0,1:,:,235:,:].mean())
     with torch.no_grad():
         # for i in range(num_frames):
         #     vae._conv_idx = [0]
