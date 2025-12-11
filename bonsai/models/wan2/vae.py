@@ -172,7 +172,10 @@ class RMSNorm(nnx.Module):
         # Normalize to unit RMS along the channel dimension manually since jax.nn.normalize is unavailable.
         rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True))
         rms = jnp.maximum(rms, self.eps)
+        jax.debug.print("rms values: {}", rms.mean())
         x_normalized = x / rms
+        jax.debug.print("x_normalized has nan: {}", jnp.isnan(x_normalized).any())
+        jax.debug.print("scale values: {} {}", self.scale_factor, self.scale.value.mean())
         return x_normalized * self.scale_factor * self.scale.value
 
 

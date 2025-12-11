@@ -176,7 +176,7 @@ def test_dit():
         dtype=torch.float32
     )
     # jax channels last
-    hidden_states_jax = jnp.array(np.transpose(hidden_states.numpy(), (0, 2, 3, 4, 1)))    
+    hidden_states_jax = jnp.array(np.transpose(hidden_states.numpy(), (0, 2, 3, 4, 1))).astype(jnp.bfloat16)
     timestep = torch.randint(
         0, 1000,
         (batch_size,),
@@ -187,7 +187,7 @@ def test_dit():
         batch_size, text_seq_len, text_dim,
         dtype=torch.float32
     )
-    encoder_hidden_states_jax = jnp.array(encoder_hidden_states.numpy())
+    encoder_hidden_states_jax = jnp.array(encoder_hidden_states.numpy()).astype(jnp.bfloat16)
 
     print("\n[2/2] Running forward pass")
     with torch.no_grad():

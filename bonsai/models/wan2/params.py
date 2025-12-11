@@ -43,7 +43,7 @@ def cast_with_exclusion(path, x, dtype_to_cast):
     path_str = ".".join(str(k.key) if isinstance(k, jax.tree_util.DictKey) else str(k) for k in path)
 
     if any(keyword in path_str.lower() for keyword in exclusion_keywords):
-        print("is_norm_path: ", path)
+        # print("is_norm_path: ", path)
         # Keep LayerNorm/GroupNorm weights and biases in full precision
         return x.astype(jnp.float32)
     else:
