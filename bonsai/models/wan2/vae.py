@@ -550,6 +550,9 @@ class WanVAEDecoder(nnx.Module):
         # Process remaining frames with JIT
         if z_frames.shape[0] > 1:
             _final_cache, remaining_outputs = jax.lax.scan(scan_frames, cache_tuple, z_frames[1:])
+
+            print(remaining_outputs.shape)
+            print(remaining_outputs[0, :, :, 235:, :].mean())
             # Frame 0 outputs 1 frame: [B, 1, H, W, 3]
             # Frames 1+ each output 4 frames: [T-1, B, 4, H, W, 3]
             # Flatten temporal dimensions before concatenating
