@@ -130,9 +130,9 @@ class CausalConv3d(nnx.Module):
         cache_t = 2 * self.temporal_padding
         if cache is not None and cache_t > 0:
             x = jnp.concatenate([cache, x], axis=1)  # [B, T+CACHE_T, H, W, C]
-            # if self.conv.in_features != self.conv.out_features:
-            # jax.debug.print("CausalConv3d with cache input has nan:{}", jnp.isnan(x).any(), ordered=True)
-            # jax.debug.print("feat cache in causalconv3d:{},{}", cache.shape, x.shape)
+            if self.conv.in_features != self.conv.out_features:
+                jax.debug.print("CausalConv3d with cache input has nan:{}", jnp.isnan(x).any(), ordered=True)
+                jax.debug.print("feat cache in causalconv3d:{},{}", cache.shape, x.shape, ordered=True)
             padding = list(self.padding)
             padding[1] = (max(0, self.padding[1][0] - cache.shape[1]), 0)  # Reduce left padding
             padding = tuple(padding)
@@ -140,11 +140,11 @@ class CausalConv3d(nnx.Module):
             padding = self.padding
 
         x_padded = jnp.pad(x, padding, mode="constant")
-        # if self.conv.in_features != self.conv.out_features:
-        # jax.debug.print("CausalConv3d input has nan:{}", jnp.isnan(x_padded).any(), ordered=True)
+        if self.conv.in_features != self.conv.out_features:
+            jax.debug.print("CausalConv3d input has nan:{}", jnp.isnan(x_padded).any(), ordered=True)
         out = self.conv(x_padded)
-        # if self.conv.in_features != self.conv.out_features:
-        # jax.debug.print("CausalConv3d output has nan:{}", jnp.isnan(out).any(), ordered=True)
+        if self.conv.in_features != self.conv.out_features:
+            jax.debug.print("CausalConv3d output has nan:{}", jnp.isnan(out).any(), ordered=True)
 
         # Extract cache for next iteration: last cache_t frames of INPUT (before conv)
         # Always create cache if we have temporal padding (even on first frame)
@@ -615,7 +615,8 @@ class WanVAEDecoder(nnx.Module):
 
         # Process remaining frames with JIT
         if z_frames.shape[0] > 1:
-            _final_cache, remaining_outputs = jax.lax.scan(scan_frames, cache_tuple, z_frames[1:])
+            with jax.disable_jit():
+                _final_cache, remaining_outputs = jax.lax.scan(scan_frames, cache_tuple, z_frames[1:])
 
             print(f"remaining output shape: {remaining_outputs.shape}")
             right_part_remaining = remaining_outputs[:, :, :, :, 235:, :]
