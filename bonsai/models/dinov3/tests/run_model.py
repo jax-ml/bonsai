@@ -12,7 +12,7 @@ def run_model():
     model_name = "facebook/dinov3-vitb16-pretrain-lvd1689m"
     
     url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/image_processor_example.png" # Replace with your image URL
-    image = Image.open(requests.get(url, stream=True).raw).convert("RGB") # type: ignore
+    image = Image.open(requests.get(url, stream=True).raw).convert("RGB") 
     processor = AutoImageProcessor.from_pretrained(model_name)
 
     model_ckpt_path = snapshot_download(model_name, allow_patterns=["*.safetensors", "*.json"])
