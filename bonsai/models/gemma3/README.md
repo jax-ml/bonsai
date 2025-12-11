@@ -21,17 +21,12 @@ python3 -m bonsai.models.gemma3.tests.run_model
 
 ### Remaining Tasks
 
-1. Implement KV caching to speed up inference
-2. JIT Compile forward pass
-3. Finish the `run_model.py` example. Add timing and profiling. 
-4. Optimize based on the profiling. 
-5. Implement sharding. 
-6. Get the `lm_head` from the weights. 
-7. Update to include other model sizes
-
-
-### Implementation Notes
-The implementation matches the HF one pretty well. To get KV caching working, we have to pad things. We also have to pad the token_type_ids on the right with 0's. 
+1. Finish the `run_model.py` example. Add timing and profiling. 
+2. Optimize based on the profiling. 
+3. Implement sharding. 
+4. Update to include other model sizes
+5. Clean up code (variable names, etc.)
+6. Implement with batching
 
 
 

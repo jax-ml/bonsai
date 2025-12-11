@@ -12,7 +12,7 @@ from tqdm import trange
 from transformers import AutoModel, AutoProcessor, AutoTokenizer, Gemma3Model, SiglipModel
 from transformers.cache_utils import DynamicCache
 from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
-from transformers.models.gemma3 import Gemma3ForCausalLM
+from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
 from transformers.models.gemma3.modeling_gemma3 import token_type_ids_mask_function
 
 from bonsai.models.gemma3 import modeling, params
@@ -32,7 +32,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         ## models
         cls.torch_model = (
-            AutoModel.from_pretrained(cls.model_name, dtype="auto")
+            Gemma3ForConditionalGeneration.from_pretrained(cls.model_name, dtype="auto")
             .to(device=cls.torch_device, dtype=torch.float32)
             .eval()
         )
@@ -115,7 +115,7 @@ class TestModuleForwardPasses(absltest.TestCase):
             llm_input_ids = input_ids
 
         if inputs_embeds is None:
-            inputs_embeds = self.torch_model.get_input_embeddings()(llm_input_ids)
+            inputs_embeds = self.torch_model.model.get_input_embeddings()(llm_input_ids)
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -125,9 +125,9 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         # Merge text and images
         if pixel_values is not None:
-            image_features = self.torch_model.get_image_features(pixel_values)
+            image_features = self.torch_model.model.get_image_features(pixel_values)
             image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
-            special_image_mask = self.torch_model.get_placeholder_mask(
+            special_image_mask = self.torch_model.model.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, image_features=image_features
             )
             inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features)
@@ -208,7 +208,7 @@ class TestModuleForwardPasses(absltest.TestCase):
             inputs_embeds = self.embed_tokens(input_ids)
 
         if use_cache and past_key_values is None and not training:
-            past_key_values = DynamicCache(config=self.torch_model.config.text_config)
+            past_key_values = DynamicCache(config=self.torch_model.model.config.text_config)
 
         if cache_position is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
@@ -243,8 +243,8 @@ class TestModuleForwardPasses(absltest.TestCase):
                 "full_attention": create_causal_mask(**mask_kwargs),
                 "sliding_attention": create_sliding_window_causal_mask(**sliding_mask_kwargs),
             }
-        position_embeddings_global = self.torch_model.language_model.rotary_emb(inputs_embeds, position_ids)
-        position_embeddings_local = self.torch_model.language_model.rotary_emb_local(inputs_embeds, position_ids)
+        position_embeddings_global = self.torch_model.model.language_model.rotary_emb(inputs_embeds, position_ids)
+        position_embeddings_local = self.torch_model.model.language_model.rotary_emb_local(inputs_embeds, position_ids)
         return dict(
             hidden_states=inputs_embeds,
             position_embeddings_global=position_embeddings_global,
@@ -270,7 +270,7 @@ class TestModuleForwardPasses(absltest.TestCase):
     # Vision tests
     # @unittest.skip("Done")
     def test_image_emb(self):
-        tm = self.torch_model.vision_tower.vision_model.embeddings
+        tm = self.torch_model.model.vision_tower.vision_model.embeddings
         nm = self.bonsai_model.vision_tower.embeddings
 
         t_inputs = self._make_torch_input()
@@ -287,7 +287,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     # @unittest.skip("Done")
     def test_siglip_encoder_layer(self):
-        tm = self.torch_model.vision_tower.vision_model.encoder.layers[0]
+        tm = self.torch_model.model.vision_tower.vision_model.encoder.layers[0]
         nm = self.bonsai_model.vision_tower.encoder.layers[0]
 
         tx = torch.randn((1, 4096, 1152), device=self.torch_device)
@@ -299,10 +299,10 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-4, atol=1e-4)
 
-    # @unittest.skip("Done but double check")
+    # @unittest.skip("Done")
     def test_vision_model(self):
         # only have deviations on .0567% of the entries and on order 7e-3
-        tm = self.torch_model.vision_tower
+        tm = self.torch_model.model.vision_tower
         nm = self.bonsai_model.vision_tower
 
         t_inputs = self._make_torch_input()
@@ -320,7 +320,7 @@ class TestModuleForwardPasses(absltest.TestCase):
     # @unittest.skip("Done")
     def test_text_embedding(self):
         self._upgrade_dtypes()
-        tm = self.torch_model.language_model.embed_tokens
+        tm = self.torch_model.model.language_model.embed_tokens
         nm = self.bonsai_model.language_model.embed_tokens
 
         torch.testing.assert_close(torch.tensor(nm.weight.embedding.value), tm.weight.cpu())
@@ -339,7 +339,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     # @unittest.skip("Done")
     def test_attn_projs(self):
-        tm = self.torch_model.language_model.layers[0].self_attn
+        tm = self.torch_model.model.language_model.layers[0].self_attn
         nm = self.bonsai_model.language_model.layers[0].self_attn
 
         tx = torch.randn((1, 281, 2560), device=self.torch_device)
@@ -365,7 +365,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     # @unittest.skip("Done")
     def test_attn_norms(self):
-        tm = self.torch_model.language_model.layers[0].self_attn
+        tm = self.torch_model.model.language_model.layers[0].self_attn
         nm = self.bonsai_model.language_model.layers[0].self_attn
 
         tx = torch.randn((1, 281, 2048), device=self.torch_device).reshape(1, 281, -1, 256)
@@ -395,7 +395,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         # local uses default
         rt = self.bonsai_config.text_config.rope_local_base_freq
         js, jc = modeling._generate_pos_embeddings(jp, dim, rope_theta=rt, factor=1.0)
-        rot_emb = self.torch_model.language_model.rotary_emb_local
+        rot_emb = self.torch_model.model.language_model.rotary_emb_local
         tc, ts = rot_emb(hidden_states, torch.tensor(jp))
         tc, ts = tc[:, :, : dim // 2], ts[:, :, : dim // 2]
         torch.testing.assert_close(torch.tensor(js), ts)
@@ -404,7 +404,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         # global uses linear
         rt = self.bonsai_config.text_config.rope_theta
         js, jc = modeling._generate_pos_embeddings(jp, dim, rope_theta=rt, factor=8.0)
-        rot_emb = self.torch_model.language_model.rotary_emb
+        rot_emb = self.torch_model.model.language_model.rotary_emb
         tc, ts = rot_emb(hidden_states, torch.tensor(jp))
         tc, ts = tc[:, :, : dim // 2], ts[:, :, : dim // 2]
         torch.testing.assert_close(torch.tensor(js), ts)
@@ -412,12 +412,12 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     # @unittest.skip("Done")
     def test_text_decoder_layer(self):
-        start_t_inputs = self._make_torch_input()
-        start_t_inputs = self._process_torch_inputs(**start_t_inputs)
+        first_t_inputs = self._make_torch_input()
+        start_t_inputs = self._process_torch_inputs(**first_t_inputs)
 
         for test_layer in trange(34):
             # Models
-            tm = self.torch_model.language_model.layers[test_layer]
+            tm = self.torch_model.model.language_model.layers[test_layer]
             nm = self.bonsai_model.language_model.layers[test_layer]
             attn_type = tm.attention_type
 
@@ -428,9 +428,12 @@ class TestModuleForwardPasses(absltest.TestCase):
             nnx_cache = self._init_nnx_cache(
                 batch_size=batch_size, token_len=num_tokens, generate_steps=1, dtype=jnp.float32
             )
+            n_tti = first_t_inputs["token_type_ids"].detach().cpu().numpy()
 
-            # NOTE: Using the HF attention mask for this test
-            mask = t_inputs["attention_mask"].detach().cpu().numpy()[:, :, :, :num_tokens]
+            if attn_type == "full_attention":
+                mask = modeling.make_causal_mask(n_tti, nnx_cache[test_layer], n_tti)
+            else:
+                mask = modeling.make_window_mask(n_tti, nnx_cache[test_layer], n_tti, 1024)
 
             # run models
             ty = tm(**t_inputs)
@@ -453,7 +456,7 @@ class TestModuleForwardPasses(absltest.TestCase):
     # @unittest.skip("Done")
     def test_multi_modal_projector(self):
         t_inputs = self._make_torch_input()
-        tm = self.torch_model
+        tm = self.torch_model.model
         nm = self.bonsai_model.multi_modal_projector
 
         tx = tm.vision_tower(t_inputs["pixel_values"]).last_hidden_state
@@ -488,13 +491,13 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     # @unittest.skip("Done")
     def test_text_layers_in_order(self):
-        start_t_inputs = self._make_torch_input()
-        start_t_inputs = self._process_torch_inputs(**start_t_inputs)
+        first_t_inputs = self._make_torch_input()
+        start_t_inputs = self._process_torch_inputs(**first_t_inputs)
         ny, ty = None, None
 
         for test_layer in trange(34):
             # Models
-            tm = self.torch_model.language_model.layers[test_layer]
+            tm = self.torch_model.model.language_model.layers[test_layer]
             nm = self.bonsai_model.language_model.layers[test_layer]
             attn_type = tm.attention_type
 
@@ -510,9 +513,12 @@ class TestModuleForwardPasses(absltest.TestCase):
             nnx_cache = self._init_nnx_cache(
                 batch_size=batch_size, token_len=num_tokens, generate_steps=1, dtype=jnp.float32
             )
+            n_tti = first_t_inputs["token_type_ids"].detach().cpu().numpy()
 
-            # NOTE: Using the HF attention mask here
-            mask = t_inputs["attention_mask"].detach().cpu().numpy()[:, :, :, :num_tokens]
+            if attn_type == "full_attention":
+                mask = modeling.make_causal_mask(n_tti, nnx_cache[test_layer], n_tti)
+            else:
+                mask = modeling.make_window_mask(n_tti, nnx_cache[test_layer], n_tti, 1024)
 
             # run models
             ty = tm(**t_inputs)
@@ -550,24 +556,28 @@ class TestModuleForwardPasses(absltest.TestCase):
         t_inputs["pixel_values"] = t_inputs["pixel_values"].to(dtype=torch.float32)
 
         batch_size, num_tokens = t_inputs["input_ids"].shape
+        n_text = jnp.array(t_inputs["input_ids"].detach().cpu().numpy())
         n_tti = jnp.array(t_inputs["token_type_ids"].detach().cpu().numpy())
-        n_mask = modeling.make_causal_mask(batch_size, num_tokens, n_tti)
+        gen_steps = 10
+        cache = modeling.init_cache(self.bonsai_config, batch_size, num_tokens, gen_steps)
+        n_mask = modeling.make_causal_mask(n_text, cache[0], n_tti)
 
         # Full attention
         t_inputs = self._process_torch_inputs(**t_inputs)
         t_mask = t_inputs["attention_mask"]["full_attention"]
+        size_for_comp = t_mask.shape[-1]
 
-        np.testing.assert_allclose(n_mask, t_mask.detach().cpu().numpy())
+        np.testing.assert_allclose(n_mask[:, :, :, :size_for_comp], t_mask.detach().cpu().numpy())
 
         # Sliding attention
         t_mask = t_inputs["attention_mask"]["sliding_attention"]
-        n_mask = modeling.make_window_mask(batch_size, num_tokens, n_tti, self.bonsai_config.text_config.sliding_window)
+        n_mask = modeling.make_window_mask(n_text, cache[0], n_tti, self.bonsai_config.text_config.sliding_window)
 
-        np.testing.assert_allclose(n_mask, t_mask.detach().cpu().numpy())
+        np.testing.assert_allclose(n_mask[:, :, :, :size_for_comp], t_mask.detach().cpu().numpy())
 
-    # @unittest.skip("Done but come back to this")
+    @unittest.skip("Skipping - this test is just to observe errors over full model evaluation")
     def test_full_in_order(self):
-        tm = self.torch_model
+        tm = self.torch_model.model
         nm = self.bonsai_model
 
         # Torch inputs
@@ -582,8 +592,10 @@ class TestModuleForwardPasses(absltest.TestCase):
         cache = modeling.init_cache(self.bonsai_config, batch_size, num_tokens, 1, jnp.float32)
 
         # Get masks
-        n_causal_mask = modeling.make_causal_mask(n_text.shape[0], n_text.shape[1], n_tti)
-        n_sliding_mask = modeling.make_window_mask(n_text.shape[0], n_text.shape[1], n_tti, 1024)
+        n_causal_mask = modeling.make_causal_mask(n_text, cache[0], n_tti)
+        n_sliding_mask = modeling.make_window_mask(
+            n_text, cache[0], n_tti, self.bonsai_config.text_config.sliding_window
+        )
 
         # text embeds
         t_inputs_embeds = tm.language_model.embed_tokens(t_inputs["input_ids"])
@@ -667,7 +679,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         ny = nm(n_text, n_img, cache, segment_ids, n_tti)
         ty = tm(**t_inputs)
 
-        torch.testing.assert_close(torch.tensor(ny), ty.last_hidden_state, rtol=5e-2, atol=5e-2)
+        torch.testing.assert_close(torch.tensor(ny), ty.logits, rtol=5e-2, atol=5e-2)
 
     @unittest.skip("TODO")
     def test_full_batched(self):

@@ -43,7 +43,6 @@ class Transform(Enum):
     EMBED = None
 
 
-# TODO: Need to get lm_head. It currently isn't used.
 def _get_key_and_transform_mapping():
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     return {
@@ -180,7 +179,6 @@ def _get_key_and_transform_mapping():
             r"vision_tower\.post_layernorm\.scale",
             Transform.DEFAULT,
         ),
-        r"lm_head\.weight": ("lm_head.kernel", Transform.LINEAR),
     }
 
 

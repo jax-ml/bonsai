@@ -26,8 +26,6 @@ from flax import nnx
 from jax.interpreters import pxla
 from jaxtyping import Array, Float
 
-_K_MASK = jax._src.nn.functions._get_large_negative(jax.numpy.float32).item()
-
 
 class AttentionType(Enum):
     FULL = "full_attention"
@@ -373,17 +371,13 @@ class Gemma3Attention(nnx.Module):
 
         # Update cache
         slice_indices = (0, cache.cur_ind.value, 0, 0)
-        cache.v_cache.value = jax.lax.dynamic_update_slice(cache.v_cache.value, v, slice_indices)
         cache.k_cache.value = jax.lax.dynamic_update_slice(cache.k_cache.value, k, slice_indices)
-        t = q.shape[1]
-        cache.cur_ind.value += x.shape[1]
+        cache.v_cache.value = jax.lax.dynamic_update_slice(cache.v_cache.value, v, slice_indices)
 
-        # TODO: Need to do this with the kv cache next
-        k, v = repeat_kv(k, self.n_rep), repeat_kv(v, self.n_rep)
-        qkv = jax.nn.dot_product_attention(q, k, v, is_causal=False, mask=mask[:, :, :, :t], scale=self.scale)
-        # k, v = repeat_kv(cache.k_cache.value, self.n_rep), repeat_kv(cache.v_cache.value, self.n_rep)
-        # qkv = jax.nn.dot_product_attention(q, k, v, is_causal=False, mask=mask[:, :, :, :t], scale=self.scale)
+        k, v = repeat_kv(cache.k_cache.value, self.n_rep), repeat_kv(cache.v_cache.value, self.n_rep)
+        qkv = jax.nn.dot_product_attention(q, k, v, is_causal=False, mask=mask, scale=self.scale)
 
+        t = x.shape[1]
         cache.cur_ind.value = cache.cur_ind.value + t
         return self.o_proj(qkv.reshape(*x.shape[:-1], -1))
 
@@ -483,22 +477,25 @@ class Gemma3MultiModalProjector(nnx.Module):
         return x.astype(vision_outputs.dtype)
 
 
-# def make_causal_mask(cache_layer: LayerCache, token_type_ids):
-#     pass
-
-
-def make_causal_mask(b: int, t: int, token_type_ids: Array):
-    my_mask = nnx.make_causal_mask(jnp.ones((b, t)))
+def make_causal_mask(x: Array, layer_cache: LayerCache, token_type_ids: Array):
+    _, t = x.shape
+    c = layer_cache.size
+    tmp1 = jnp.arange(t)
+    tmp2 = jnp.arange(c)
+    my_mask = tmp1[:, None] - tmp2[None, :] >= -layer_cache.cur_ind
     tti = token_type_ids.astype(jnp.bool_)
-    or_mask = tti[:, None, None, :] & tti[:, None, :, None]
+    tmp3 = jnp.concat([tti, jnp.zeros((1, c - t), dtype=jnp.bool_)], axis=-1)
+    or_mask = tti[:, None, :, None] & tmp3[:, None, None, :]
     my_mask = my_mask.astype(jnp.bool_) | or_mask
     return my_mask
 
 
-def make_window_mask(b: int, t: int, token_type_ids: Array, slide_size: int):
-    my_mask = make_causal_mask(b, t, token_type_ids)
-    tmp = jnp.arange(my_mask.shape[-1])
-    slide = tmp[:, None] - tmp[None, :] < slide_size
+def make_window_mask(x, layer_cache, token_type_ids, slide_size: int):
+    my_mask = make_causal_mask(x, layer_cache, token_type_ids)
+    *_, t, c = my_mask.shape
+    tmp1 = jnp.arange(t)
+    tmp2 = jnp.arange(c)
+    slide = tmp1[:, None] - tmp2[None, :] < slide_size
     return my_mask & slide
 
 
@@ -525,6 +522,7 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
 
 class Gemma3Model(nnx.Module):
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
+        self.sliding_window_size = cfg.text_config.sliding_window
         self.vision_tower = SiglipVisionTransformer(cfg.vision_config, rngs=rngs)
         self.multi_modal_projector = Gemma3MultiModalProjector(cfg, rngs=rngs)
         self.language_model = Gemma3TextModel(cfg.text_config, rngs=rngs)
@@ -532,8 +530,9 @@ class Gemma3Model(nnx.Module):
     def __call__(
         self, input_ids: Array, pixel_values: Array, cache: Cache, segment_ids: Array, token_type_ids: Array
     ) -> Array:
-        causal_mask = make_causal_mask(input_ids.shape[0], input_ids.shape[1], token_type_ids)
-        sliding_mask = make_causal_mask(input_ids.shape[0], input_ids.shape[1], token_type_ids)
+        assert input_ids.shape == token_type_ids.shape
+        causal_mask = make_causal_mask(input_ids, cache[0], token_type_ids)
+        sliding_mask = make_window_mask(input_ids, cache[0], token_type_ids, slide_size=self.sliding_window_size)
 
         inputs_embeds = self.language_model.embed_tokens(input_ids)
 
@@ -546,7 +545,13 @@ class Gemma3Model(nnx.Module):
             inputs_embeds = batched_merge_modalities(image_features, inputs_embeds, token_type_ids)
 
         out = self.language_model(inputs_embeds, cache, segment_ids, sliding_mask, causal_mask)
+        out = self.language_model.embed_tokens.weight.attend(out)
         return out
 
 
-# TODO: Implement a jitted forward method
+@jax.jit
+def forward(
+    model: nnx.Module, cache: Cache, input_ids: Array, pixel_values: Array, segment_ids: Array, token_type_ids
+) -> tuple[Array, nnx.Cache]:
+    logits = model(input_ids, pixel_values, cache, segment_ids, token_type_ids)
+    return logits[:, -1:None, :], cache

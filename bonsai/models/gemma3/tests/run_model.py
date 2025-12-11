@@ -20,7 +20,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import tqdm
-from flax import nnx
 
 from bonsai.models.gemma3 import modeling, params
 
@@ -33,7 +32,7 @@ except Exception:
 import os
 
 import torch
-from transformers import AutoModel, AutoProcessor, AutoTokenizer, Gemma3ForConditionalGeneration
+from transformers import AutoProcessor
 
 
 def make_input(processor, dtype=torch.float32, msg1=True):
@@ -82,37 +81,28 @@ def run_model():
     model_ckpt_path = snapshot_download(model_name)
     bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path)
 
-    # # Dummy token ids
+    # Make inputs
     t_inputs = make_input(processor)
-
-    t_lm_head = Gemma3ForConditionalGeneration.from_pretrained(
-        "google/gemma-3-4b-it",
-        dtype=torch.float32,
-    ).lm_head
-
-    full_tokens = t_inputs["input_ids"]
-
     n_img = jnp.array(np.permute_dims(t_inputs["pixel_values"].detach().cpu().numpy(), (0, 2, 3, 1)))
     n_text = jnp.array(t_inputs["input_ids"].detach().cpu().numpy())
     n_tti = jnp.array(t_inputs["token_type_ids"].detach().cpu().numpy())
 
-    gen_steps = 30
+    gen_steps = 200
+    batch_size, num_tokens = n_text.shape
+    cache = modeling.init_cache(cfg, batch_size, num_tokens, gen_steps, jnp.float32)
+
+    all_tokens = [n_text]
     for i in tqdm.trange(gen_steps):
         batch_size, num_tokens = n_text.shape
         segment_ids = jnp.ones((batch_size, num_tokens))
-        cache = modeling.init_cache(cfg, batch_size, num_tokens, 1, jnp.float32)
+        out, cache = modeling.forward(bonsai_model, cache, n_text, n_img, segment_ids, n_tti)
 
-        out = bonsai_model(n_text, n_img, cache, segment_ids, n_tti)
-        out = torch.tensor(out)
+        n_text = jnp.argmax(out, axis=-1)
+        all_tokens.append(n_text)
+        n_tti = n_tti[:, -1:None]  # this assumes that the input prompt ends with text
+        n_img = None
 
-        out = t_lm_head(out[:, -1:None, :])
-
-        out = torch.argmax(out, axis=-1)
-
-        full_tokens = torch.concat([full_tokens, out], axis=-1)
-        n_text = full_tokens.detach().cpu().numpy()
-        n_tti = jnp.concatenate([n_tti, n_tti[:, -1:None]], axis=-1)
-
+    full_tokens = torch.tensor(jnp.concat(all_tokens, axis=1))
     out_tokens = processor.decode(full_tokens[0], skip_special_tokens=True)
     print(out_tokens)
 
