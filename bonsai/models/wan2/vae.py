@@ -170,29 +170,21 @@ class RMSNorm(nnx.Module):
     def __call__(self, x: Array) -> Array:
         # x: [B, T, H, W, C] for 3D or [B, H, W, C] for 2D
         # Normalize to unit RMS along the channel dimension manually since jax.nn.normalize is unavailable.
-        def check_and_handle_nan(x, loc_id: int = 0):
-            nan_mask = jnp.isnan(x)
-            nan_indices = jnp.argwhere(nan_mask)
-            jax.debug.print("location {}:NaN at indices: {}", loc_id, nan_indices[:10])
-            return x
-
-        rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True))
-        rms = jnp.maximum(rms, self.eps)
-        x = jax.lax.cond(
-            jnp.isnan(x).any(),
-            lambda x: check_and_handle_nan(x, 0),
-            lambda x: x,
-            x,
-        )
+        rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True) + self.eps)
+        # if jnp.isnan(x).any():
+        nan_mask_x = jnp.isnan(x)
+        nan_indices_x = jnp.argwhere(nan_mask_x)
         x_normalized = x / rms
-        x_normalized = jax.lax.cond(
-            jnp.isnan(x_normalized).any(), lambda x: check_and_handle_nan(x, 1), lambda x: x, x_normalized
+        nan_mask = jnp.isnan(x_normalized)
+        nan_indices = jnp.argwhere(nan_mask)
+        jax.debug.print(
+            "x_normalized NaN at indices?:{}, nan indices:{}, rum values:{}, x NaN?: {}, x NaN indices:{}, ",
+            nan_mask.any(),
+            nan_indices[:10],
+            rms.mean(),
+            nan_mask_x.any(),
+            nan_indices_x[:10],
         )
-        if jnp.isnan(x_normalized).any():
-            nan_mask = jnp.isnan(x_normalized)
-            nan_indices = jnp.argwhere(nan_mask)
-            jax.debug.print("NaN at indices: {}", nan_indices[:10])
-            jax.debug.print("rms values: {}", rms.mean())
         # jax.debug.print("x_normalized has nan: {}", jnp.isnan(x_normalized).any())
         # jax.debug.print("scale values: {} {}", self.scale_factor, self.scale.value.mean())
         return x_normalized * self.scale_factor * self.scale.value
