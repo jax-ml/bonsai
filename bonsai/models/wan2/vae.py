@@ -170,13 +170,24 @@ class RMSNorm(nnx.Module):
     def __call__(self, x: Array) -> Array:
         # x: [B, T, H, W, C] for 3D or [B, H, W, C] for 2D
         # Normalize to unit RMS along the channel dimension manually since jax.nn.normalize is unavailable.
-        rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True))
-        rms = jnp.maximum(rms, self.eps)
-        if jnp.isnan(x).any():
+        def check_and_handle_nan(x, loc_id: int = 0):
             nan_mask = jnp.isnan(x)
             nan_indices = jnp.argwhere(nan_mask)
-            jax.debug.print("NaN at indices: {}", nan_indices[:10])
+            jax.debug.print("location {}:NaN at indices: {}", loc_id, nan_indices[:10])
+            return x
+
+        rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True))
+        rms = jnp.maximum(rms, self.eps)
+        x = jax.lax.cond(
+            jnp.isnan(x).any(),
+            lambda x: check_and_handle_nan(x, 0),
+            lambda x: x,
+            x,
+        )
         x_normalized = x / rms
+        x_normalized = jax.lax.cond(
+            jnp.isnan(x_normalized).any(), lambda x: check_and_handle_nan(x, 1), lambda x: x, x_normalized
+        )
         if jnp.isnan(x_normalized).any():
             nan_mask = jnp.isnan(x_normalized)
             nan_indices = jnp.argwhere(nan_mask)
