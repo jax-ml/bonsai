@@ -108,9 +108,9 @@ def run_model():
     umt5_encoder = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
     
     print("\n[1/4] Encoding text with T5...")
-    text_embeds = get_t5_text_embeddings(prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
+    text_embeds = get_t5_text_embeddings(prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len)
     negative_prompts = [""]  # Empty negative prompt
-    negative_embeds = get_t5_text_embeddings(negative_prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len, model_ckpt_path=model_ckpt_path)
+    negative_embeds = get_t5_text_embeddings(negative_prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len)
 
     print("\n[2/5] Loading Diffusion Transformer weights...")
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None)
@@ -127,13 +127,11 @@ def run_model():
 
     latents = modeling.generate_video(
         model=model,
+        latents=latents,
         text_embeds=text_embeds,
         negative_embeds=negative_embeds,
-        num_frames=config.num_frames,
-        latent_size=config.latent_size,
         num_steps=config.num_inference_steps,
         guidance_scale=config.guidance_scale,
-        key=key,
         scheduler=scheduler,
         scheduler_state=scheduler_state,
     )
