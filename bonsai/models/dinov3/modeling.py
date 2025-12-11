@@ -36,8 +36,8 @@ class DINOv3ViTEmbeddings(nnx.Module):
         patch_embeddings = self.patch_embeddings(pixel_values)
         patch_embeddings = patch_embeddings.reshape(b, -1, self.hidden_size)
 
-        cls_token = jnp.broadcast_to(self.cls_token.value, (b, 1, self.hidden_size))
-        register_tokens = jnp.broadcast_to(self.register_tokens.value, (b, self.config.num_register_tokens, self.hidden_size))
+        cls_token = jnp.broadcast_to(self.cls_token[...], (b, 1, self.hidden_size))
+        register_tokens = jnp.broadcast_to(self.register_tokens[...], (b, self.config.num_register_tokens, self.hidden_size))
         return jnp.concat([cls_token, register_tokens, patch_embeddings], axis = 1)
 
 class Dinov3ViTRopePositionEmbedding(nnx.Module):
