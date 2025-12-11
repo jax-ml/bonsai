@@ -172,19 +172,19 @@ class RMSNorm(nnx.Module):
         # Normalize to unit RMS along the channel dimension manually since jax.nn.normalize is unavailable.
         rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True) + self.eps)
         # if jnp.isnan(x).any():
-        nan_mask_x = jnp.isnan(x)
-        nan_indices_x = jnp.argwhere(nan_mask_x, size=5, fill_value=-1)
+        # nan_mask_x = jnp.isnan(x)
+        # nan_indices_x = jnp.argwhere(nan_mask_x, size=5, fill_value=-1)
         x_normalized = x / rms
-        nan_mask = jnp.isnan(x_normalized)
-        nan_indices = jnp.argwhere(nan_mask, size=5, fill_value=-1)
-        jax.debug.print(
-            "x_normalized NaN at indices?:{}, nan indices:{}, rum values:{}, x NaN?: {}, x NaN indices:{}, ",
-            nan_mask.any(),
-            nan_indices[:5],
-            rms.mean(),
-            nan_mask_x.any(),
-            nan_indices_x[:5],
-        )
+        # nan_mask = jnp.isnan(x_normalized)
+        # nan_indices = jnp.argwhere(nan_mask, size=5, fill_value=-1)
+        # jax.debug.print(
+        #     "x_normalized NaN at indices?:{}, nan indices:{}, rum values:{}, x NaN?: {}, x NaN indices:{}, ",
+        #     nan_mask.any(),
+        #     nan_indices[:5],
+        #     rms.mean(),
+        #     nan_mask_x.any(),
+        #     nan_indices_x[:5],
+        # )
         # jax.debug.print("x_normalized has nan: {}", jnp.isnan(x_normalized).any())
         # jax.debug.print("scale values: {} {}", self.scale_factor, self.scale.value.mean())
         return x_normalized * self.scale_factor * self.scale.value
@@ -475,47 +475,47 @@ class Decoder3D(nnx.Module):
         else:
             x, _ = self.conv_in(z, None)
 
-        # jax.debug.print("Decoder3D conv_in output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Decoder3D conv_in output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         # Middle blocks
         x, cache_list = self.mid_block1(x, cache_list, cache_idx)
         x = self.mid_attn(x)  # Attention doesn't use cache
         x, cache_list = self.mid_block2(x, cache_list, cache_idx)
 
-        # jax.debug.print("Decoder3D mid output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Decoder3D mid output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         # Upsample stage 0
         for block in self.up_blocks_0:
             x, cache_list = block(x, cache_list, cache_idx)
         x, cache_list = self.up_sample_0(x, cache_list, cache_idx)
 
-        # jax.debug.print("Decoder3D upsample0 output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Decoder3D upsample0 output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         # Upsample stage 1
         for block in self.up_blocks_1:
             x, cache_list = block(x, cache_list, cache_idx)
         x, cache_list = self.up_sample_1(x, cache_list, cache_idx)
 
-        # jax.debug.print("Decoder3D upsample1 output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Decoder3D upsample1 output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         # Upsample stage 2
         for block in self.up_blocks_2:
             x, cache_list = block(x, cache_list, cache_idx)
         x = self.up_sample_2(x)  # Spatial-only upsample, no cache
 
-        # jax.debug.print("Decoder3D upsample2 output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Decoder3D upsample2 output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         # Upsample stage 3 (no spatial upsample)
         for block in self.up_blocks_3:
             x, cache_list = block(x, cache_list, cache_idx)
 
-        # jax.debug.print("Decoder3D upsample3 output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Decoder3D upsample3 output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         # Output
         x = self.norm_out(x)
         x = nnx.silu(x)
 
-        # jax.debug.print("Decoder3D norm_out output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Decoder3D norm_out output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         if cache_list is not None:
             idx = cache_idx[0]
@@ -525,7 +525,7 @@ class Decoder3D(nnx.Module):
         else:
             x, _ = self.conv_out(x, None)
 
-        # jax.debug.print("Decoder3D conv_out output has nan:{}", jnp.isnan(x).any())
+        jax.debug.print("Decoder3D conv_out output has nan:{}", jnp.isnan(x).any(), ordered=True)
 
         return x, cache_list
 
