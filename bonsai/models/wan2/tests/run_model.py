@@ -10,7 +10,7 @@ import traceback
 from transformers import AutoTokenizer
 from bonsai.models.wan2 import modeling, params, vae, t5
 from bonsai.models.wan2 import scheduler as scheduler_module
-
+jax.config.update("jax_debug_nans", True)
 
 def get_t5_text_embeddings(
     prompt: str,
