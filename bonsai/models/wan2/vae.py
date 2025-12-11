@@ -546,7 +546,10 @@ class WanVAEDecoder(nnx.Module):
             cache_idx = [0]
             frame_out, new_cache_tuple = self.decoder(frame_latent, cache_tuple, cache_idx)
             print(f"frame_out shape:{frame_out.shape}")
-            print(f"frame_out mean:{frame_out[0, :, :, 235:, :].mean()} ")
+            right_part_frame = frame_out[:, :, :, 235:, :]
+            print(f"Has NaN: {jnp.isnan(right_part_frame).any()}")
+            print(f"Has Inf: {jnp.isinf(right_part_frame).any()}")
+            jax.debug.print(f"frame_out mean:{right_part_frame.mean()} ")
             return new_cache_tuple, frame_out
 
         # Process remaining frames with JIT
@@ -554,7 +557,10 @@ class WanVAEDecoder(nnx.Module):
             _final_cache, remaining_outputs = jax.lax.scan(scan_frames, cache_tuple, z_frames[1:])
 
             print(f"remaining output shape: {remaining_outputs.shape}")
-            print(f"remaining output mean:{remaining_outputs[:, 0, :, :, 235:, :].mean()} ")
+            right_part_remaining = remaining_outputs[:, :, :, :, 235:, :]
+            print(f"Has NaN: {jnp.isnan(right_part_remaining).any()}")
+            print(f"Has Inf: {jnp.isinf(right_part_remaining).any()}")
+            print(f"remaining output mean:{right_part_remaining.mean()} ")
             # Frame 0 outputs 1 frame: [B, 1, H, W, 3]
             # Frames 1+ each output 4 frames: [T-1, B, 4, H, W, 3]
             # Flatten temporal dimensions before concatenating
