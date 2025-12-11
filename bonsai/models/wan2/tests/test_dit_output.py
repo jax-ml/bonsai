@@ -33,6 +33,7 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Mean diff: {np.abs(torch_kv - jax_kv_weight).mean():.2e}")
     
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-2, atol: float = 1e-4):
+    print(f"before convert: {torch_output.dtype}")
     if torch_output.dtype == torch.bfloat16:
         torch_output = torch_output.float()
 
@@ -94,7 +95,7 @@ def test_dit_output():
     config = modeling.ModelConfig
 
     print("\n[1/2] Loading transformer")
-    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.float32)
+    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.bfloat16)
 
     jax_dit = params.create_model_from_safe_tensors(model_ckpt_path, config,mesh=None)
     print("transformer loaded:", transformer, transformer.config)
@@ -141,6 +142,7 @@ def test_dit_output():
     
     # Compare final output
     return compare_outputs(pred_noise, expected_output, "Final DiT Output", rtol=1e-3, atol=1e-4)
+
 def test_dit():
     print("\n" + "=" * 80)
     print("TEST 2: DiT")
@@ -150,7 +152,7 @@ def test_dit():
     config = modeling.ModelConfig
 
     print("\n[1/2] Loading transformer")
-    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.float32)
+    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.bfloat16)
 
     jax_dit = params.create_model_from_safe_tensors(model_ckpt_path, config,mesh=None)
     print("transformer loaded:", transformer, transformer.config)
@@ -781,5 +783,5 @@ class WanAttentionDebugger:
         self.attention_states = OrderedDict()
 
 if __name__ == "__main__":
-    test_dit_output()
-    # test_dit()
+    # test_dit_output()
+    test_dit()
