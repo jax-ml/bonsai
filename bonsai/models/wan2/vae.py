@@ -172,10 +172,18 @@ class RMSNorm(nnx.Module):
         # Normalize to unit RMS along the channel dimension manually since jax.nn.normalize is unavailable.
         rms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1, keepdims=True))
         rms = jnp.maximum(rms, self.eps)
-        jax.debug.print("rms values: {}", rms.mean())
+        if jnp.isnan(x).any():
+            nan_mask = jnp.isnan(x)
+            nan_indices = jnp.argwhere(nan_mask)
+            jax.debug.print("NaN at indices: {}", nan_indices[:10])
         x_normalized = x / rms
-        jax.debug.print("x_normalized has nan: {}", jnp.isnan(x_normalized).any())
-        jax.debug.print("scale values: {} {}", self.scale_factor, self.scale.value.mean())
+        if jnp.isnan(x_normalized).any():
+            nan_mask = jnp.isnan(x_normalized)
+            nan_indices = jnp.argwhere(nan_mask)
+            jax.debug.print("NaN at indices: {}", nan_indices[:10])
+            jax.debug.print("rms values: {}", rms.mean())
+        # jax.debug.print("x_normalized has nan: {}", jnp.isnan(x_normalized).any())
+        # jax.debug.print("scale values: {} {}", self.scale_factor, self.scale.value.mean())
         return x_normalized * self.scale_factor * self.scale.value
 
 
@@ -198,48 +206,48 @@ class ResidualBlock(nnx.Module):
     ) -> tuple[Array, tuple[Array | None, ...] | None]:
         residual = x
         x = self.norm1(x)
-        if self.skip_conv is not None:
-            jax.debug.print("Residual block norm1 output has nan:{}", jnp.isnan(x).any())
+        # if self.skip_conv is not None:
+        # jax.debug.print("Residual block norm1 output has nan:{}", jnp.isnan(x).any())
         x = nnx.silu(x)
-        if self.skip_conv is not None:
-            jax.debug.print("Residual block activation output has nan:{}", jnp.isnan(x).any())
+        # if self.skip_conv is not None:
+        # jax.debug.print("Residual block activation output has nan:{}", jnp.isnan(x).any())
 
         if cache_list is not None:
             idx = cache_idx[0]
             x, new_cache = self.conv1(x, cache_list[idx])
             cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
-            if self.skip_conv is not None:
-                jax.debug.print("Residual block conv1 output has nan:{}", jnp.isnan(x).any())
+            # if self.skip_conv is not None:
+            # jax.debug.print("Residual block conv1 output has nan:{}", jnp.isnan(x).any())
         else:
             x, _ = self.conv1(x, None)
-            if self.skip_conv is not None:
-                jax.debug.print("no cache: Residual block conv1 output has nan:{}", jnp.isnan(x).any())
+            # if self.skip_conv is not None:
+            # jax.debug.print("no cache: Residual block conv1 output has nan:{}", jnp.isnan(x).any())
 
         x = self.norm2(x)
-        if self.skip_conv is not None:
-            jax.debug.print("Residual block norm2 output has nan:{}", jnp.isnan(x).any())
+        # if self.skip_conv is not None:
+        # jax.debug.print("Residual block norm2 output has nan:{}", jnp.isnan(x).any())
         x = nnx.silu(x)
-        if self.skip_conv is not None:
-            jax.debug.print("Residual block activation2 output has nan:{}", jnp.isnan(x).any())
+        # if self.skip_conv is not None:
+        # jax.debug.print("Residual block activation2 output has nan:{}", jnp.isnan(x).any())
 
         if cache_list is not None:
             idx = cache_idx[0]
             x, new_cache = self.conv2(x, cache_list[idx])
             cache_list = (*cache_list[:idx], new_cache, *cache_list[idx + 1 :])
             cache_idx[0] += 1
-            if self.skip_conv is not None:
-                jax.debug.print("Residual block conv2 output has nan:{}", jnp.isnan(x).any())
+            # if self.skip_conv is not None:
+            # jax.debug.print("Residual block conv2 output has nan:{}", jnp.isnan(x).any())
         else:
             x, _ = self.conv2(x, None)
-            if self.skip_conv is not None:
-                jax.debug.print("no cache: Residual block conv2 output has nan:{}", jnp.isnan(x).any())
+            # if self.skip_conv is not None:
+            # jax.debug.print("no cache: Residual block conv2 output has nan:{}", jnp.isnan(x).any())
 
         if self.skip_conv is not None:
             residual, _ = self.skip_conv(residual, None)
-            jax.debug.print("Residual conv output has nan:{}", jnp.isnan(residual).any())
+            # jax.debug.print("Residual conv output has nan:{}", jnp.isnan(residual).any())
 
-        jax.debug.print("Residual block output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Residual block output has nan:{}", jnp.isnan(x).any())
 
         return x + residual, cache_list
 
@@ -464,47 +472,47 @@ class Decoder3D(nnx.Module):
         else:
             x, _ = self.conv_in(z, None)
 
-        jax.debug.print("Decoder3D conv_in output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Decoder3D conv_in output has nan:{}", jnp.isnan(x).any())
 
         # Middle blocks
         x, cache_list = self.mid_block1(x, cache_list, cache_idx)
         x = self.mid_attn(x)  # Attention doesn't use cache
         x, cache_list = self.mid_block2(x, cache_list, cache_idx)
 
-        jax.debug.print("Decoder3D mid output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Decoder3D mid output has nan:{}", jnp.isnan(x).any())
 
         # Upsample stage 0
         for block in self.up_blocks_0:
             x, cache_list = block(x, cache_list, cache_idx)
         x, cache_list = self.up_sample_0(x, cache_list, cache_idx)
 
-        jax.debug.print("Decoder3D upsample0 output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Decoder3D upsample0 output has nan:{}", jnp.isnan(x).any())
 
         # Upsample stage 1
         for block in self.up_blocks_1:
             x, cache_list = block(x, cache_list, cache_idx)
         x, cache_list = self.up_sample_1(x, cache_list, cache_idx)
 
-        jax.debug.print("Decoder3D upsample1 output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Decoder3D upsample1 output has nan:{}", jnp.isnan(x).any())
 
         # Upsample stage 2
         for block in self.up_blocks_2:
             x, cache_list = block(x, cache_list, cache_idx)
         x = self.up_sample_2(x)  # Spatial-only upsample, no cache
 
-        jax.debug.print("Decoder3D upsample2 output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Decoder3D upsample2 output has nan:{}", jnp.isnan(x).any())
 
         # Upsample stage 3 (no spatial upsample)
         for block in self.up_blocks_3:
             x, cache_list = block(x, cache_list, cache_idx)
 
-        jax.debug.print("Decoder3D upsample3 output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Decoder3D upsample3 output has nan:{}", jnp.isnan(x).any())
 
         # Output
         x = self.norm_out(x)
         x = nnx.silu(x)
 
-        jax.debug.print("Decoder3D norm_out output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Decoder3D norm_out output has nan:{}", jnp.isnan(x).any())
 
         if cache_list is not None:
             idx = cache_idx[0]
@@ -514,7 +522,7 @@ class Decoder3D(nnx.Module):
         else:
             x, _ = self.conv_out(x, None)
 
-        jax.debug.print("Decoder3D conv_out output has nan:{}", jnp.isnan(x).any())
+        # jax.debug.print("Decoder3D conv_out output has nan:{}", jnp.isnan(x).any())
 
         return x, cache_list
 
@@ -571,7 +579,7 @@ class WanVAEDecoder(nnx.Module):
         # Add singleton time dimension for each frame: [T, B, 1, H, W, C]
         z_frames = z_frames[:, :, None, :, :, :]
 
-        jax.debug.print("z_frames has nan:{}", jnp.isnan(z_frames).any())
+        # jax.debug.print("z_frames has nan:{}", jnp.isnan(z_frames).any())
 
         # Warm-up pass: process first frame to initialize cache with correct shapes
         # This ensures consistent pytree structure for jax.lax.scan
@@ -588,12 +596,12 @@ class WanVAEDecoder(nnx.Module):
             """Process single frame with caching (JIT-compiled)."""
             cache_idx = [0]
             frame_out, new_cache_tuple = self.decoder(frame_latent, cache_tuple, cache_idx)
-            num_arrays = sum(isinstance(x, jnp.ndarray) for x in new_cache_tuple)
-            num_nones = sum(x is None for x in new_cache_tuple)
-            jax.debug.print("new cache Arrays: {},cache Nones: {}", num_arrays, num_nones)
-            jax.debug.print("frame_out shape:{}", frame_out.shape)
-            right_part_frame = frame_out[:, :, :, 235:, :]
-            jax.debug.print("frame_out Has NaN: {}", jnp.isnan(right_part_frame).any())
+            # num_arrays = sum(isinstance(x, jnp.ndarray) for x in new_cache_tuple)
+            # num_nones = sum(x is None for x in new_cache_tuple)
+            # jax.debug.print("new cache Arrays: {},cache Nones: {}", num_arrays, num_nones)
+            # jax.debug.print("frame_out shape:{}", frame_out.shape)
+            # right_part_frame = frame_out[:, :, :, 235:, :]
+            # jax.debug.print("frame_out Has NaN: {}", jnp.isnan(right_part_frame).any())
             return new_cache_tuple, frame_out
 
         # Process remaining frames with JIT
