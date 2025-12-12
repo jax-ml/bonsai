@@ -36,14 +36,14 @@ def cast_with_exclusion(path, x, dtype_to_cast):
 
     exclusion_keywords = [
         "norm",  # For all LayerNorm/GroupNorm layers
-        "condition_embedder",  # The entire time/text conditioning module
+        "time_embed",  # The entire time conditioning module
+        "text_proj",  # The entire text conditioning module
         "scale_shift_table",  # Catches both the final and the AdaLN tables
     ]
 
     path_str = ".".join(str(k.key) if isinstance(k, jax.tree_util.DictKey) else str(k) for k in path)
 
     if any(keyword in path_str.lower() for keyword in exclusion_keywords):
-        # print("is_norm_path: ", path)
         # Keep LayerNorm/GroupNorm weights and biases in full precision
         return x.astype(jnp.float32)
     else:
@@ -362,10 +362,6 @@ def create_model_from_safe_tensors(
     # Setup sharding if mesh provided
     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
-    # _params = jax.tree_util.tree_map_with_path(
-    #     lambda path, x: cast_with_exclusion(path, x, dtype_to_cast=cfg.weights_dtype), params
-    # )
-
     key_mapping = _get_dit_mapping(cfg)
     conversion_errors = []
     loaded_keys = []
@@ -429,6 +425,10 @@ def create_model_from_safe_tensors(
 
     print(f"Loaded {len(loaded_keys)} weight tensors")
     print(f"Skipped {len(skipped_keys)} weight tensors (VAE/text encoder/attn2.norm_k)")
+
+    state_dict = jax.tree_util.tree_map_with_path(
+        lambda path, x: cast_with_exclusion(path, x, dtype_to_cast=cfg.weights_dtype), state_dict
+    )
 
     if conversion_errors:
         print(f"\n Warning: {len(conversion_errors)} conversion errors occurred:")

@@ -11,8 +11,15 @@ from jax.lax import Precision
 from collections import OrderedDict
 
 def check_weight_loading(jax_model, torch_model):
+
+    text_proj_torch = torch_model.condition_embedder.text_embedder.linear_1.weight.detach().cpu().float().numpy().T
+    text_proj_jax = np.array(jax_model.text_proj.layers[0].kernel.value)
+    print("Text projection weights:")
+    print(f"  Shapes: torch={text_proj_torch.shape}, jax={text_proj_jax.shape}")
+    print(f"  Max diff: {np.abs(text_proj_torch - text_proj_jax).max():.2e}")
+    print(f"  Mean diff: {np.abs(text_proj_torch - text_proj_jax).mean():.2e}")
     # torch :(out, in, t, h, w)
-    torch_emb = torch_model.patch_embedding.weight.detach().cpu().numpy()
+    torch_emb = torch_model.patch_embedding.weight.detach().cpu().float().numpy()
     # jax: (t, h, w, in, out)
     jax_emb = np.array(jax_model.patch_embed.kernel.value).transpose(4,3,0,1,2)
 
@@ -22,8 +29,8 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Mean diff: {np.abs(torch_emb - jax_emb).mean():.2e}")
 
     # check fused kv projection weights in first block
-    torch_k_weight = torch_model.blocks[0].attn2.to_k.weight.detach().cpu().numpy().T
-    torch_v_weight = torch_model.blocks[0].attn2.to_v.weight.detach().cpu().numpy().T
+    torch_k_weight = torch_model.blocks[0].attn2.to_k.weight.detach().cpu().float().numpy().T
+    torch_v_weight = torch_model.blocks[0].attn2.to_v.weight.detach().cpu().float().numpy().T
     torch_kv = np.concatenate([torch_k_weight, torch_v_weight], axis=1)
 
     jax_kv_weight = np.array(jax_model.blocks[0].cross_attn.kv_proj.kernel.value)
@@ -33,8 +40,16 @@ def check_weight_loading(jax_model, torch_model):
     print(f"  Mean diff: {np.abs(torch_kv - jax_kv_weight).mean():.2e}")
     
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-2, atol: float = 1e-4):
+
+    print(f"\n{'=' * 80}")
+    print(f"Comparing: {name}")
+    print(f"{'=' * 80}")
+
+    print(f"before convert torch: {torch_output.dtype}, jax: {jax_output.dtype}")
     if torch_output.dtype == torch.bfloat16:
         torch_output = torch_output.float()
+    if jax_output.dtype == jnp.bfloat16:
+        jax_output = jax_output.astype(jnp.float32)
 
     if isinstance(torch_output, torch.Tensor):
         torch_np = torch_output.detach().cpu().numpy()
@@ -43,9 +58,6 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
 
     jax_np = np.array(jax_output)
 
-    print(f"\n{'=' * 80}")
-    print(f"Comparing: {name}")
-    print(f"{'=' * 80}")
     print(f"JAX shape:   {jax_np.shape}")
     print(f"Torch shape: {torch_np.shape}")
     print(f"JAX dtype:   {jax_np.dtype}")
@@ -94,7 +106,7 @@ def test_dit_output():
     config = modeling.ModelConfig
 
     print("\n[1/2] Loading transformer")
-    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.float32)
+    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.bfloat16)
 
     jax_dit = params.create_model_from_safe_tensors(model_ckpt_path, config,mesh=None)
     print("transformer loaded:", transformer, transformer.config)
@@ -141,6 +153,7 @@ def test_dit_output():
     
     # Compare final output
     return compare_outputs(pred_noise, expected_output, "Final DiT Output", rtol=1e-3, atol=1e-4)
+
 def test_dit():
     print("\n" + "=" * 80)
     print("TEST 2: DiT")
@@ -150,7 +163,7 @@ def test_dit():
     config = modeling.ModelConfig
 
     print("\n[1/2] Loading transformer")
-    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.float32)
+    transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.bfloat16)
 
     jax_dit = params.create_model_from_safe_tensors(model_ckpt_path, config,mesh=None)
     print("transformer loaded:", transformer, transformer.config)
@@ -176,7 +189,7 @@ def test_dit():
         dtype=torch.float32
     )
     # jax channels last
-    hidden_states_jax = jnp.array(np.transpose(hidden_states.numpy(), (0, 2, 3, 4, 1))).astype(jnp.bfloat16)
+    hidden_states_jax = jnp.array(np.transpose(hidden_states.numpy(), (0, 2, 3, 4, 1))).astype(jnp.bfloat16) 
     timestep = torch.randint(
         0, 1000,
         (batch_size,),
@@ -187,14 +200,14 @@ def test_dit():
         batch_size, text_seq_len, text_dim,
         dtype=torch.float32
     )
-    encoder_hidden_states_jax = jnp.array(encoder_hidden_states.numpy()).astype(jnp.bfloat16)
+    encoder_hidden_states_jax = jnp.array(encoder_hidden_states.numpy()).astype(jnp.bfloat16) 
 
     print("\n[2/2] Running forward pass")
     with torch.no_grad():
         output = transformer(
-            hidden_states=hidden_states,
+            hidden_states=hidden_states.to(dtype=torch.bfloat16),
             timestep=timestep,
-            encoder_hidden_states=encoder_hidden_states,
+            encoder_hidden_states=encoder_hidden_states.to(dtype=torch.bfloat16),
             encoder_hidden_states_image=None,  # Only for I2V models
             return_dict=True,
             attention_kwargs=None,
@@ -227,14 +240,14 @@ def test_dit():
     # 1. Text projection
     text_embeds_jax = jax_dit.text_proj(encoder_hidden_states_jax)
     text_embeds_torch = intermediate_outputs['condition_encoder_hidden_states']
-    # compare_outputs(text_embeds_jax, text_embeds_torch, "Text Projection", rtol=1e-3, atol=1e-4)
+    compare_outputs(text_embeds_jax, text_embeds_torch, "Text Projection", rtol=1e-3, atol=1e-4)
 
     # 2. Patch embedding
     x_jax = jax_dit.patch_embed(hidden_states_jax)
     # PyTorch is BCTHW, need to convert to BTHWC for comparison
     patch_embed_torch = intermediate_outputs['patch_embed_output']
-    patch_embed_torch_channels_last = np.transpose(patch_embed_torch.numpy(), (0, 2, 3, 4, 1))
-    # compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
+    patch_embed_torch_channels_last = np.transpose(patch_embed_torch.float().numpy(), (0, 2, 3, 4, 1))
+    compare_outputs(x_jax, patch_embed_torch_channels_last, "Patch Embedding", rtol=1e-3, atol=1e-4)
 
     # Reshape to sequence
     b, t_out, h_out, w_out, d = x_jax.shape
@@ -270,14 +283,14 @@ def test_dit():
 
     # PyTorch RoPE freqs are in BCHW format, convert to sequence format
     rope_freqs_cos_torch = intermediate_outputs['rope_freqs_cos']
-    # compare_outputs(rope_freqs_cos_jax, rope_freqs_cos_torch, "RoPE Freqs Cos", rtol=1e-5, atol=1e-6)
+    compare_outputs(rope_freqs_cos_jax, rope_freqs_cos_torch, "RoPE Freqs Cos", rtol=1e-5, atol=1e-6)
 
     # 4. Time embeddings
     time_emb_jax, time_proj_jax = jax_dit.time_embed(timestep_jax)
     time_emb_torch = intermediate_outputs['condition_temb']
     time_proj_torch = intermediate_outputs['condition_timestep_proj']
-    # compare_outputs(time_emb_jax, time_emb_torch, "Time Embedding", rtol=1e-3, atol=1e-4)
-    # compare_outputs(time_proj_jax, time_proj_torch, "Time Projection", rtol=1e-3, atol=1e-4)
+    compare_outputs(time_emb_jax, time_emb_torch, "Time Embedding", rtol=1e-3, atol=1e-4)
+    compare_outputs(time_proj_jax, time_proj_torch, "Time Projection", rtol=1e-3, atol=1e-4)
 
     # 5. Process through transformer blocks with detailed attention comparison
     for i, block in enumerate(jax_dit.blocks):
@@ -365,7 +378,7 @@ def test_dit():
     assert output.sample.shape == expected_shape
 
     # change to channels last for comparison
-    expected_output = np.transpose(output.sample.numpy(), (0, 2, 3, 4, 1))
+    expected_output = np.transpose(output.sample.float().numpy(), (0, 2, 3, 4, 1))
 
     debugger.remove_hooks()
     # Compare final output
@@ -781,5 +794,5 @@ class WanAttentionDebugger:
         self.attention_states = OrderedDict()
 
 if __name__ == "__main__":
-    test_dit_output()
-    # test_dit()
+    # test_dit_output()
+    test_dit()
