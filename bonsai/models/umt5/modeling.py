@@ -104,10 +104,10 @@ class T5LayerNorm(nnx.Module):
         # RMS normalization: hidden_states / sqrt(mean(hidden_states^2))
         variance = jnp.mean(hidden_states.astype(jnp.float32) ** 2, axis=-1, keepdims=True)
         hidden_states = hidden_states * jax.lax.rsqrt(variance + self.eps)
-        weight_dtype = self.scale.get_value().dtype
+        weight_dtype = self.scale.dtype
         if weight_dtype in [jnp.float16, jnp.bfloat16]:
             hidden_states = hidden_states.astype(weight_dtype)
-        return self.scale.get_value() * hidden_states
+        return self.scale * hidden_states
 
 
 class UMT5DenseActDense(nnx.Module):
