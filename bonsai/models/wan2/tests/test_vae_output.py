@@ -149,6 +149,56 @@ class WanVAEDecoderHooks:
         """Get all captured outputs"""
         return self.outputs
 
+def test_vae_decoder_outpout(src:str="hf"):
+    # Load VAE model
+    print("Loading AutoencoderKLWan...")
+    if src == "ms":
+        model_ckpt_path = ms_snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",allow_patterns='vae/*')
+    elif src == "hf":
+        model_ckpt_path = hf_snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers",allow_patterns='vae/*')
+
+    vae_jax = params.create_vae_decoder_from_safe_tensors(model_ckpt_path, mesh=None)
+    vae = AutoencoderKLWan.from_pretrained(
+        model_ckpt_path,
+        subfolder="vae",
+        torch_dtype=torch.float32
+    )
+    vae.eval()
+
+    # Register hooks
+    hook_manager = WanVAEDecoderHooks(vae)
+    hook_manager.register_decoder_hooks()
+
+    # Create dummy latent input
+    torch.manual_seed(42)
+    batch_size = 1
+    z_dim = 16
+    num_frames = 9
+    height = 30  # After spatial compression (8x)
+    width = 52
+
+    latents_mean = (
+        torch.tensor(vae_lib.VAEConfig.latent_mean)
+        .view(1, 16, 1, 1, 1)
+        .to(dtype=torch.float32)
+    )
+    latents_std = 1.0 / torch.tensor(vae_lib.VAEConfig.latent_std).view(
+        1, 16, 1, 1, 1
+    ).to(dtype=torch.float32)
+
+    latents_original = torch.randn(batch_size, z_dim, num_frames, height, width,dtype=torch.float32)
+    latents = latents_original / latents_std + latents_mean
+    latents_jax = jnp.array(latents_original.numpy().transpose(0,2,3,4,1))
+
+    print(f"\nInput latents shape: {latents.shape}")
+    print("Running decoder forward pass...\n")
+
+    decoded_jax = vae_jax.decode(latents_jax)
+    print(decoded_jax[0,1:,:,235:,:].mean())
+    with torch.no_grad():
+        decoded = vae.decode(latents).sample
+    compare_outputs(decoded_jax, decoded, "final_output", rtol=1e-2, atol=1e-4)
+    hook_manager.remove_hooks()
 
 def test_vae_decoder(src:str="hf"):
     # Load VAE model
@@ -194,174 +244,127 @@ def test_vae_decoder(src:str="hf"):
     print(f"\nInput latents shape: {latents.shape}")
     print("Running decoder forward pass...\n")
 
-    # z, _ = vae_jax.conv2(latents_jax, None)
-    # t = z.shape[1]
-    # frames = []
-    # decoder = vae_jax.decoder
-    # output_jax = {}
-
-    # Initialize cache list for feature caching
-    # cache_list = [None] * 50
-
-    # Run decoder (through VAE decode)
-    # vae.clear_cache()
-    # x = vae.post_quant_conv(latents)
-    decoded_jax = vae_jax.decode(latents_jax)
-    print(decoded_jax[0,1:,:,235:,:].mean())
-    with torch.no_grad():
-        # for i in range(num_frames):
-        #     vae._conv_idx = [0]
-        #     cache_idx = [0]
-        #     frame_latent = z[:, i : i + 1, :, :, :]
-        #     frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
-        #     print(i)
-        #     if i == 0:
-        #         out = vae.decoder(
-        #             x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx, first_chunk=True
-        #         )
-        #         # compare_outputs(frame_out, out, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
-        #     else:
-        #         out_ = vae.decoder(x[:, :, i : i + 1, :, :], feat_cache=vae._feat_map, feat_idx=vae._conv_idx)
-        #         out = torch.cat([out, out_], 2)
-        #         # compare_outputs(frame_out, out_, f"frame_{i}_output", rtol=1e-2, atol=1e-4)
-        #     frames.append(frame_out)
-        # out = torch.clamp(out, min=-1.0, max=1.0)
-        # x = jnp.concatenate(frames, axis=1)  # [B, T_total, H_out, W_out, 3]
-        # x = jnp.clip(x, -1.0, 1.0)
-        # compare_outputs(x, out, "final_output", rtol=1e-2, atol=1e-4)
-        decoded = vae.decode(latents).sample
-    compare_outputs(decoded_jax, decoded, "final_output", rtol=1e-2, atol=1e-4)
-
-    # first_frame_output = hook_manager.decode_first_frame_only(latents)
-    # Get captured outputs
-    # outputs = hook_manager.get_outputs()
-
     print("=" * 80)
     print("CAPTURED VAE DECODER INTERMEDIATE OUTPUTS")
     print("=" * 80)
 
-    # for name, tensor in outputs.items():
-    #     print(f"{name:40s}: {tuple(tensor.shape)}")
+    output_jax = {}
+    z, _ = vae_jax.conv2(latents_jax, None)
+    compare_outputs(z, outputs['post_quant_conv'], 'post_quant_conv', rtol=1e-2, atol=1e-4)
+    output_jax['post_quant_conv'] = z
 
-    # output_jax = {}
-    # z, _ = vae_jax.conv2(latents_jax, None)
-    # compare_outputs(z, outputs['post_quant_conv'], 'post_quant_conv', rtol=1e-2, atol=1e-4)
-    # output_jax['post_quant_conv'] = z
+    t = z.shape[1]
+    frames = []
+    decoder = vae_jax.decoder
 
-    # t = z.shape[1]
-    # frames = []
-    # decoder = vae_jax.decoder
+    # Initialize cache list for feature caching
+    cache_list = [None] * 50
 
-    # # Initialize cache list for feature caching
-    # cache_list = [None] * 50
+    for i in range(t):
+        print(f"\n{'='*80}")
+        print(f"Processing frame {i+1}/{t}")
+        print(f"{'='*80}")
 
-    # for i in range(t):
-    #     print(f"\n{'='*80}")
-    #     print(f"Processing frame {i+1}/{t}")
-    #     print(f"{'='*80}")
+        # Reset cache index for each frame
+        cache_idx = [0]
+        frame_latent = z[:, i : i + 1, :, :, :]
 
-    #     # Reset cache index for each frame
-    #     cache_idx = [0]
-    #     frame_latent = z[:, i : i + 1, :, :, :]
+        if i == 0:
+            idx = cache_idx[0]
+            x, cache_list[idx] = decoder.conv_in(frame_latent, cache_list[idx])
+            cache_idx[0] += 1
+            compare_outputs(x, outputs['conv_in'], 'conv_in', rtol=1e-2, atol=1e-4)
+            output_jax['conv_in'] = x
 
-    #     if i == 0:
-    #         idx = cache_idx[0]
-    #         x, cache_list[idx] = decoder.conv_in(frame_latent, cache_list[idx])
-    #         cache_idx[0] += 1
-    #         compare_outputs(x, outputs['conv_in'], 'conv_in', rtol=1e-2, atol=1e-4)
-    #         output_jax['conv_in'] = x
+            # Mid block 1
+            x, cache_list = decoder.mid_block1(x, cache_list, cache_idx)
+            compare_outputs(x, outputs['mid_block_res_0'], 'mid_block_res_0', rtol=1e-2, atol=1e-4)
+            output_jax['mid_block_res_0'] = x
 
-    #         # Mid block 1
-    #         x, cache_list = decoder.mid_block1(x, cache_list, cache_idx)
-    #         compare_outputs(x, outputs['mid_block_res_0'], 'mid_block_res_0', rtol=1e-2, atol=1e-4)
-    #         output_jax['mid_block_res_0'] = x
+            # Mid attention
+            x = decoder.mid_attn(x)
+            compare_outputs(x, outputs['mid_block_attn_0'], 'mid_block_attn_0', rtol=1e-2, atol=1e-4)
+            output_jax['mid_block_attn_0'] = x
 
-    #         # Mid attention
-    #         x = decoder.mid_attn(x)
-    #         compare_outputs(x, outputs['mid_block_attn_0'], 'mid_block_attn_0', rtol=1e-2, atol=1e-4)
-    #         output_jax['mid_block_attn_0'] = x
+            # Mid block 2
+            x, cache_list = decoder.mid_block2(x, cache_list, cache_idx)
+            compare_outputs(x, outputs['mid_block_res_1'], 'mid_block_res_1', rtol=1e-2, atol=1e-4)
+            output_jax['mid_block_res_1'] = x
 
-    #         # Mid block 2
-    #         x, cache_list = decoder.mid_block2(x, cache_list, cache_idx)
-    #         compare_outputs(x, outputs['mid_block_res_1'], 'mid_block_res_1', rtol=1e-2, atol=1e-4)
-    #         output_jax['mid_block_res_1'] = x
+            # Upsample stage 0
+            for j, block in enumerate(decoder.up_blocks_0):
+                x, cache_list = block(x, cache_list, cache_idx)
+                compare_outputs(x, outputs[f'up_block_0_res_{j}'], f'up_block_0_res_{j}', rtol=1e-2, atol=1e-4)
+                output_jax[f'up_block_0_res_{j}'] = x
+            x, cache_list = decoder.up_sample_0(x, cache_list, cache_idx)
+            compare_outputs(x, outputs['up_block_0_upsample'], 'up_block_0_upsample', rtol=1e-2, atol=1e-4)
+            output_jax['up_block_0_upsample'] = x
 
-    #         # Upsample stage 0
-    #         for j, block in enumerate(decoder.up_blocks_0):
-    #             x, cache_list = block(x, cache_list, cache_idx)
-    #             compare_outputs(x, outputs[f'up_block_0_res_{j}'], f'up_block_0_res_{j}', rtol=1e-2, atol=1e-4)
-    #             output_jax[f'up_block_0_res_{j}'] = x
-    #         x, cache_list = decoder.up_sample_0(x, cache_list, cache_idx)
-    #         compare_outputs(x, outputs['up_block_0_upsample'], 'up_block_0_upsample', rtol=1e-2, atol=1e-4)
-    #         output_jax['up_block_0_upsample'] = x
+            # Upsample stage 1
+            for j, block in enumerate(decoder.up_blocks_1):
+                x, cache_list = block(x, cache_list, cache_idx)
+                compare_outputs(x, outputs[f'up_block_1_res_{j}'], f'up_block_1_res_{j}', rtol=1e-2, atol=1e-4)
+                output_jax[f'up_block_1_res_{j}'] = x
+            x, cache_list = decoder.up_sample_1(x, cache_list, cache_idx)
+            compare_outputs(x, outputs['up_block_1_upsample'], 'up_block_1_upsample', rtol=1e-2, atol=1e-4)
+            output_jax['up_block_1_upsample'] = x
 
-    #         # Upsample stage 1
-    #         for j, block in enumerate(decoder.up_blocks_1):
-    #             x, cache_list = block(x, cache_list, cache_idx)
-    #             compare_outputs(x, outputs[f'up_block_1_res_{j}'], f'up_block_1_res_{j}', rtol=1e-2, atol=1e-4)
-    #             output_jax[f'up_block_1_res_{j}'] = x
-    #         x, cache_list = decoder.up_sample_1(x, cache_list, cache_idx)
-    #         compare_outputs(x, outputs['up_block_1_upsample'], 'up_block_1_upsample', rtol=1e-2, atol=1e-4)
-    #         output_jax['up_block_1_upsample'] = x
+            # Upsample stage 2 (spatial only, no cache)
+            for j, block in enumerate(decoder.up_blocks_2):
+                x, cache_list = block(x, cache_list, cache_idx)
+                compare_outputs(x, outputs[f'up_block_2_res_{j}'], f'up_block_2_res_{j}', rtol=1e-2, atol=1e-4)
+                output_jax[f'up_block_2_res_{j}'] = x
+            x = decoder.up_sample_2(x)  # Spatial-only, no cache
+            compare_outputs(x, outputs['up_block_2_upsample'], 'up_block_2_upsample', rtol=1e-2, atol=1e-4)
+            output_jax['up_block_2_upsample'] = x
 
-    #         # Upsample stage 2 (spatial only, no cache)
-    #         for j, block in enumerate(decoder.up_blocks_2):
-    #             x, cache_list = block(x, cache_list, cache_idx)
-    #             compare_outputs(x, outputs[f'up_block_2_res_{j}'], f'up_block_2_res_{j}', rtol=1e-2, atol=1e-4)
-    #             output_jax[f'up_block_2_res_{j}'] = x
-    #         x = decoder.up_sample_2(x)  # Spatial-only, no cache
-    #         compare_outputs(x, outputs['up_block_2_upsample'], 'up_block_2_upsample', rtol=1e-2, atol=1e-4)
-    #         output_jax['up_block_2_upsample'] = x
+            # Upsample stage 3 (no spatial upsample)
+            for j, block in enumerate(decoder.up_blocks_3):
+                x, cache_list = block(x, cache_list, cache_idx)
+                compare_outputs(x, outputs[f'up_block_3_res_{j}'], f'up_block_3_res_{j}', rtol=1e-2, atol=1e-4)
+                output_jax[f'up_block_3_res_{j}'] = x
 
-    #         # Upsample stage 3 (no spatial upsample)
-    #         for j, block in enumerate(decoder.up_blocks_3):
-    #             x, cache_list = block(x, cache_list, cache_idx)
-    #             compare_outputs(x, outputs[f'up_block_3_res_{j}'], f'up_block_3_res_{j}', rtol=1e-2, atol=1e-4)
-    #             output_jax[f'up_block_3_res_{j}'] = x
+            x = decoder.norm_out(x)
+            compare_outputs(x, outputs['norm_out'], 'norm_out', rtol=1e-2, atol=1e-4)
+            output_jax['norm_out'] = x
+            x = nnx.silu(x)
 
-    #         x = decoder.norm_out(x)
-    #         compare_outputs(x, outputs['norm_out'], 'norm_out', rtol=1e-2, atol=1e-4)
-    #         output_jax['norm_out'] = x
-    #         x = nnx.silu(x)
+            idx = cache_idx[0]
+            x, cache_list[idx] = decoder.conv_out(x, cache_list[idx])
+            cache_idx[0] += 1
+            compare_outputs(x, outputs['conv_out'], 'conv_out', rtol=1e-2, atol=1e-4)
+            output_jax['conv_out'] = x
+            frames.append(x)
+        else:
+            # Subsequent frames: use cached features
+            print(f"Subsequent frame: using feature cache")
+            frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
+            frames.append(frame_out)
 
-    #         idx = cache_idx[0]
-    #         x, cache_list[idx] = decoder.conv_out(x, cache_list[idx])
-    #         cache_idx[0] += 1
-    #         compare_outputs(x, outputs['conv_out'], 'conv_out', rtol=1e-2, atol=1e-4)
-    #         output_jax['conv_out'] = x
-    #         frames.append(x)
-    #     else:
-    #         # Subsequent frames: use cached features
-    #         print(f"Subsequent frame: using feature cache")
-    #         frame_out, cache_list = decoder(frame_latent, cache_list, cache_idx)
-    #         frames.append(frame_out)
+    print("\n" + "=" * 80)
+    print(f"Final decoded output shape: {decoded.shape}")
+    print("=" * 80)
 
-    # print("\n" + "=" * 80)
-    # print(f"Final decoded output shape: {decoded.shape}")
-    # print("=" * 80)
+    # Save outputs for comparison
+    outputs_dict = {
+        'inputs': {
+            'latents': latents.cpu(),
+        },
+        'intermediate': outputs,
+        'output': decoded.cpu(),
+    }
 
-    # # Save outputs for comparison
-    # outputs_dict = {
-    #     'inputs': {
-    #         'latents': latents.cpu(),
-    #     },
-    #     'intermediate': outputs,
-    #     'output': decoded.cpu(),
-    # }
+    outputs_dict_jax = {
+        'intermediate': output_jax
+    }
 
-    # outputs_dict_jax = {
-    #     'intermediate': output_jax
-    # }
+    compare_with_jax_decoder(outputs_dict, outputs_dict_jax)
 
-    # compare_with_jax_decoder(outputs_dict, outputs_dict_jax)
-
-    # torch.save(outputs_dict, 'wan_vae_decoder_outputs.pt')
-    # print("\n✓ Saved outputs to 'wan_vae_decoder_outputs.pt'")
+    torch.save(outputs_dict, 'wan_vae_decoder_outputs.pt')
+    print("\n✓ Saved outputs to 'wan_vae_decoder_outputs.pt'")
 
     # Clean up
     hook_manager.remove_hooks()
-
-    # return outputs_dict
 
 def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float = 1e-2, atol: float = 1e-4):
     if torch_output.dtype == torch.bfloat16:
@@ -416,85 +419,8 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
 
     return close
 
-def compare_with_jax_decoder(outputs_dict_torch, outputs_dict_jax):
-    """
-    Compare PyTorch decoder outputs with JAX implementation
-    
-    Args:
-        outputs_dict_torch: Output dict from PyTorch decoder
-        outputs_dict_jax: Output dict from JAX decoder (convert to numpy/torch first)
-    """
-    print("\n" + "=" * 80)
-    print("COMPARISON: PyTorch vs JAX")
-    print("=" * 80)
-
-    torch_intermediate = outputs_dict_torch['intermediate']
-    jax_intermediate = outputs_dict_jax['intermediate']
-
-    for name in torch_intermediate.keys():
-        if name not in jax_intermediate:
-            print(f"⚠  {name:40s}: MISSING in JAX implementation")
-            continue
-
-        torch_output = torch_intermediate[name]
-        torch_np = torch_output.cpu().numpy()
-        jax_output = jax_intermediate[name]
-        jax_np = np.array(jax_output).transpose(0,4,1,2,3)  # Convert JAX [B,T,H,W,C] to [B,C,T,H,W]
-
-        # Check shape match
-        if torch_np.shape != jax_np.shape:
-            print(f"✗  {name:40s}: SHAPE MISMATCH")
-            print(f"     PyTorch: {torch_np.shape}")
-            print(f"     JAX:     {jax_np.shape}")
-            continue
-
-        abs_diff = np.abs(jax_np - torch_np)
-        rel_diff = abs_diff / (np.abs(torch_np) + 1e-10)
-
-        max_abs_diff = np.max(abs_diff)
-        mean_abs_diff = np.mean(abs_diff)
-        mean_rel_diff = np.mean(rel_diff)
-
-        rtol = 1e-1
-        atol = 1e-4
-        close = np.allclose(jax_np, torch_np, rtol=rtol, atol=atol)
-        if close:
-            print(f"\n✅ Outputs match within tolerance (rtol={rtol}, atol={atol})")
-        else:
-            print(f"\n❌ Outputs do NOT match (rtol={rtol}, atol={atol})")
-            # Show some mismatched locations
-            mismatch_mask = ~np.isclose(jax_np, torch_np, rtol=rtol, atol=atol)
-            n_mismatches = np.sum(mismatch_mask)
-            print(f"  Number of mismatches: {n_mismatches} / {jax_np.size} ({100 * n_mismatches / jax_np.size:.2f}%)")
-        # # Status
-        # if max_diff < 1e-5:
-        #     status = "✓ EXACT"
-        # elif max_diff < 1e-3:
-        #     status = "✓ CLOSE"
-        # elif max_diff < 1e-1:
-        #     status = "⚠ DIFF"
-        # else:
-        #     status = "✗ LARGE DIFF"
-
-        print(f"{name:40s}: max_diff={max_abs_diff:.2e}, mean_diff={mean_abs_diff:.2e}, mean_rel_diff={mean_rel_diff:.2e}")
-
-    # # Compare final output
-    # torch_output = outputs_dict_torch['output']
-    # jax_output = outputs_dict_jax['output']
-
-    # if not isinstance(jax_output, torch.Tensor):
-    #     jax_output = torch.from_numpy(jax_output)
-
-    # abs_diff = torch.abs(torch_output - jax_output)
-    # max_diff = abs_diff.max().item()
-    # mean_diff = abs_diff.mean().item()
-
-    # print("=" * 80)
-    # print(f"Final Output: max_diff={max_diff:.2e}, mean_diff={mean_diff:.2e}")
-    # print("=" * 80)
-
 if __name__ == "__main__":
     # add args for modelscope/huggingface model download
     src = sys.argv[1] if len(sys.argv) > 1 else "hf"
     assert src in ["ms", "hf"], "Invalid source specified. Use 'modelscope' or 'huggingface'."
-    test_vae_decoder(src)
+    test_vae_decoder_output(src)

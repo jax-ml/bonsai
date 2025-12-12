@@ -379,7 +379,6 @@ def test_dit():
     debugger.remove_hooks()
     # Compare final output
     return compare_outputs(jax_dit_output, expected_output, "Final DiT Output", rtol=1e-3, atol=1e-4)
-
 class WanTransformerDebugger:
     """Helper class to extract intermediate outputs from WanTransformer3DModel"""
 
