@@ -19,12 +19,36 @@ import re
 from enum import Enum
 
 import jax
+import jax.numpy as jnp
 import safetensors
 from etils import epath
 from flax import nnx
 
 from bonsai.models.wan2 import modeling as model_lib
+from bonsai.models.wan2 import t5 as t5_lib
 from bonsai.models.wan2 import vae as vae_lib
+
+
+def cast_with_exclusion(path, x, dtype_to_cast):
+    """
+    Casts arrays to dtype_to_cast, but keeps params from any 'norm' layer in float32.
+    """
+
+    exclusion_keywords = [
+        "norm",  # For all LayerNorm/GroupNorm layers
+        "time_embed",  # The entire time conditioning module
+        "text_proj",  # The entire text conditioning module
+        "scale_shift_table",  # Catches both the final and the AdaLN tables
+    ]
+
+    path_str = ".".join(str(k.key) if isinstance(k, jax.tree_util.DictKey) else str(k) for k in path)
+
+    if any(keyword in path_str.lower() for keyword in exclusion_keywords):
+        # Keep LayerNorm/GroupNorm weights and biases in full precision
+        return x.astype(jnp.float32)
+    else:
+        # Cast everything else to dtype_to_cast
+        return x.astype(dtype_to_cast)
 
 
 def _get_dit_mapping(cfg: model_lib.ModelConfig):
@@ -32,8 +56,8 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         """Transformations for model parameters"""
 
         NONE = None
-        TRANSPOSE = ((1, 0), None, False)  # For linear layers: (out, in) -> (in, out)
-        TRANSPOSE_CONV = ((2, 3, 4, 1, 0), None, False)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
+        TRANSPOSE = ((1, 0), None)  # For linear layers: (out, in) -> (in, out)
+        TRANSPOSE_CONV = ((2, 3, 4, 1, 0), None)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
 
     mapping = {
         # Patch embedding (input projection)
@@ -77,6 +101,7 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         # Transformer blocks - Cross attention (attn2)
         # Note: CrossAttention only has q_norm, not k_norm; norm_k is skipped
         r"blocks\.([0-9]+)\.attn2\.norm_q\.weight": (r"blocks.\1.cross_attn.q_norm.scale", Transform.NONE),
+        r"blocks\.([0-9]+)\.attn2\.norm_k\.weight": (r"blocks.\1.cross_attn.k_norm.scale", Transform.NONE),
         r"blocks\.([0-9]+)\.attn2\.to_q\.weight": (r"blocks.\1.cross_attn.q_proj.kernel", Transform.TRANSPOSE),
         r"blocks\.([0-9]+)\.attn2\.to_q\.bias": (r"blocks.\1.cross_attn.q_proj.bias", Transform.NONE),
         # Note: to_k and to_v need special handling - they're fused into kv_proj in JAX
@@ -96,6 +121,7 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         r"scale_shift_table": ("final_layer.scale_shift_table", Transform.NONE),
         r"proj_out\.weight": ("final_layer.linear.kernel", Transform.TRANSPOSE),
         r"proj_out\.bias": ("final_layer.linear.bias", Transform.NONE),
+        r"norm_out\.weight": ("final_layer.norm.scale", Transform.NONE),
     }
 
     return mapping
@@ -108,9 +134,9 @@ def _get_vae_key_mapping():
         """Transformations for VAE parameters"""
 
         NONE = None
-        TRANSPOSE_2D_CONV = ((2, 3, 1, 0), None, False)  # For 2D conv: (out, in, h, w) -> (h, w, in, out)
-        TRANSPOSE_3D = ((2, 3, 4, 1, 0), None, False)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
-        SQUEEZE = (None, (-1,), False)  # Squeeze to 1D: (C, 1, 1, 1) -> (C,)
+        TRANSPOSE_2D_CONV = ((2, 3, 1, 0), None)  # For 2D conv: (out, in, h, w) -> (h, w, in, out)
+        TRANSPOSE_3D = ((2, 3, 4, 1, 0), None)  # For 3D conv: (out, in, t, h, w) -> (t, h, w, in, out)
+        SQUEEZE = (None, (-1,))  # Squeeze to 1D: (C, 1, 1, 1) -> (C,)
 
     # PyTorch format: (out_channels, in_channels, kernel_size...)
     # JAX format: (kernel_size..., in_channels, out_channels)
@@ -129,6 +155,7 @@ def _get_vae_key_mapping():
         ),
         r"decoder\.mid_block\.resnets\.0\.conv1\.bias": ("decoder.mid_block1.conv1.conv.bias", Transform.NONE),
         r"decoder\.mid_block\.resnets\.0\.norm2\.gamma": ("decoder.mid_block1.norm2.scale", Transform.SQUEEZE),
+        r"decoder\.mid_block\.resnets\.0\.norm2\.bias": ("decoder.mid_block1.norm2.scale", Transform.NONE),
         r"decoder\.mid_block\.resnets\.0\.conv2\.weight": (
             "decoder.mid_block1.conv2.conv.kernel",
             Transform.TRANSPOSE_3D,
@@ -262,13 +289,11 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict=N
     key, *rest = keys
     if not rest:
         if transform is not None and transform.value is not None:
-            permute, reshape, reshape_first = transform.value
-            if reshape_first and reshape is not None:
+            permute, reshape = transform.value
+            if reshape is not None:
                 tensor = tensor.reshape(reshape)
             if permute:
                 tensor = tensor.transpose(permute)
-            if not reshape_first and reshape is not None:
-                tensor = tensor.reshape(reshape)
 
         if key not in state_dict:
             raise KeyError(f"Key {key} not found in state_dict. Available keys: {list(state_dict.keys())[:10]}...")
@@ -298,7 +323,6 @@ def create_model_from_safe_tensors(
     file_dir: str,
     cfg: model_lib.ModelConfig,
     mesh: jax.sharding.Mesh | None = None,
-    load_transformer_only: bool = True,
 ) -> model_lib.Wan2DiT:
     """
     Load Wan2.1-T2V-1.3B DiT model from safetensors checkpoint.
@@ -398,10 +422,13 @@ def create_model_from_safe_tensors(
             # Assign to state dict
             state_dict["blocks"][block_idx]["cross_attn"]["kv_proj"]["kernel"] = jax.device_put(kv_kernel)
             state_dict["blocks"][block_idx]["cross_attn"]["kv_proj"]["bias"] = jax.device_put(kv_bias)
-            print(f"✓ Fused K/V weights for block {block_idx}")
 
     print(f"Loaded {len(loaded_keys)} weight tensors")
     print(f"Skipped {len(skipped_keys)} weight tensors (VAE/text encoder/attn2.norm_k)")
+
+    state_dict = jax.tree_util.tree_map_with_path(
+        lambda path, x: cast_with_exclusion(path, x, dtype_to_cast=cfg.weights_dtype), state_dict
+    )
 
     if conversion_errors:
         print(f"\n Warning: {len(conversion_errors)} conversion errors occurred:")
@@ -467,7 +494,7 @@ def create_vae_decoder_from_safe_tensors(
 
                 if jax_key is None:
                     skipped_keys.append(torch_key)
-                    print(f"{torch_key} is not mapped")
+                    # print(f"{torch_key} is not mapped")
                     continue
 
                 keys = [_stoi(k) for k in jax_key.split(".")]
@@ -505,12 +532,13 @@ def _get_t5_key_mapping():
         """Transformations for T5 parameters"""
 
         NONE = None
-        TRANSPOSE = ((1, 0), None, False)  # For linear layers: (out, in) -> (in, out)
+        TRANSPOSE = ((1, 0), None)  # For linear layers: (out, in) -> (in, out)
 
     # T5/UMT5 uses standard HuggingFace naming
     mapping = {
         # Shared token embeddings
         r"shared\.weight": ("encoder.token_embedding.embedding", Transform.NONE),
+        r"encoder\.embed_tokens\.weight": ("encoder.token_embedding.embedding", Transform.NONE),
         # Encoder blocks - Self attention
         r"encoder\.block\.([0-9]+)\.layer\.0\.SelfAttention\.q\.weight": (
             r"encoder.blocks.\1.attn.q.kernel",
@@ -557,41 +585,31 @@ def _get_t5_key_mapping():
 def create_t5_encoder_from_safe_tensors(
     file_dir: str,
     mesh: jax.sharding.Mesh | None = None,
-):
+    is_sf: bool = True,
+    config: t5_lib.T5Config | None = None,
+) -> t5_lib.T5EncoderModel:
     """
     Load T5 encoder from safetensors checkpoint.
 
     Args:
         file_dir: Directory containing .safetensors files or path to text_encoder directory
         mesh: Optional JAX mesh for sharding
+        is_sf: Whether to load from safetensors (True) or PyTorch checkpoint (False)
+        config: T5Config to use. If None, defaults to UMT5-XXL
 
     Returns:
         T5EncoderModel with loaded weights
     """
     from bonsai.models.wan2 import t5
 
-    # Check if file_dir is the model root or text_encoder subdirectory
-    file_path = epath.Path(file_dir).expanduser()
-    text_encoder_path = file_path / "text_encoder"
+    # Use provided config or default to UMT5-XXL
+    if config is None:
+        config = t5.T5Config.umt5_xxl()
 
-    if text_encoder_path.exists():
-        # Look in text_encoder subdirectory
-        files = sorted(list(text_encoder_path.glob("model-*.safetensors")))
-    else:
-        # Look in provided directory
-        files = sorted(list(file_path.glob("model-*.safetensors")))
-
-    if not files:
-        raise ValueError(f"No safetensors found in {file_dir} or {file_dir}/text_encoder")
-
-    print(f"Found {len(files)} T5 encoder safetensors file(s)")
-
-    # Create T5 encoder structure
-    t5_encoder = nnx.eval_shape(lambda: t5.T5EncoderModel(rngs=nnx.Rngs(params=0, dropout=0)))
+    t5_encoder = nnx.eval_shape(lambda: t5.T5EncoderModel(config, rngs=nnx.Rngs(params=0, dropout=0)))
     graph_def, abs_state = nnx.split(t5_encoder)
     state_dict = abs_state.to_pure_dict()
 
-    # Setup sharding if mesh provided
     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
     key_mapping = _get_t5_key_mapping()
@@ -599,29 +617,69 @@ def create_t5_encoder_from_safe_tensors(
     loaded_keys = []
     skipped_keys = []
 
-    for f in files:
-        print(f"Loading T5 weights from {f.name}...")
-        with safetensors.safe_open(f, framework="numpy") as sf:
-            for torch_key in sf.keys():
-                tensor = sf.get_tensor(torch_key)
+    # Check if file_dir is the model root or text_encoder subdirectory
+    file_path = epath.Path(file_dir).expanduser()
+    text_encoder_path = file_path / "text_encoder"
 
-                jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+    def load_pytorch_weights(file_dir):
+        from transformers import UMT5ForConditionalGeneration
 
-                if jax_key is None:
-                    # Skip keys not in our mapping
-                    skipped_keys.append(torch_key)
-                    print(f"{torch_key} is not mapped")
-                    continue
+        model = UMT5ForConditionalGeneration.from_pretrained(file_dir)
+        encoder_state = {k: v for k, v in model.state_dict().items() if k.startswith("encoder.")}
+        return encoder_state
 
-                keys = [_stoi(k) for k in jax_key.split(".")]
-                try:
-                    _assign_weights(keys, tensor, state_dict, torch_key, transform, sharding)
-                    loaded_keys.append(torch_key)
-                except Exception as e:
-                    full_jax_key = ".".join([str(k) for k in keys])
-                    conversion_errors.append(
-                        f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}"
-                    )
+    if is_sf:
+        if text_encoder_path.exists():
+            files = sorted(list(text_encoder_path.glob("model-*.safetensors")))
+        else:
+            files = sorted(list(file_path.glob("*.safetensors")))
+        if not files:
+            raise ValueError(f"No safetensors found in {file_dir} or {file_dir}/text_encoder")
+        print(f"Found {len(files)} T5 encoder safetensors file(s)")
+
+        for f in files:
+            print(f"Loading T5 weights from {f.name}...")
+            with safetensors.safe_open(f, framework="numpy") as sf:
+                for torch_key in sf.keys():
+                    tensor = sf.get_tensor(torch_key)
+
+                    jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+
+                    if jax_key is None:
+                        # Skip keys not in our mapping
+                        skipped_keys.append(torch_key)
+                        # print(f"{torch_key} is not mapped")
+                        continue
+
+                    keys = [_stoi(k) for k in jax_key.split(".")]
+                    try:
+                        _assign_weights(keys, tensor, state_dict, torch_key, transform, sharding)
+                        loaded_keys.append(torch_key)
+                    except Exception as e:
+                        full_jax_key = ".".join([str(k) for k in keys])
+                        conversion_errors.append(
+                            f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}"
+                        )
+            gc.collect()
+    else:
+        print(f"Loading T5 weights from PyTorch checkpoint in {file_dir}...")
+        pt_state = load_pytorch_weights(file_dir)
+        for torch_key, tensor in pt_state.items():
+            jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+
+            if jax_key is None:
+                # Skip keys not in our mapping
+                skipped_keys.append(torch_key)
+                # print(f"{torch_key} is not mapped")
+                continue
+
+            keys = [_stoi(k) for k in jax_key.split(".")]
+            try:
+                _assign_weights(keys, tensor.numpy(), state_dict, torch_key, transform, sharding)
+                loaded_keys.append(torch_key)
+            except Exception as e:
+                full_jax_key = ".".join([str(k) for k in keys])
+                conversion_errors.append(f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}")
         gc.collect()
 
     print(f"Loaded {len(loaded_keys)} T5 weight tensors")

@@ -18,6 +18,7 @@ import keras_hub
 import numpy as np
 import tensorflow as tf
 from absl.testing import absltest
+from flax import nnx
 from huggingface_hub import snapshot_download
 
 from bonsai.models.densenet121 import modeling, params
@@ -26,10 +27,16 @@ from bonsai.models.densenet121 import modeling, params
 class TestModuleForwardPasses(absltest.TestCase):
     def setUp(self):
         super().setUp()
+        jax.config.update("jax_default_matmul_precision", "float32")
         try:
             self.ref_model = keras_hub.models.ImageClassifier.from_preset("densenet_121_imagenet")
             model_ckpt_path = snapshot_download("keras/densenet_121_imagenet")
-            self.nnx_model = params.create_model_from_h5(model_ckpt_path, modeling.ModelConfig.densenet_121())
+            graph_def, state = nnx.split(
+                params.create_model_from_h5(model_ckpt_path, modeling.ModelConfig.densenet_121())
+            )
+            state = jax.tree.map(lambda x: x.astype(jnp.float32) if isinstance(x, jax.Array) else x, state)
+            self.nnx_model = nnx.merge(graph_def, state)
+
         except Exception as e:
             self.skipTest(
                 "Skipping test because tensorflow-text requires 3.12 or below: %s"

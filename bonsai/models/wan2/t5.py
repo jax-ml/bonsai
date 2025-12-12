@@ -1,40 +1,19 @@
-# Copyright 2025 The JAX Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""JAX/Flax implementation of T5 encoder for Wan2.1-T2V-1.3B.
-
-Modified from transformers.models.t5.modeling_t5
-Converted from PyTorch to JAX/Flax NNX.
-"""
-
+import dataclasses
 import math
 from typing import Optional
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
+from jax.lax import Precision
 from jaxtyping import Array
 
 
 def gelu(x: Array) -> Array:
-    """GELU activation function."""
     return 0.5 * x * (1.0 + jnp.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * jnp.pow(x, 3.0))))
 
 
-class T5LayerNorm(nnx.Module):
-    """T5 Layer Normalization (RMS normalization without centering)."""
-
+class RMSNorm(nnx.Module):
     def __init__(self, dim: int, eps: float = 1e-6, *, rngs: nnx.Rngs):
         self.dim = dim
         self.eps = eps
@@ -58,10 +37,10 @@ class T5Attention(nnx.Module):
         self.head_dim = dim_attn // num_heads
 
         # Linear projections
-        self.q = nnx.Linear(dim, dim_attn, use_bias=False, rngs=rngs)
-        self.k = nnx.Linear(dim, dim_attn, use_bias=False, rngs=rngs)
-        self.v = nnx.Linear(dim, dim_attn, use_bias=False, rngs=rngs)
-        self.o = nnx.Linear(dim_attn, dim, use_bias=False, rngs=rngs)
+        self.q = nnx.Linear(dim, dim_attn, use_bias=False, precision=Precision.HIGHEST, rngs=rngs)
+        self.k = nnx.Linear(dim, dim_attn, use_bias=False, precision=Precision.HIGHEST, rngs=rngs)
+        self.v = nnx.Linear(dim, dim_attn, use_bias=False, precision=Precision.HIGHEST, rngs=rngs)
+        self.o = nnx.Linear(dim_attn, dim, use_bias=False, precision=Precision.HIGHEST, rngs=rngs)
         self.dropout = nnx.Dropout(dropout, rngs=rngs)
 
     def __call__(
@@ -70,7 +49,7 @@ class T5Attention(nnx.Module):
         context: Optional[Array] = None,
         mask: Optional[Array] = None,
         pos_bias: Optional[Array] = None,
-        deterministic: bool = False,
+        deterministic: bool = True,
     ) -> Array:
         """
         Args:
@@ -84,10 +63,9 @@ class T5Attention(nnx.Module):
         n = self.num_heads
         c = self.head_dim
 
-        # Compute Q, K, V
-        q = self.q(x).reshape(b, -1, n, c)  # [B, L1, num_heads, head_dim]
-        k = self.k(context).reshape(b, -1, n, c)  # [B, L2, num_heads, head_dim]
-        v = self.v(context).reshape(b, -1, n, c)  # [B, L2, num_heads, head_dim]
+        q = self.q(x).reshape(b, -1, n, c)
+        k = self.k(context).reshape(b, -1, n, c)
+        v = self.v(context).reshape(b, -1, n, c)
 
         # Attention bias
         attn_bias = jnp.zeros((b, n, q.shape[1], k.shape[1]))
@@ -101,12 +79,10 @@ class T5Attention(nnx.Module):
                 mask = mask[:, None, :, :]  # [B, 1, L1, L2]
             attn_bias = jnp.where(mask == 0, jnp.finfo(x.dtype).min, attn_bias)
 
-        # Compute attention (T5 does not use scaling)
         attn = jnp.einsum("binc,bjnc->bnij", q, k) + attn_bias
         attn = jax.nn.softmax(attn, axis=-1)
         x = jnp.einsum("bnij,bjnc->binc", attn, v)
 
-        # Output projection
         x = x.reshape(b, -1, n * c)
         x = self.o(x)
         x = self.dropout(x, deterministic=deterministic)
@@ -120,14 +96,12 @@ class T5FeedForward(nnx.Module):
         self.dim = dim
         self.dim_ffn = dim_ffn
 
-        # Gate and projection layers
-        self.gate = nnx.Linear(dim, dim_ffn, use_bias=False, rngs=rngs)
-        self.fc1 = nnx.Linear(dim, dim_ffn, use_bias=False, rngs=rngs)
-        self.fc2 = nnx.Linear(dim_ffn, dim, use_bias=False, rngs=rngs)
+        self.gate = nnx.Linear(dim, dim_ffn, use_bias=False, precision=Precision.HIGHEST, rngs=rngs)
+        self.fc1 = nnx.Linear(dim, dim_ffn, use_bias=False, precision=Precision.HIGHEST, rngs=rngs)
+        self.fc2 = nnx.Linear(dim_ffn, dim, use_bias=False, precision=Precision.HIGHEST, rngs=rngs)
         self.dropout = nnx.Dropout(dropout, rngs=rngs)
 
-    def __call__(self, x: Array, deterministic: bool = False) -> Array:
-        # Gated activation
+    def __call__(self, x: Array, deterministic: bool = True) -> Array:
         x = self.fc1(x) * gelu(self.gate(x))
         x = self.dropout(x, deterministic=deterministic)
         x = self.fc2(x)
@@ -136,8 +110,6 @@ class T5FeedForward(nnx.Module):
 
 
 class T5RelativeEmbedding(nnx.Module):
-    """T5 Relative position embeddings."""
-
     def __init__(self, num_buckets: int, num_heads: int, bidirectional: bool, max_dist: int = 128, *, rngs: nnx.Rngs):
         self.num_buckets = num_buckets
         self.num_heads = num_heads
@@ -155,12 +127,10 @@ class T5RelativeEmbedding(nnx.Module):
         Returns:
             [1, num_heads, lq, lk] relative position bias
         """
-        # Compute relative positions
         q_pos = jnp.arange(lq)[:, None]
         k_pos = jnp.arange(lk)[None, :]
-        rel_pos = k_pos - q_pos  # [lq, lk]
+        rel_pos = k_pos - q_pos
 
-        # Convert to buckets
         rel_pos_buckets = self._relative_position_bucket(rel_pos)
 
         # Get embeddings
@@ -212,10 +182,9 @@ class T5SelfAttention(nnx.Module):
     ):
         self.shared_pos = shared_pos
 
-        # Layers
-        self.norm1 = T5LayerNorm(dim, rngs=rngs)
+        self.norm1 = RMSNorm(dim, rngs=rngs)
         self.attn = T5Attention(dim, dim_attn, num_heads, dropout, rngs=rngs)
-        self.norm2 = T5LayerNorm(dim, rngs=rngs)
+        self.norm2 = RMSNorm(dim, rngs=rngs)
         self.ffn = T5FeedForward(dim, dim_ffn, dropout, rngs=rngs)
 
         if not shared_pos:
@@ -224,7 +193,7 @@ class T5SelfAttention(nnx.Module):
             self.pos_embedding = None
 
     def __call__(
-        self, x: Array, mask: Optional[Array] = None, pos_bias: Optional[Array] = None, deterministic: bool = False
+        self, x: Array, mask: Optional[Array] = None, pos_bias: Optional[Array] = None, deterministic: bool = True
     ) -> Array:
         # Get position bias
         if self.shared_pos:
@@ -232,16 +201,12 @@ class T5SelfAttention(nnx.Module):
         else:
             e = self.pos_embedding(x.shape[1], x.shape[1])
 
-        # Self-attention
         x = x + self.attn(self.norm1(x), mask=mask, pos_bias=e, deterministic=deterministic)
-        # Feed-forward
         x = x + self.ffn(self.norm2(x), deterministic=deterministic)
         return x
 
 
 class T5Encoder(nnx.Module):
-    """T5 Encoder."""
-
     def __init__(
         self,
         vocab_size: int,
@@ -259,7 +224,6 @@ class T5Encoder(nnx.Module):
         self.dim = dim
         self.shared_pos = shared_pos
 
-        # Layers
         self.token_embedding = nnx.Embed(vocab_size, dim, rngs=rngs)
         if shared_pos:
             self.pos_embedding = T5RelativeEmbedding(num_buckets, num_heads, bidirectional=True, rngs=rngs)
@@ -272,19 +236,9 @@ class T5Encoder(nnx.Module):
                 for _ in range(num_layers)
             ]
         )
-        self.norm = T5LayerNorm(dim, rngs=rngs)
+        self.norm = RMSNorm(dim, rngs=rngs)
 
     def __call__(self, ids: Array, mask: Optional[Array] = None, deterministic: bool = True) -> Array:
-        """Encode input tokens.
-
-        Args:
-            ids: [B, L] input token IDs
-            mask: [B, L] attention mask (1 for valid tokens)
-            deterministic: whether to disable dropout
-
-        Returns:
-            [B, L, dim] encoded representations
-        """
         x = self.token_embedding(ids)
         x = self.dropout(x, deterministic=deterministic)
 
@@ -300,16 +254,24 @@ class T5Encoder(nnx.Module):
         return x
 
 
-class T5EncoderModel(nnx.Module):
-    """T5 Encoder-only model for text encoding.
+@dataclasses.dataclass(frozen=True)
+class T5Config:
+    """Configuration for T5 Encoder."""
 
-    This is a wrapper for the T5 encoder configured for UMT5-XXL.
-    """
+    vocab_size: int = 256384
+    dim: int = 4096
+    dim_attn: int = 4096
+    dim_ffn: int = 10240
+    num_heads: int = 64
+    num_layers: int = 24
+    num_buckets: int = 32
+    shared_pos: bool = False  # UMT5 uses per-layer position embeddings
+    dropout: float = 0.1
 
-    def __init__(self, *, rngs: nnx.Rngs):
-        """Initialize UMT5-XXL encoder."""
-        # UMT5-XXL configuration
-        self.encoder = T5Encoder(
+    @classmethod
+    def umt5_xxl(cls) -> "T5Config":
+        """UMT5-XXL configuration (~5B parameters)."""
+        return cls(
             vocab_size=256384,
             dim=4096,
             dim_attn=4096,
@@ -317,10 +279,89 @@ class T5EncoderModel(nnx.Module):
             num_heads=64,
             num_layers=24,
             num_buckets=32,
-            shared_pos=False,  # UMT5 uses per-layer position embeddings
+            shared_pos=False,
             dropout=0.1,
+        )
+
+    @classmethod
+    def umt5_base(cls) -> "T5Config":
+        """UMT5-Base configuration (~580M parameters)."""
+        return cls(
+            vocab_size=256384,
+            dim=768,
+            dim_attn=768,
+            dim_ffn=2048,
+            num_heads=12,
+            num_layers=12,
+            num_buckets=32,
+            shared_pos=False,
+            dropout=0.1,
+        )
+
+
+class T5EncoderModel(nnx.Module):
+    """T5 Encoder-only model for text encoding.
+
+    Supports multiple T5 configurations (UMT5-XXL, UMT5-Base).
+    """
+
+    def __init__(self, config: T5Config, *, rngs: nnx.Rngs):
+        """Initialize T5 encoder from config.
+
+        Args:
+            config: T5Config specifying model architecture
+            rngs: Random number generators for initialization
+        """
+        self.config = config
+        self.encoder = T5Encoder(
+            vocab_size=config.vocab_size,
+            dim=config.dim,
+            dim_attn=config.dim_attn,
+            dim_ffn=config.dim_ffn,
+            num_heads=config.num_heads,
+            num_layers=config.num_layers,
+            num_buckets=config.num_buckets,
+            shared_pos=config.shared_pos,
+            dropout=config.dropout,
             rngs=rngs,
         )
+
+    @classmethod
+    def from_config(cls, config: T5Config, *, rngs: nnx.Rngs) -> "T5EncoderModel":
+        """Create T5 encoder from configuration.
+
+        Args:
+            config: T5Config instance
+            rngs: Random number generators
+
+        Returns:
+            T5EncoderModel instance
+        """
+        return cls(config, rngs=rngs)
+
+    @classmethod
+    def umt5_xxl(cls, *, rngs: nnx.Rngs) -> "T5EncoderModel":
+        """Create UMT5-XXL encoder (~5B parameters).
+
+        Args:
+            rngs: Random number generators
+
+        Returns:
+            T5EncoderModel configured as UMT5-XXL
+        """
+        return cls(T5Config.umt5_xxl(), rngs=rngs)
+
+    @classmethod
+    def umt5_base(cls, *, rngs: nnx.Rngs) -> "T5EncoderModel":
+        """Create UMT5-Base encoder (~580M parameters).
+
+        Args:
+            rngs: Random number generators
+
+        Returns:
+            T5EncoderModel configured as UMT5-Base
+        """
+        return cls(T5Config.umt5_base(), rngs=rngs)
 
     def __call__(self, input_ids: Array, attention_mask: Optional[Array] = None, deterministic: bool = True) -> Array:
         """Encode text.
@@ -331,9 +372,9 @@ class T5EncoderModel(nnx.Module):
             deterministic: whether to disable dropout (True for inference)
 
         Returns:
-            [B, L, 4096] encoded text embeddings
+            [B, L, dim] encoded text embeddings (dim depends on config)
         """
         return self.encoder(input_ids, mask=attention_mask, deterministic=deterministic)
 
 
-__all__ = ["T5Encoder", "T5EncoderModel"]
+__all__ = ["T5Config", "T5Encoder", "T5EncoderModel"]
