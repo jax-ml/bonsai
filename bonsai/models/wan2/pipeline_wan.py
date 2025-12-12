@@ -1,5 +1,6 @@
 """Example script for running Wan2.1-T2V-1.3B text-to-video generation."""
 
+import argparse
 import time
 import traceback
 from typing import Optional, Tuple
@@ -124,7 +125,7 @@ def generate_video(
     return latents
 
 
-def run_model():
+def run_model(prompt: Optional[str] = None, neg_prompt: Optional[str] = None) -> jax.Array:
     print("=" * 60)
     print("Wan2.1-T2V-1.3B Text-to-Video Generation Demo")
     print("=" * 60)
@@ -154,9 +155,12 @@ def run_model():
     )
     scheduler_state = scheduler.create_state()
 
-    prompts = [
-        "A curious racoon",
-    ]
+    if prompt is not None:
+        prompts = [prompt]
+    else:
+        prompts = [
+            "A curious racoon",
+        ]
 
     print(f"\nPrompt: {prompts[0]}")
     print(f"Model: Wan2.1-T2V-1.3B ({config.num_layers} layers, {config.hidden_dim} dim)")
@@ -167,7 +171,10 @@ def run_model():
 
     print("\n[1/4] Encoding text with UMT5...")
     text_embeds = get_t5_text_embeddings(prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len)
-    negative_prompts = [""]  # Empty negative prompt
+    if neg_prompt is not None:
+        negative_prompts = [neg_prompt]
+    else:
+        negative_prompts = ["blurry"]
     negative_embeds = get_t5_text_embeddings(
         negative_prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len
     )
@@ -224,7 +231,15 @@ def run_model():
     return video
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Wan2.1-T2V-1.3B Text-to-Video Generation Demo")
+    parser.add_argument("--prompt", type=str, default=None, help="Text prompt for video generation")
+    parser.add_argument("--neg_prompt", type=str, default=None, help="Negative text prompt for video generation")
+    args = parser.parse_args()
+    run_model(args.prompt, args.neg_prompt)
+
+
 if __name__ == "__main__":
-    run_model()
+    main()
 
 __all__ = ["run_model"]
