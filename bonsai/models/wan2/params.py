@@ -24,9 +24,9 @@ import safetensors
 from etils import epath
 from flax import nnx
 
-from bonsai.models.wan2 import modeling as model_lib
-from bonsai.models.wan2 import t5 as t5_lib
-from bonsai.models.wan2 import vae as vae_lib
+from bonsai.models.wan2 import transformer_wan as model_lib
+from bonsai.models.wan2 import umt5 as t5_lib
+from bonsai.models.wan2 import vae_wan as vae_lib
 
 
 def cast_with_exclusion(path, x, dtype_to_cast):
@@ -82,7 +82,7 @@ def _get_dit_mapping(cfg: model_lib.ModelConfig):
         ),
         r"condition_embedder\.time_proj\.weight": ("time_embed.time_projection.layers.1.kernel", Transform.TRANSPOSE),
         r"condition_embedder\.time_proj\.bias": ("time_embed.time_projection.layers.1.bias", Transform.NONE),
-        # Text embedder (projects T5 embeddings to hidden dim)
+        # Text embedder (projects UMT5 embeddings to hidden dim)
         r"condition_embedder\.text_embedder\.linear_1\.weight": ("text_proj.layers.0.kernel", Transform.TRANSPOSE),
         r"condition_embedder\.text_embedder\.linear_1\.bias": ("text_proj.layers.0.bias", Transform.NONE),
         r"condition_embedder\.text_embedder\.linear_2\.weight": ("text_proj.layers.2.kernel", Transform.TRANSPOSE),
@@ -526,15 +526,15 @@ def create_vae_decoder_from_safe_tensors(
 
 
 def _get_t5_key_mapping():
-    """Define mapping from HuggingFace T5 keys to JAX T5 keys."""
+    """Define mapping from HuggingFace UMT5 keys to JAX UMT5 keys."""
 
     class Transform(Enum):
-        """Transformations for T5 parameters"""
+        """Transformations for UMT5 parameters"""
 
         NONE = None
         TRANSPOSE = ((1, 0), None)  # For linear layers: (out, in) -> (in, out)
 
-    # T5/UMT5 uses standard HuggingFace naming
+    # UMT5/UMT5 uses standard HuggingFace naming
     mapping = {
         # Shared token embeddings
         r"shared\.weight": ("encoder.token_embedding.embedding", Transform.NONE),
@@ -589,7 +589,7 @@ def create_t5_encoder_from_safe_tensors(
     config: t5_lib.T5Config | None = None,
 ) -> t5_lib.T5EncoderModel:
     """
-    Load T5 encoder from safetensors checkpoint.
+    Load UMT5 encoder from safetensors checkpoint.
 
     Args:
         file_dir: Directory containing .safetensors files or path to text_encoder directory
@@ -600,13 +600,13 @@ def create_t5_encoder_from_safe_tensors(
     Returns:
         T5EncoderModel with loaded weights
     """
-    from bonsai.models.wan2 import t5
+    from bonsai.models.wan2 import umt5
 
     # Use provided config or default to UMT5-XXL
     if config is None:
-        config = t5.T5Config.umt5_xxl()
+        config = umt5.T5Config.umt5_xxl()
 
-    t5_encoder = nnx.eval_shape(lambda: t5.T5EncoderModel(config, rngs=nnx.Rngs(params=0, dropout=0)))
+    t5_encoder = nnx.eval_shape(lambda: umt5.T5EncoderModel(config, rngs=nnx.Rngs(params=0, dropout=0)))
     graph_def, abs_state = nnx.split(t5_encoder)
     state_dict = abs_state.to_pure_dict()
 
@@ -635,10 +635,10 @@ def create_t5_encoder_from_safe_tensors(
             files = sorted(list(file_path.glob("*.safetensors")))
         if not files:
             raise ValueError(f"No safetensors found in {file_dir} or {file_dir}/text_encoder")
-        print(f"Found {len(files)} T5 encoder safetensors file(s)")
+        print(f"Found {len(files)} UMT5 encoder safetensors file(s)")
 
         for f in files:
-            print(f"Loading T5 weights from {f.name}...")
+            print(f"Loading UMT5 weights from {f.name}...")
             with safetensors.safe_open(f, framework="numpy") as sf:
                 for torch_key in sf.keys():
                     tensor = sf.get_tensor(torch_key)
@@ -662,7 +662,7 @@ def create_t5_encoder_from_safe_tensors(
                         )
             gc.collect()
     else:
-        print(f"Loading T5 weights from PyTorch checkpoint in {file_dir}...")
+        print(f"Loading UMT5 weights from PyTorch checkpoint in {file_dir}...")
         pt_state = load_pytorch_weights(file_dir)
         for torch_key, tensor in pt_state.items():
             jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
@@ -682,7 +682,7 @@ def create_t5_encoder_from_safe_tensors(
                 conversion_errors.append(f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}")
         gc.collect()
 
-    print(f"Loaded {len(loaded_keys)} T5 weight tensors")
+    print(f"Loaded {len(loaded_keys)} UMT5 weight tensors")
     print(f"Skipped {len(skipped_keys)} weight tensors")
 
     if conversion_errors:
@@ -693,7 +693,7 @@ def create_t5_encoder_from_safe_tensors(
         #     print(f"  ... and {len(conversion_errors) - 10} more")
 
     if len(loaded_keys) == 0:
-        raise ValueError("No T5 weights were loaded! Check the checkpoint structure and key mapping.")
+        raise ValueError("No UMT5 weights were loaded! Check the checkpoint structure and key mapping.")
 
     gc.collect()
     return nnx.merge(graph_def, state_dict)

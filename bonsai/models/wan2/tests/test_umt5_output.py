@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from huggingface_hub import snapshot_download
-from bonsai.models.wan2 import params, t5
+from bonsai.models.wan2 import params, umt5
 import torch
 from transformers import AutoTokenizer, UMT5EncoderModel, UMT5ForConditionalGeneration
 import os
@@ -93,9 +93,9 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
     return close
 
 def test_t5_encoder():
-    """Test T5 encoder output against Wan T5 reference implementation."""
+    """Test UMT5 encoder output against Wan UMT5 reference implementation."""
     print("\n" + "=" * 80)
-    print("TEST 1: T5 Encoder (UMT5-XXL)")
+    print("TEST 1: UMT5 Encoder (UMT5-XXL)")
     print("=" * 80)
     # Download checkpoint
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
@@ -112,7 +112,7 @@ def test_t5_encoder():
     inputs_j = tokenizer(prompt, return_tensors="np")
     inputs_p = tokenizer(prompt, return_tensors="pt")
 
-    print("\n[1/2] Loading T5 encoder...")
+    print("\n[1/2] Loading UMT5 encoder...")
     jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
     hf_t5 = UMT5EncoderModel.from_pretrained(model_ckpt_path, subfolder="text_encoder", torch_dtype=torch.bfloat16)
 
@@ -126,13 +126,13 @@ def test_t5_encoder():
     torch_embeddings = pytorch_output.last_hidden_state
 
     # Compare only the valid portion (ignore padding)
-    return compare_outputs(jax_output, torch_embeddings, "T5 Encoder Output", rtol=1e-3, atol=1e-4)
+    return compare_outputs(jax_output, torch_embeddings, "UMT5 Encoder Output", rtol=1e-3, atol=1e-4)
 
 
 def test_t5_intermediate():
-    """Compare intermediate layer outputs between JAX and PyTorch T5 encoder."""
+    """Compare intermediate layer outputs between JAX and PyTorch UMT5 encoder."""
     print("\n" + "=" * 80)
-    print("TEST 2: T5 Encoder Intermediate Outputs")
+    print("TEST 2: UMT5 Encoder Intermediate Outputs")
     print("=" * 80)
 
     # Download checkpoint
@@ -298,9 +298,9 @@ def test_t5_intermediate():
     print("="*80)
 
 def test_t5_e2e():
-    """Test JAX T5 encoder with PyTorch decoder on end-to-end generation task."""
+    """Test JAX UMT5 encoder with PyTorch decoder on end-to-end generation task."""
     print("\n" + "=" * 80)
-    print("TEST 2: T5 E2E (JAX Encoder + PyTorch Decoder)")
+    print("TEST 2: UMT5 E2E (JAX Encoder + PyTorch Decoder)")
     print("=" * 80)
     # Test prompts
     test_prompts = [
@@ -312,7 +312,7 @@ def test_t5_e2e():
     model_ckpt_path = snapshot_download("google/umt5-xxl")
 
     # Load JAX encoder
-    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None, is_sf=False,config=t5.T5Config.umt5_xxl())
+    jax_t5 = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None, is_sf=False,config=umt5.T5Config.umt5_xxl())
 
     # Load full PyTorch model (encoder + decoder)
     pytorch_full_model = UMT5ForConditionalGeneration.from_pretrained(

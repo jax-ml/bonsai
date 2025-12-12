@@ -27,7 +27,7 @@ class RMSNorm(nnx.Module):
 
 
 class T5Attention(nnx.Module):
-    """T5 Multi-head attention."""
+    """UMT5 Multi-head attention."""
 
     def __init__(self, dim: int, dim_attn: int, num_heads: int, dropout: float = 0.1, *, rngs: nnx.Rngs):
         assert dim_attn % num_heads == 0
@@ -90,7 +90,7 @@ class T5Attention(nnx.Module):
 
 
 class T5FeedForward(nnx.Module):
-    """T5 Feed-forward network with gated activation."""
+    """UMT5 Feed-forward network with gated activation."""
 
     def __init__(self, dim: int, dim_ffn: int, dropout: float = 0.1, *, rngs: nnx.Rngs):
         self.dim = dim
@@ -166,7 +166,7 @@ class T5RelativeEmbedding(nnx.Module):
 
 
 class T5SelfAttention(nnx.Module):
-    """T5 Self-attention block with feed-forward."""
+    """UMT5 Self-attention block with feed-forward."""
 
     def __init__(
         self,
@@ -256,7 +256,7 @@ class T5Encoder(nnx.Module):
 
 @dataclasses.dataclass(frozen=True)
 class T5Config:
-    """Configuration for T5 Encoder."""
+    """Configuration for UMT5 Encoder."""
 
     vocab_size: int = 256384
     dim: int = 4096
@@ -300,13 +300,13 @@ class T5Config:
 
 
 class T5EncoderModel(nnx.Module):
-    """T5 Encoder-only model for text encoding.
+    """UMT5 Encoder-only model for text encoding.
 
-    Supports multiple T5 configurations (UMT5-XXL, UMT5-Base).
+    Supports multiple UMT5 configurations (UMT5-XXL, UMT5-Base).
     """
 
     def __init__(self, config: T5Config, *, rngs: nnx.Rngs):
-        """Initialize T5 encoder from config.
+        """Initialize UMT5 encoder from config.
 
         Args:
             config: T5Config specifying model architecture
@@ -328,7 +328,7 @@ class T5EncoderModel(nnx.Module):
 
     @classmethod
     def from_config(cls, config: T5Config, *, rngs: nnx.Rngs) -> "T5EncoderModel":
-        """Create T5 encoder from configuration.
+        """Create UMT5 encoder from configuration.
 
         Args:
             config: T5Config instance

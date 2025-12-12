@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from huggingface_hub import snapshot_download
-from bonsai.models.wan2 import params, modeling
+from bonsai.models.wan2 import params, transformer_wan
 import torch
 from diffusers import AutoModel
 from jax.lax import Precision
@@ -103,7 +103,7 @@ def test_dit_output():
     print("=" * 80)
 
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    config = modeling.ModelConfig
+    config = transformer_wan.ModelConfig
 
     print("\n[1/2] Loading transformer")
     transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.bfloat16)
@@ -160,7 +160,7 @@ def test_dit():
     print("=" * 80)
 
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    config = modeling.ModelConfig
+    config = transformer_wan.ModelConfig
 
     print("\n[1/2] Loading transformer")
     transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.bfloat16)
@@ -258,7 +258,7 @@ def test_dit():
     max_seq = max(grid_sizes)
     rope_freqs = tuple(
         jax.lax.stop_gradient(arr)
-        for arr in modeling.precompute_freqs_cis_3d(
+        for arr in transformer_wan.precompute_freqs_cis_3d(
             dim=jax_dit.cfg.head_dim,
             theta=jax_dit.rope_theta,
             max_seq_len=max_seq

@@ -22,7 +22,7 @@ Architecture:
 - 12 attention heads (128 dim each)
 - Vision self-attention + text cross-attention
 - AdaLN modulation conditioned on timestep
-- T5 text encoder for multilingual prompts
+- UMT5 text encoder for multilingual prompts
 - Wan-VAE for video encoding/decoding
 """
 
@@ -36,29 +36,18 @@ from flax import nnx
 from jax.lax import Precision
 from jaxtyping import Array
 
-from .scheduler import FlaxUniPCMultistepScheduler, UniPCMultistepSchedulerState
-
-
-class WanLayerNorm(nnx.LayerNorm):
-    """LayerNorm with float32 conversion for numerical stability."""
-
-    def __init__(self, dim: int, eps: float = 1e-6, use_scale: bool = False, use_bias: bool = False, *, rngs: nnx.Rngs):
-        super().__init__(dim, epsilon=eps, use_scale=use_scale, use_bias=use_bias, rngs=rngs)
-
-    def __call__(self, x: Array) -> Array:
-        dtype = x.dtype
-        return super().__call__(x.astype(jnp.float32)).astype(dtype)
+from .unipc_multistep_scheduler import FlaxUniPCMultistepScheduler, UniPCMultistepSchedulerState
 
 
 @dataclasses.dataclass(frozen=True)
-class ModelConfig:
+class TransformerWanModelConfig:
     """Configuration for Wan2.1-T2V-1.3B Diffusion Transformer."""
 
     weights_dtype: jnp.dtype = jnp.bfloat16
     num_layers: int = 30
     hidden_dim: int = 1536
-    input_dim: int = 16
-    output_dim: int = 16
+    latent_input_dim: int = 16
+    latent_output_dim: int = 16
     ffn_dim: int = 8960
     freq_dim: int = 256
     num_heads: int = 12
@@ -76,21 +65,14 @@ class ModelConfig:
     added_kv_proj_dim: Optional[int] = None  # None for T2V, set for I2V
     rope_max_seq_len: int = 1024
 
-
-def sinusoidal_embedding_1d(timesteps: Array, embedding_dim: int, max_period: int = 10000) -> Array:
-    half_dim = embedding_dim // 2
-    freqs = jnp.exp(-math.log(max_period) * jnp.arange(0, half_dim) / half_dim)
-    args = timesteps[:, None] * freqs[None, :]
-    embedding = jnp.concatenate([jnp.cos(args), jnp.sin(args)], axis=-1)
-    if embedding_dim % 2:
-        embedding = jnp.concatenate([embedding, jnp.zeros_like(embedding[:, :1])], axis=-1)
-    return embedding
+    def __post_init__(self):
+        assert self.hidden_dim == self.num_heads * self.head_dim, "hidden_dim must equal num_heads * head_dim"
 
 
 class TimestepEmbedding(nnx.Module):
     """Timestep embedding: sinusoidal -> MLP -> projection for AdaLN."""
 
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: TransformerWanModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
         self.time_embedding = nnx.Sequential(
             nnx.Linear(cfg.freq_dim, cfg.hidden_dim, rngs=rngs),
@@ -109,11 +91,14 @@ class TimestepEmbedding(nnx.Module):
         return time_emb, time_proj
 
 
-def rope_params(max_seq_len: int, dim: int, theta: float = 10000.0) -> Array:
-    freqs = 1.0 / jnp.power(theta, jnp.arange(0, dim, 2, dtype=jnp.float32) / dim)
-    positions = jnp.arange(max_seq_len, dtype=jnp.float32)
-    freqs = jnp.outer(positions, freqs)
-    return jnp.stack([jnp.cos(freqs), jnp.sin(freqs)], axis=-1)
+def sinusoidal_embedding_1d(timesteps: Array, embedding_dim: int, max_period: int = 10000) -> Array:
+    half_dim = embedding_dim // 2
+    freqs = jnp.exp(-math.log(max_period) * jnp.arange(0, half_dim) / half_dim)
+    args = timesteps[:, None] * freqs[None, :]
+    embedding = jnp.concatenate([jnp.cos(args), jnp.sin(args)], axis=-1)
+    if embedding_dim % 2:
+        embedding = jnp.concatenate([embedding, jnp.zeros_like(embedding[:, :1])], axis=-1)
+    return embedding
 
 
 def precompute_freqs_cis_3d(dim: int, theta: float = 10000.0, max_seq_len: int = 1024) -> tuple[Array, Array, Array]:
@@ -126,6 +111,13 @@ def precompute_freqs_cis_3d(dim: int, theta: float = 10000.0, max_seq_len: int =
         rope_params(max_seq_len, dim_h, theta),
         rope_params(max_seq_len, dim_w, theta),
     )
+
+
+def rope_params(max_seq_len: int, dim: int, theta: float = 10000.0) -> Array:
+    freqs = 1.0 / jnp.power(theta, jnp.arange(0, dim, 2, dtype=jnp.float32) / dim)
+    positions = jnp.arange(max_seq_len, dtype=jnp.float32)
+    freqs = jnp.outer(positions, freqs)
+    return jnp.stack([jnp.cos(freqs), jnp.sin(freqs)], axis=-1)
 
 
 def rope_apply(x: Array, grid_sizes: tuple[int, int, int], freqs: tuple[Array, Array, Array]) -> Array:
@@ -158,10 +150,19 @@ def rope_apply(x: Array, grid_sizes: tuple[int, int, int], freqs: tuple[Array, A
     return x_out.reshape(b, seq_len, num_heads, head_dim)
 
 
-class MultiHeadAttention(nnx.Module):
-    """Multi-head self-attention with RoPE position embeddings."""
+class WanLayerNorm(nnx.LayerNorm):
+    """LayerNorm with float32 conversion for numerical stability."""
 
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
+    def __init__(self, dim: int, eps: float = 1e-6, use_scale: bool = False, use_bias: bool = False, *, rngs: nnx.Rngs):
+        super().__init__(dim, epsilon=eps, use_scale=use_scale, use_bias=use_bias, rngs=rngs)
+
+    def __call__(self, x: Array) -> Array:
+        dtype = x.dtype
+        return super().__call__(x.astype(jnp.float32)).astype(dtype)
+
+
+class MultiHeadAttention(nnx.Module):
+    def __init__(self, cfg: TransformerWanModelConfig, *, rngs: nnx.Rngs):
         self.num_heads, self.head_dim = cfg.num_heads, cfg.head_dim
         self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
         self.k_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
@@ -172,7 +173,6 @@ class MultiHeadAttention(nnx.Module):
 
     def __call__(self, x: Array, rope_state: tuple | None = None, deterministic: bool = True) -> Array:
         b, n = x.shape[:2]
-        # Apply normalization BEFORE reshaping to heads
         q = self.q_norm(self.q_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
         k = self.k_norm(self.k_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
         v = self.v_proj(x).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
@@ -193,9 +193,7 @@ class MultiHeadAttention(nnx.Module):
 
 
 class CrossAttention(nnx.Module):
-    """Cross-attention from video tokens to text embeddings."""
-
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: TransformerWanModelConfig, *, rngs: nnx.Rngs):
         self.num_heads, self.head_dim = cfg.num_heads, cfg.head_dim
         self.q_proj = nnx.Linear(cfg.hidden_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
         self.kv_proj = nnx.Linear(cfg.hidden_dim, 2 * cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST)
@@ -205,7 +203,6 @@ class CrossAttention(nnx.Module):
 
     def __call__(self, x: Array, context: Array, deterministic: bool = True) -> Array:
         b, n, m = x.shape[0], x.shape[1], context.shape[1]
-        # Apply normalization BEFORE reshaping to heads
         q = self.q_norm(self.q_proj(x)).reshape(b, n, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
         kv = self.kv_proj(context)
         k, v = jnp.split(kv, 2, axis=-1)
@@ -235,53 +232,51 @@ class WanAttentionBlock(nnx.Module):
     - Feed-forward network with AdaLN modulation
     """
 
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: TransformerWanModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
 
-        #  Layer norms
         self.norm1 = WanLayerNorm(cfg.hidden_dim, rngs=rngs)
         self.norm2 = WanLayerNorm(cfg.hidden_dim, rngs=rngs, use_scale=True, use_bias=True)
         self.norm3 = WanLayerNorm(cfg.hidden_dim, rngs=rngs)
 
-        # Attention layers
         self.self_attn = MultiHeadAttention(cfg, rngs=rngs)
         self.cross_attn = CrossAttention(cfg, rngs=rngs)
 
-        # Feed-forward MLP: Linear -> GELU -> Linear
         self.mlp = nnx.Sequential(
             nnx.Linear(cfg.hidden_dim, cfg.ffn_dim, rngs=rngs, precision=Precision.HIGHEST),
             nnx.gelu,
             nnx.Linear(cfg.ffn_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST),
         )
 
-        # Learnable AdaLN scale/shift table loaded from checkpoints
         self.scale_shift_table = nnx.Param(
             jax.random.normal(rngs.params(), (1, 6, cfg.hidden_dim)) / (cfg.hidden_dim**0.5)
         )
 
     @jax.named_scope("wan_attention_block")
     def __call__(
-        self, x: Array, text_embeds: Array, time_emb: Array, rope_state: tuple | None = None, deterministic: bool = True
+        self,
+        x: Array,
+        text_embeds: Array,
+        time_proj: Array,
+        rope_state: tuple | None = None,
+        deterministic: bool = True,
     ) -> Array:
         """
         Args:
             x: [B, N, D] video tokens
             text_embeds: [B, M, text_dim] text embeddings
-            time_emb: [B, 6*D] time embedding
+            time_proj: [B, 6*D] time embedding
             rope_state: Optional tuple of (freqs, grid_sizes) for 3D RoPE
             deterministic: Whether to apply dropout
         Returns:
             [B, N, D] transformed tokens
         """
-        # Get modulation parameters from time embedding
-        b = time_emb.shape[0]
+        # Get modulation from time embedding
+        b = time_proj.shape[0]
         d = self.cfg.hidden_dim
-
-        # Reshape time embedding and add learnable modulation
-        reshaped_time_emb = time_emb.reshape(b, 6, d)
-        modulation = reshaped_time_emb + self.scale_shift_table.value
+        reshaped_time_proj = time_proj.reshape(b, 6, d)
+        modulation = reshaped_time_proj + self.scale_shift_table.value
         modulation = modulation.reshape(b, -1)  # [B, 6*D]
-
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
 
         # Self-attention with AdaLN modulation and RoPE
@@ -291,7 +286,7 @@ class WanAttentionBlock(nnx.Module):
         attn_out = self.self_attn(norm_x, rope_state=rope_state, deterministic=deterministic)
         x = x + gate_msa[:, None, :] * attn_out
 
-        # Cross-attention (no modulation, following DiT design)
+        # Cross-attention
         norm_x = self.norm2(x)
         cross_out = self.cross_attn(norm_x, text_embeds, deterministic=deterministic)
         x = x + cross_out
@@ -308,13 +303,12 @@ class WanAttentionBlock(nnx.Module):
 class FinalLayer(nnx.Module):
     """Final layer that predicts noise from DiT output."""
 
-    def __init__(self, cfg: ModelConfig, patch_size, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: TransformerWanModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
         self.norm = WanLayerNorm(cfg.hidden_dim, rngs=rngs)
-        out_dim = math.prod(patch_size) * cfg.output_dim  # expand out_dim here for unpatchify
+        out_dim = math.prod(cfg.patch_size) * cfg.latent_output_dim  # expand out_dim here for unpatchify
         self.linear = nnx.Linear(cfg.hidden_dim, out_dim, rngs=rngs, precision=Precision.HIGHEST)
 
-        # Learnable modulation parameter (matches HF: torch.randn / dim**0.5)
         self.scale_shift_table = nnx.Param(
             jax.random.normal(rngs.params(), (1, 2, cfg.hidden_dim)) / (cfg.hidden_dim**0.5)
         )
@@ -326,7 +320,7 @@ class FinalLayer(nnx.Module):
             x: [B, N, D] DiT output
             time_emb: [B, D] time embedding from TimestepEmbedding
         Returns:
-            [B, N, output_dim] predicted noise
+            [B, N, latent_output_dim] predicted noise
         """
         # [B, D] → [B, 1, D] + [1, 2, D] → [B, 2, D]
         e = self.scale_shift_table.value + time_emb[:, None, :]
@@ -342,13 +336,13 @@ class Wan2DiT(nnx.Module):
     Wan2.1-T2V-1.3B Diffusion Transformer.
     """
 
-    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: TransformerWanModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
 
         # 3D Conv to patchify video latents
         # (T, H, W) → (T, H/2, W/2)
         self.patch_embed = nnx.Conv(
-            in_features=cfg.input_dim,
+            in_features=cfg.latent_input_dim,
             out_features=cfg.hidden_dim,
             kernel_size=(1, 2, 2),
             strides=(1, 2, 2),
@@ -358,8 +352,7 @@ class Wan2DiT(nnx.Module):
             precision=Precision.HIGHEST,
         )
 
-        # Text embedding projection: T5 (4096) → DiT (1536)
-        # Linear(4096 → 1536) → GELU → Linear(1536 → 1536)
+        # Text embedding projection: UMT5 (4096) → DiT (1536)
         self.text_proj = nnx.Sequential(
             nnx.Linear(cfg.text_embed_dim, cfg.hidden_dim, rngs=rngs, precision=Precision.HIGHEST),
             nnx.gelu,
@@ -368,12 +361,9 @@ class Wan2DiT(nnx.Module):
 
         self.time_embed = TimestepEmbedding(cfg, rngs=rngs)
 
-        self.rope_theta = 10000.0
-
         self.blocks = nnx.List([WanAttentionBlock(cfg, rngs=rngs) for _ in range(cfg.num_layers)])
-        print("final layer")
 
-        self.final_layer = FinalLayer(cfg, patch_size=(1, 2, 2), rngs=rngs)
+        self.final_layer = FinalLayer(cfg, rngs=rngs)
 
     @jax.named_scope("wan2_dit")
     @jax.jit
@@ -383,39 +373,36 @@ class Wan2DiT(nnx.Module):
 
         Args:
             latents: [B, T, H, W, C] noisy video latents from VAE
-            text_embeds: [B, seq_len, 4096] from T5-XXL encoder (before projection)
+            text_embeds: [B, seq_len, 4096] from UMT5-XXL encoder (before projection)
             timestep: [B] diffusion timestep (0 to num_steps)
             deterministic: Whether to apply dropout
 
         Returns:
             predicted_noise: [B, T, H, W, C] predicted noise
         """
-        b = latents.shape[0]
-
         text_embeds = self.text_proj(text_embeds)
-        x = self.patch_embed(latents)
-        b, t_out, h_out, w_out, d = x.shape
-        x = x.reshape(b, t_out * h_out * w_out, d)
-        grid_sizes = (t_out, h_out, w_out)
-
-        # RoPE frequencies for 3D position encoding (compute lazily to keep concrete arrays under jit)
-        max_seq = max(grid_sizes)
-        rope_freqs = tuple(
-            jax.lax.stop_gradient(arr)
-            for arr in precompute_freqs_cis_3d(dim=self.cfg.head_dim, theta=self.rope_theta, max_seq_len=max_seq)
-        )
 
         # Get time embeddings
         # time_emb: [B, D] for FinalLayer
         # time_proj: [B, 6*D] for AdaLN in blocks
         time_emb, time_proj = self.time_embed(timestep)
 
-        # Process through transformer blocks with RoPE
+        x = self.patch_embed(latents)
+        b, t_out, h_out, w_out, d = x.shape
+        x = x.reshape(b, t_out * h_out * w_out, d)
+
+        grid_sizes = (t_out, h_out, w_out)
+
+        max_seq = max(grid_sizes)
+        rope_freqs = tuple(
+            jax.lax.stop_gradient(arr) for arr in precompute_freqs_cis_3d(dim=self.cfg.head_dim, max_seq_len=max_seq)
+        )
+
         for block in self.blocks:
             x = block(x, text_embeds, time_proj, rope_state=(rope_freqs, grid_sizes), deterministic=deterministic)
 
         # Final projection to noise space
-        x = self.final_layer(x, time_emb)  # [B, T*H*W, output_dim]
+        x = self.final_layer(x, time_emb)  # [B, T*H*W, latent_output_dim]
 
         # Reshape back to video format
         predicted_noise = self.unpatchify(x, grid_sizes)
@@ -435,17 +422,16 @@ class Wan2DiT(nnx.Module):
         """
         b, seq_len, feature_dim = x.shape
         t_patches, h_patches, w_patches = grid_sizes
-        patch_size = (1, 2, 2)  # Patch size from the 3D Conv kernel
-        c = self.cfg.output_dim
+        c = self.cfg.latent_output_dim
+        patch_size = self.cfg.patch_size
 
-        print(f"unpatchify input: x.shape={x.shape}, grid_sizes={grid_sizes}")
-        print(
-            f"expected: seq_len={seq_len} should be {t_patches * h_patches * w_patches}, feature_dim={feature_dim} should be {patch_size[0] * patch_size[1] * patch_size[2] * c}"
+        assert seq_len == t_patches * h_patches * w_patches, (
+            f"expected: seq_len={seq_len} should be {t_patches * h_patches * w_patches}"
+        )
+        assert feature_dim == patch_size[0] * patch_size[1] * patch_size[2] * c, (
+            f"expected: feature_dim={feature_dim} should be {patch_size[0] * patch_size[1] * patch_size[2] * c}"
         )
 
-        # First, separate the sequence and feature dimensions
-        # x: [B, T*H*W, patch_t*patch_h*patch_w*C]
-        # Reshape to: [B, T, H, W, patch_t, patch_h, patch_w, C]
         x = x.reshape(
             b,
             t_patches,
@@ -456,14 +442,7 @@ class Wan2DiT(nnx.Module):
             patch_size[2],
             c,
         )
-        print(f"after first reshape: {x.shape}")
-
-        # Merge patches: einsum 'bthwpqrc->btphqwrc'
-        # This interleaves the patch dimensions with the grid dimensions
         x = jnp.einsum("bthwpqrc->btphqwrc", x)
-        print(f"after einsum: {x.shape}")
-
-        # Reshape to final video format: [B, T*patch_t, H*patch_h, W*patch_w, C]
         x = x.reshape(
             b,
             t_patches * patch_size[0],
@@ -471,124 +450,11 @@ class Wan2DiT(nnx.Module):
             w_patches * patch_size[2],
             c,
         )
-        print(f"final unpatchify output: {x.shape}")
 
         return x
 
 
-def generate_video(
-    model: Wan2DiT,
-    latents: Array,
-    text_embeds: Array,
-    negative_embeds: Array,
-    num_steps: int = 50,
-    guidance_scale: float = 5.5,
-    scheduler: Optional[FlaxUniPCMultistepScheduler] = None,
-    scheduler_state: Optional[UniPCMultistepSchedulerState] = None,
-) -> Array:
-    """
-    Generate video from text embeddings using the diffusion model.
-
-    Args:
-        model: Wan2DiT model
-        text_embeds: [B, seq_len, text_dim] text embeddings from T5
-        num_frames: Number of frames to generate
-        latent_size: Spatial size of latents
-        num_steps: Number of denoising steps
-        guidance_scale: Classifier-free guidance scale (5-6 recommended)
-        key: JAX random key
-
-    Returns:
-        latents: [B, T, H, W, C] generated video latents
-    """
-    b = text_embeds.shape[0]
-
-    # Initialize random noise
-    scheduler_state = scheduler.set_timesteps(
-        scheduler_state, num_inference_steps=num_steps, shape=latents.transpose(0, 4, 1, 2, 3).shape
-    )
-    # print(f"schecduler_state: {scheduler_state}")
-
-    for t_idx in range(num_steps):
-        # Scheduler needs scalar timestep, model needs batched timestep
-        t_scalar = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[t_idx]
-        t_batch = jnp.full((b,), t_scalar, dtype=jnp.int32)
-
-        # Classifier-free guidance
-        if guidance_scale != 1.0:
-            # Predict with text conditioning
-            noise_pred_cond = model.forward(latents, text_embeds, t_batch, deterministic=True)
-
-            noise_pred_uncond = model.forward(latents, negative_embeds, t_batch, deterministic=True)
-
-            # Apply guidance
-            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
-        else:
-            noise_pred = model.forward(latents, text_embeds, t_batch, deterministic=True)
-
-        latents, scheduler_state = scheduler.step(
-            scheduler_state, noise_pred.transpose(0, 4, 1, 2, 3), t_scalar, latents.transpose(0, 4, 1, 2, 3)
-        )
-        latents = latents.transpose(0, 2, 3, 4, 1)  # back to channel-last
-
-    return latents
-
-
 __all__ = [
-    "ModelConfig",
+    "TransformerWanModelConfig",
     "Wan2DiT",
-    "generate_video",
 ]
-
-# # 1. Initialize scheduler
-# scheduler, scheduler_state = FlaxDPMSolverMultistepScheduler.from_pretrained(
-#     "Wan-AI/Wan2.1-T2V-1.3B-Diffusers", subfolder="scheduler", dtype=jnp.bfloat16
-# )
-
-# # 2. Set timesteps
-# num_inference_steps = 50
-# latent_shape = (1, 16, 9, 60, 104)  # (B, C, T, H, W) for Wan
-# scheduler_state = scheduler.set_timesteps(scheduler_state, num_inference_steps=num_inference_steps, shape=latent_shape)
-
-# # 3. Prepare initial latents (random noise)
-# rng = jax.random.PRNGKey(0)
-# latents = jax.random.normal(rng, latent_shape, dtype=jnp.bfloat16)
-# latents = latents * scheduler_state.init_noise_sigma
-
-# # 4. Get text embeddings (from your JAX UMT5)
-# # prompt_embeds = your_umt5_encoder(prompt)  # Shape: (B, 512, 4096)
-# # negative_prompt_embeds = your_umt5_encoder(negative_prompt)
-
-# # 5. Denoising loop
-# guidance_scale = 7.5
-# timesteps = scheduler_state.timesteps
-
-# for i, t in enumerate(timesteps):
-#     # Prepare timestep (broadcast to batch)
-#     timestep = jnp.array([t] * latents.shape[0], dtype=jnp.int32)
-
-#     # Conditional forward pass
-#     noise_pred_cond = your_wan_transformer(
-#         hidden_states=latents, timestep=timestep, encoder_hidden_states=prompt_embeds
-#     )
-
-#     # Unconditional forward pass (for CFG)
-#     noise_pred_uncond = your_wan_transformer(
-#         hidden_states=latents, timestep=timestep, encoder_hidden_states=negative_prompt_embeds
-#     )
-
-#     # Apply classifier-free guidance
-#     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
-
-#     # Scheduler step: x_t -> x_{t-1}
-#     scheduler_output = scheduler.step(scheduler_state, model_output=noise_pred, timestep=t, sample=latents)
-
-#     latents = scheduler_output.prev_sample
-#     scheduler_state = scheduler_output.state
-
-# # 6. Decode latents to video
-# video_frames = your_wan_vae_decoder(latents)  # Shape: (B, C, T, H, W)
-
-# # 7. Post-process (denormalize from [-1, 1] to [0, 255])
-# video_frames = (video_frames / 2 + 0.5).clip(0, 1)
-# video_frames = (video_frames * 255).astype(jnp.uint8)

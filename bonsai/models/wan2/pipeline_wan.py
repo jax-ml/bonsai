@@ -1,16 +1,22 @@
 """Example script for running Wan2.1-T2V-1.3B text-to-video generation."""
 
 import time
+import traceback
+from typing import Optional, Tuple
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from huggingface_hub import snapshot_download
-import traceback
+from jaxtyping import Array
 from transformers import AutoTokenizer
+
 from bonsai.models.wan2 import params, transformer_wan, umt5, vae_wan
-from bonsai.models.wan2 import unipc_multistep_scheduler as scheduler_module
+from bonsai.models.wan2.transformer_wan import TransformerWanModelConfig, Wan2DiT
+from bonsai.models.wan2.unipc_multistep_scheduler import FlaxUniPCMultistepScheduler, UniPCMultistepSchedulerState
+
 jax.config.update("jax_debug_nans", True)
+
 
 def get_t5_text_embeddings(
     prompt: str,
@@ -49,6 +55,7 @@ def get_t5_text_embeddings(
         print(f"Error in text encoding: {e}")
         traceback.print_exc()
 
+
 def decode_video_latents(latents: jax.Array, vae_decoder: vae_wan.WanVAEDecoder):
     """
     Decode video latents to RGB frames using Wan-VAE.
@@ -65,19 +72,72 @@ def decode_video_latents(latents: jax.Array, vae_decoder: vae_wan.WanVAEDecoder)
     return video
 
 
+def generate_video(
+    model: Wan2DiT,
+    latents: Array,
+    text_embeds: Array,
+    negative_embeds: Array,
+    num_steps: int = 50,
+    guidance_scale: float = 5.5,
+    scheduler: Optional[FlaxUniPCMultistepScheduler] = None,
+    scheduler_state: Optional[UniPCMultistepSchedulerState] = None,
+) -> Array:
+    """
+    Generate video from text embeddings using the diffusion model.
+
+    Args:
+        model: Wan2DiT model
+        text_embeds: [B, seq_len, text_dim] text embeddings from UMT5
+        num_frames: Number of frames to generate
+        latent_size: Spatial size of latents
+        num_steps: Number of denoising steps
+        guidance_scale: Classifier-free guidance scale (5-6 recommended)
+
+    Returns:
+        latents: [B, T, H, W, C] generated video latents
+    """
+    b = text_embeds.shape[0]
+
+    # Initialize random noise
+    scheduler_state = scheduler.set_timesteps(
+        scheduler_state, num_inference_steps=num_steps, shape=latents.transpose(0, 4, 1, 2, 3).shape
+    )
+
+    for t_idx in range(num_steps):
+        # Scheduler needs scalar timestep, model needs batched timestep
+        t_scalar = jnp.array(scheduler_state.timesteps, dtype=jnp.int32)[t_idx]
+        t_batch = jnp.full((b,), t_scalar, dtype=jnp.int32)
+
+        # Classifier-free guidance
+        if guidance_scale != 1.0:
+            noise_pred_cond = model.forward(latents, text_embeds, t_batch, deterministic=True)
+            noise_pred_uncond = model.forward(latents, negative_embeds, t_batch, deterministic=True)
+            noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+        else:
+            noise_pred = model.forward(latents, text_embeds, t_batch, deterministic=True)
+
+        latents, scheduler_state = scheduler.step(
+            scheduler_state, noise_pred.transpose(0, 4, 1, 2, 3), t_scalar, latents.transpose(0, 4, 1, 2, 3)
+        )
+        latents = latents.transpose(0, 2, 3, 4, 1)  # back to channel-last
+
+    return latents
+
+
 def run_model():
     print("=" * 60)
     print("Wan2.1-T2V-1.3B Text-to-Video Generation Demo")
     print("=" * 60)
 
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    config = transformer_wan.ModelConfig()
+    config = TransformerWanModelConfig()
 
     # For sharding (multi-GPU), uncomment:
     # from jax.sharding import AxisType
     # mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
     # jax.set_mesh(mesh)
-    scheduler = scheduler_module.FlaxUniPCMultistepScheduler(
+
+    scheduler = FlaxUniPCMultistepScheduler(
         num_train_timesteps=1000,
         beta_start=0.0001,
         beta_end=0.02,
@@ -92,8 +152,6 @@ def run_model():
         lower_order_final=True,
         dtype=jnp.float32,
     )
-
-    # Create initial state
     scheduler_state = scheduler.create_state()
 
     prompts = [
@@ -106,11 +164,13 @@ def run_model():
 
     tokenizer = AutoTokenizer.from_pretrained("google/umt5-xxl")
     umt5_encoder = params.create_t5_encoder_from_safe_tensors(model_ckpt_path, mesh=None)
-    
+
     print("\n[1/4] Encoding text with UMT5...")
     text_embeds = get_t5_text_embeddings(prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len)
     negative_prompts = [""]  # Empty negative prompt
-    negative_embeds = get_t5_text_embeddings(negative_prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len)
+    negative_embeds = get_t5_text_embeddings(
+        negative_prompts[0], tokenizer, umt5_encoder, max_length=config.max_text_len
+    )
 
     print("\n[2/5] Loading Diffusion Transformer weights...")
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh=None)
@@ -125,9 +185,11 @@ def run_model():
     key = jax.random.PRNGKey(42)
     start_time = time.time()
 
-    latents = jax.random.normal(key, (1, config.num_frames, config.latent_size[0], config.latent_size[1], config.latent_input_dim))
+    latents = jax.random.normal(
+        key, (1, config.num_frames, config.latent_size[0], config.latent_size[1], config.latent_input_dim)
+    )
 
-    latents = transformer_wan.generate_video(
+    latents = generate_video(
         model=model,
         latents=latents,
         text_embeds=text_embeds,
@@ -141,18 +203,16 @@ def run_model():
     generation_time = time.time() - start_time
     print(f"✓ Generated latents in {generation_time:.2f}s")
     print(f"Latents shape: {latents.shape}")
-    print(latents[0,1:,:,25:,:].mean())
+    print(latents[0, 1:, :, 25:, :].mean())
     print(f"Has NaN: {jnp.isnan(latents).any()}")
     print(f"Has Inf: {jnp.isinf(latents).any()}")
 
-    # Step 4: Decode to video
     print("\n[4/5] Decoding latents to video...")
     video = decode_video_latents(latents, vae_decoder)
     generation_time = time.time() - start_time
     print(f"Video shape: {video.shape}")
-    print(video[0,1:,:,235:,:].mean())
+    print(video[0, 1:, :, 235:, :].mean())
 
-    # Summary
     print("\n" + "=" * 60)
     print("✓ Generation Complete!")
     print("=" * 60)
@@ -163,9 +223,8 @@ def run_model():
 
     return video
 
+
 if __name__ == "__main__":
     run_model()
 
-
-
-__all__ = ["run_model", "run_simple_forward_pass", "run_vae_decoder_test"]
+__all__ = ["run_model"]

@@ -4,7 +4,7 @@ import numpy as np
 from modelscope import snapshot_download as ms_snapshot_download
 from huggingface_hub import snapshot_download as hf_snapshot_download
 from bonsai.models.wan2 import params
-from bonsai.models.wan2 import vae as vae_lib
+from bonsai.models.wan2 import vae_wan as vae_lib
 import torch
 from diffusers import AutoencoderKLWan
 from jax.lax import Precision
