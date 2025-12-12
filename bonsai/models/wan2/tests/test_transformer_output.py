@@ -97,26 +97,26 @@ def compare_outputs(jax_output: jax.Array, torch_output, name: str, rtol: float 
 
     return close
 
+# e2e test
 def test_dit_output():
     print("\n" + "=" * 80)
     print("TEST 2: DiT")
     print("=" * 80)
 
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    config = transformer_wan.ModelConfig
+    config = transformer_wan.TransformerWanModelConfig
 
     print("\n[1/2] Loading transformer")
     transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.bfloat16)
 
     jax_dit = params.create_model_from_safe_tensors(model_ckpt_path, config,mesh=None)
-    print("transformer loaded:", transformer, transformer.config)
 
     batch_size = 1
     num_channels = 16  # in_channels
-    num_frames = 9 
-    height = 30      
-    width = 30      
-    text_seq_len = 128  
+    num_frames = 9
+    height = 30
+    width = 30
+    text_seq_len = 128
     text_dim = 4096     # UMT5 hidden dimension
 
     # Create dummy inputs
@@ -124,14 +124,15 @@ def test_dit_output():
         batch_size, num_channels, num_frames, height, width,
         dtype=torch.float32
     )
-    # jax channels last
-    hidden_states_jax = jnp.array(np.transpose(hidden_states.numpy(), (0, 2, 3, 4, 1)))    
+    hidden_states_jax = jnp.array(np.transpose(hidden_states.numpy(), (0, 2, 3, 4, 1)))
+
     timestep = torch.randint(
         0, 1000,
         (batch_size,),
         dtype=torch.long
     )
     timestep_jax = jnp.array(timestep.numpy())
+
     encoder_hidden_states = torch.randn(
         batch_size, text_seq_len, text_dim,
         dtype=torch.float32
@@ -160,7 +161,7 @@ def test_dit():
     print("=" * 80)
 
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    config = transformer_wan.ModelConfig
+    config = transformer_wan.TransformerWanModelConfig
 
     print("\n[1/2] Loading transformer")
     transformer = AutoModel.from_pretrained(model_ckpt_path, subfolder="transformer", torch_dtype=torch.bfloat16)
@@ -220,11 +221,6 @@ def test_dit():
     print("=" * 80)
     print("INTERMEDIATE OUTPUTS")
     print("=" * 80)
-
-    # # Print all intermediate output shapes
-    # for name, tensor in intermediate_outputs.items():
-    #     if isinstance(tensor, torch.Tensor):
-    #         print(f"{name:50s} : {tuple(tensor.shape)}")
 
     for name, tensor in states.items():
         print(f"{name:50s}: {tuple(tensor.shape)}")
@@ -541,7 +537,6 @@ class WanTransformerDebugger:
     def clear_outputs(self):
         """Clear stored outputs"""
         self.intermediate_outputs = OrderedDict()
-
 class WanAttentionDebugger:
     """Capture internal attention states (Q, K, V, attention scores, etc.)"""
 

@@ -51,7 +51,7 @@ def cast_with_exclusion(path, x, dtype_to_cast):
         return x.astype(dtype_to_cast)
 
 
-def _get_dit_mapping(cfg: model_lib.ModelConfig):
+def _get_dit_mapping(cfg: model_lib.TransformerWanModelConfig):
     class Transform(Enum):
         """Transformations for model parameters"""
 
@@ -321,7 +321,7 @@ def _stoi(s):
 
 def create_model_from_safe_tensors(
     file_dir: str,
-    cfg: model_lib.ModelConfig,
+    cfg: model_lib.TransformerWanModelConfig,
     mesh: jax.sharding.Mesh | None = None,
 ) -> model_lib.Wan2DiT:
     """

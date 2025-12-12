@@ -71,7 +71,7 @@ def run_model():
     print("=" * 60)
 
     model_ckpt_path = snapshot_download("Wan-AI/Wan2.1-T2V-1.3B-Diffusers")
-    config = transformer_wan.ModelConfig()
+    config = transformer_wan.TransformerWanModelConfig()
 
     # For sharding (multi-GPU), uncomment:
     # from jax.sharding import AxisType

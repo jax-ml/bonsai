@@ -219,7 +219,9 @@ class CrossAttention(nnx.Module):
 
 def modulate(x: Array, shift: Array, scale: Array) -> Array:
     """Apply adaptive layer norm modulation."""
-    return x * (1 + scale) + shift
+    original_dtype = x.dtype
+
+    return (x.astype(jnp.float32) * (1 + scale) + shift).astype(original_dtype)
 
 
 class WanAttentionBlock(nnx.Module):
@@ -275,16 +277,15 @@ class WanAttentionBlock(nnx.Module):
         b = time_proj.shape[0]
         d = self.cfg.hidden_dim
         reshaped_time_proj = time_proj.reshape(b, 6, d)
-        modulation = reshaped_time_proj + self.scale_shift_table.value
+        modulation = reshaped_time_proj.astype(jnp.float32) + self.scale_shift_table.value
         modulation = modulation.reshape(b, -1)  # [B, 6*D]
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = jnp.split(modulation, 6, axis=-1)
 
         # Self-attention with AdaLN modulation and RoPE
-        print("video tokens:", x.shape)
         norm_x = self.norm1(x)
         norm_x = modulate(norm_x, shift_msa[:, None, :], scale_msa[:, None, :])
         attn_out = self.self_attn(norm_x, rope_state=rope_state, deterministic=deterministic)
-        x = x + gate_msa[:, None, :] * attn_out
+        x = (x.astype(jnp.float32) + gate_msa[:, None, :] * attn_out).astype(x.dtype)
 
         # Cross-attention
         norm_x = self.norm2(x)
@@ -295,7 +296,7 @@ class WanAttentionBlock(nnx.Module):
         norm_x = self.norm3(x)
         norm_x = modulate(norm_x, shift_mlp[:, None, :], scale_mlp[:, None, :])
         mlp_out = self.mlp(norm_x)
-        x = x + gate_mlp[:, None, :] * mlp_out
+        x = (x.astype(jnp.float32) + gate_mlp[:, None, :] * mlp_out).astype(jnp.float32)
 
         return x
 
@@ -326,7 +327,7 @@ class FinalLayer(nnx.Module):
         e = self.scale_shift_table.value + time_emb[:, None, :]
         shift, scale = e[:, 0, :], e[:, 1, :]
 
-        x = self.norm(x) * (1 + scale[:, None, :]) + shift[:, None, :]
+        x = modulate(x, shift[:, None, :], scale[:, None, :])
         x = self.linear(x)
         return x
 

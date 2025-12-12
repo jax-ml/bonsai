@@ -11,13 +11,13 @@ resources:
 run: |
   rm -rf bonsai
   git clone https://github.com/primatrix/bonsai
-  cd bonsai && git checkout bf16
+  cd bonsai && git checkout dev-wan
   uv venv --python 3.12
   source .venv/bin/activate
   uv pip install -e .
   uv pip install -r requirements.txt
   cd bonsai/models/wan2/tests
-  python test_dit_output.py
+  python test_transformer_output.py
 
 # cd sky_workdir/bonsai
 # source .venv/bin/activate

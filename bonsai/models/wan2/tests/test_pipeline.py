@@ -132,7 +132,7 @@ def run_model():
 
     model_id = "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
     model_ckpt_path = snapshot_download(model_id)
-    config = transformer_wan.ModelConfig()
+    config = transformer_wan.TransformerWanModelConfig()
 
     vae = AutoencoderKLWan.from_pretrained(model_ckpt_path, subfolder="vae", torch_dtype=torch.float32)
     pipe = WanPipeline.from_pretrained(model_id, vae=vae, torch_dtype=torch.bfloat16)
@@ -336,7 +336,7 @@ def run_simple_forward_pass():
     print("Wan2.1-T2V-1.3B Simple Forward Pass Test")
     print("=" * 60)
 
-    config = transformer_wan.ModelConfig()
+    config = transformer_wan.TransformerWanModelConfig()
     print(f"\nConfig: {config.num_layers} layers, {config.hidden_dim} dim")
 
     # Create model
