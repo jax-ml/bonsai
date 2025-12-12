@@ -263,7 +263,7 @@ def create_whisper_from_pretrained(
     config = model_lib.ModelConfig.whisper_tiny()
     whisper = model_lib.Whisper(config, rngs=nnx.Rngs(0))
     graph_def, abs_state = nnx.split(whisper)
-    jax_state = abs_state.to_pure_dict()
+    jax_state = nnx.to_pure_dict(abs_state)
 
     mapping = _get_key_and_transform_mapping(config)
     error_count = 0
