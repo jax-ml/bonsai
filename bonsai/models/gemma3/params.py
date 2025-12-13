@@ -47,7 +47,7 @@ def _get_key_and_transform_mapping():
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     return {
         r"^language_model\.model\.embed_tokens\.weight$": (
-            r"language_model\.embed_tokens\.weight\.embedding",
+            r"embed_tokens\.weight\.embedding",
             Transform.EMBED,
         ),
         r"^language_model\.model\.layers\.(\d+)\.input_layernorm\.weight$": (
@@ -225,6 +225,7 @@ def _stoi(s):
 # TODO: Update to include sharding
 def create_gemma3_from_pretrained(
     file_dir: str,
+    cfg: model_lib.ModelConfig,
     *,
     mesh: jax.sharding.Mesh | None = None,
 ):
@@ -242,7 +243,7 @@ def create_gemma3_from_pretrained(
     for f in files:
         tensor_dict |= safetensors.load_file(f)
 
-    gemma3 = model_lib.Gemma3Model(model_lib.ModelConfig(), rngs=nnx.Rngs(0))
+    gemma3 = model_lib.Gemma3Model(cfg, rngs=nnx.Rngs(0))
     graph_def, abs_state = nnx.split(gemma3)
     jax_state = abs_state.to_pure_dict()
 

@@ -21,12 +21,8 @@ python3 -m bonsai.models.gemma3.tests.run_model
 
 ### Remaining Tasks
 
-1. Finish the `run_model.py` example. Add timing and profiling. 
-2. Optimize based on the profiling. 
-3. Implement sharding. 
-4. Update to include other model sizes
-5. Clean up code (variable names, etc.)
-6. Implement with batching
-
-
-
+1. Properly implement sharding (vision, then text)
+2. Implement with batching. Need this for FSDP. 
+3. Optimize based on the profiling. 
+4. Clean up code (variable names, etc.). Simplify unused configs (marked these with TODO)
+5. Update to include other model sizes

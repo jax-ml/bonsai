@@ -21,82 +21,262 @@ from typing import Any, Optional, Tuple, TypeAlias
 import flax
 import jax
 import jax.numpy as jnp
-import jax.sharding as shd
 from flax import nnx
+from jax import P
 from jax.interpreters import pxla
+from jax.sharding import PartitionSpec, get_abstract_mesh, reshard
 from jaxtyping import Array, Float
 
 
-class AttentionType(Enum):
+class AttentionMode(Enum):
     FULL = "full_attention"
     SLIDE = "sliding_attention"
 
 
-def _make_attn_types():
+class ShardMode(Enum):
+    FSDP = "fsdp"
+    TP = "tp"
+
+
+def _make_attn_types(full_freq: int):
     # Fix this (5x slide 1x full) x 5 + (4x slide)
-    return [AttentionType.FULL if i % 6 == 5 else AttentionType.SLIDE for i in range(34)]
+    return [AttentionMode.FULL if i % full_freq == full_freq - 1 else AttentionMode.SLIDE for i in range(34)]
 
 
-@dataclass
+# TODO: Need to get these implemented and follow the activations
+@dataclass(slots=True, frozen=True)
+class VisionShardingCfg:
+    qk: PartitionSpec
+    qb: PartitionSpec
+    kk: PartitionSpec
+    kb: PartitionSpec
+    vk: PartitionSpec
+    vb: PartitionSpec
+    ok: PartitionSpec
+    ob: PartitionSpec
+    fc1k: PartitionSpec
+    fc1b: PartitionSpec
+    fc2k: PartitionSpec
+    fc2b: PartitionSpec
+
+    @staticmethod
+    def no_sharding():
+        return VisionShardingCfg.default(False, False)
+
+    @staticmethod
+    def default(use_fsdp: bool, use_tp: bool):
+        fsdp = ShardMode.FSDP.value if use_fsdp else None
+        tp = ShardMode.TP.value if use_tp else None
+        return VisionShardingCfg(
+            qk=P(tp, fsdp),
+            qb=P(fsdp),
+            kk=P(tp, fsdp),
+            kb=P(),  # TODO
+            vk=P(tp, fsdp),
+            vb=P(),  # TODO
+            ok=P(tp, fsdp),
+            ob=P(),  # TODO
+            fc1k=P(fsdp, tp),
+            fc1b=P(),  # TODO
+            fc2k=P(tp, fsdp),
+            fc2b=P(),  # TODO
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class TextShardingCfg:
+    # attn
+    qk: PartitionSpec
+    qb: PartitionSpec
+    kk: PartitionSpec
+    kb: PartitionSpec
+    vk: PartitionSpec
+    vb: PartitionSpec
+    ok: PartitionSpec
+    ob: PartitionSpec
+    # mlp
+    dpk: PartitionSpec
+    dpb: PartitionSpec
+    gpk: PartitionSpec
+    gpb: PartitionSpec
+    upk: PartitionSpec
+    upb: PartitionSpec
+    # cache
+    # TODO
+
+    @staticmethod
+    def no_sharding():
+        return VisionShardingCfg.default(False, False)
+
+    @staticmethod
+    def default(use_fsdp: bool, use_tp: bool):
+        fsdp = ShardMode.FSDP.value if use_fsdp else None
+        tp = ShardMode.TP.value if use_tp else None
+        return TextShardingCfg(
+            qk=P(tp, fsdp),
+            qb=P(fsdp),
+            kk=P(tp, fsdp),
+            kb=P(),  # TODO
+            vk=P(tp, fsdp),
+            vb=P(),  # TODO
+            ok=P(tp, fsdp),
+            ob=P(),  # TODO
+            dpk=P(tp, fsdp),
+            dpb=P(),
+            gpk=P(tp, fsdp),
+            gpb=P(),
+            upk=P(tp, fsdp),
+            upb=P(),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class ShardingCfg:
+    pass
+
+
+@dataclass(frozen=True)
 class VisionConfig:
-    attention_dropout: float = 0.0
-    hidden_act: str = "gelu_pytorch_tanh"
-    hidden_size: int = 1152
-    image_size: int = 896
-    intermediate_size: int = 4304
-    layer_norm_eps: float = 1e-6
-    num_attention_heads: int = 16
-    num_channels: int = 3
-    num_hidden_layers: int = 27
-    patch_size: int = 14
-    vision_use_head: bool = False
+    attention_dropout: float  # TODO: unused
+    hidden_size: int
+    image_size: int
+    intermediate_size: int
+    layer_norm_eps: float
+    num_attention_heads: int
+    num_channels: int
+    num_hidden_layers: int
+    patch_size: int
+    vision_use_head: bool
+    shd_cfg: VisionShardingCfg
+
+    @classmethod
+    def gemma3_4b(cls, use_fsdp: bool, use_tp: bool):
+        return cls(
+            attention_dropout=0.0,
+            hidden_size=1152,
+            image_size=896,
+            intermediate_size=4304,
+            layer_norm_eps=1e-6,
+            num_attention_heads=16,
+            num_channels=3,
+            num_hidden_layers=27,
+            patch_size=14,
+            vision_use_head=False,
+            shd_cfg=VisionShardingCfg.default(use_fsdp, use_tp),
+        )
 
 
-@dataclass
+@dataclass(frozen=True)
 class TextConfig:
-    _sliding_window_pattern: int = 6
-    attention_bias: bool = False
-    attention_dropout: float = 0.0
-    attn_logit_softcapping: Optional[float] = None
-    final_logit_softcapping: Optional[float] = None
-    head_dim: int = 256
-    hidden_activation: str = "gelu_pytorch_tanh"
-    hidden_size: int = 2560
-    initializer_range: float = 0.02
-    intermediate_size: int = 10240
-    layer_types: list[AttentionType] = field(default_factory=lambda: _make_attn_types())
-    max_position_embeddings: int = 131072
-    num_attention_heads: int = 8
-    num_hidden_layers: int = 34
-    num_key_value_heads: int = 4
-    query_pre_attn_scalar: int = 256
-    rms_norm_eps: float = 1e-6
-    rope_local_base_freq: float = 10000.0
-    rope_scaling: dict[str, Any] = field(default_factory=lambda: {"factor": 8.0, "rope_type": "linear"})
-    rope_theta: float = 1000000.0
-    sliding_window: int = 1024
-    use_cache: bool = True
-    vocab_size: int = 262208
+    attention_bias: bool
+    attention_dropout: float  # TODO: unused
+    attn_logit_softcapping: Optional[float]  # TODO: unused
+    final_logit_softcapping: Optional[float]  # TODO: unused
+    head_dim: int
+    hidden_size: int
+    initializer_range: float  # TODO: unused
+    intermediate_size: int
+    layer_types: list[AttentionMode]
+    max_position_embeddings: int  # TODO: unused
+    num_attention_heads: int
+    num_hidden_layers: int
+    num_key_value_heads: int
+    query_pre_attn_scalar: int  # TODO: unused
+    rms_norm_eps: float
+    rope_full_factor: float
+    rope_full_theta: float
+    rope_slide_factor: float
+    rope_slide_theta: float
+    sliding_window: int
+    use_cache: bool  # TODO: unused
+    vocab_size: int
+    shd_cfg: TextShardingCfg
+
+    @classmethod
+    def gemma3_4b(cls, use_fsdp: bool, use_tp: bool):
+        return cls(
+            attention_bias=False,
+            attention_dropout=0.0,  # TODO: unused
+            attn_logit_softcapping=None,  # TODO: unused
+            final_logit_softcapping=None,  # TODO: unused
+            head_dim=256,
+            hidden_size=2560,
+            initializer_range=0.02,  # TODO: unused
+            intermediate_size=10240,
+            layer_types=_make_attn_types(6),
+            max_position_embeddings=131072,  # TODO: unused
+            num_attention_heads=8,
+            num_hidden_layers=34,
+            num_key_value_heads=4,
+            query_pre_attn_scalar=256,  # TODO: unused
+            rms_norm_eps=1e-6,
+            rope_full_factor=8.0,
+            rope_full_theta=1000000.0,
+            rope_slide_factor=1.0,
+            rope_slide_theta=10000.0,
+            sliding_window=1024,
+            use_cache=True,  # TODO: unused
+            vocab_size=262208,
+            shd_cfg=TextShardingCfg.default(use_fsdp, use_tp),
+        )
 
 
-@dataclass
+@dataclass(frozen=True)
 class ModelConfig:
-    vision_config: VisionConfig = field(default_factory=lambda: VisionConfig())
-    text_config: TextConfig = field(default_factory=lambda: TextConfig())
-    mm_tokens_per_image: int = 256
-    boi_token_index: int = 255999
-    dtype: str = "bfloat16"
-    eoi_token_index: int = 256000
-    eos_token_id: list[int] = field(default_factory=lambda: [1, 106])
-    image_token_index: int = 262144
-    initializer_range: float = 0.02
-    mm_tokens_per_image: int = 256
+    vision_config: VisionConfig
+    text_config: TextConfig
+    mm_tokens_per_image: int
+    boi_token_index: int  # TODO: unused
+    dtype: str  # TODO: unused
+    eoi_token_index: int  # TODO: unused
+    eos_token_id: list[int]  # TODO: unused
+    image_token_index: int  # TODO: unused
+    initializer_range: float  # TODO: unused
+
+    @classmethod
+    def gemma3_4b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        return cls(
+            vision_config=VisionConfig.gemma3_4b(use_fsdp, use_tp),
+            text_config=TextConfig.gemma3_4b(use_fsdp, use_tp),
+            mm_tokens_per_image=256,
+            boi_token_index=255999,  # TODO: unused
+            dtype="bfloat16",  # TODO: unused
+            eoi_token_index=256000,  # TODO: unused
+            eos_token_id=field(default_factory=lambda: [1, 106]),  # TODO: unused
+            image_token_index=262144,  # TODO: unused
+            initializer_range=0.02,  # TODO: unused
+        )
 
 
-## GENERAL
+# General Components
 
 
-## VISION
+class SHLinear(nnx.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        *,
+        use_bias: bool = True,
+        kernel_sharding=P(),
+        bias_sharding=P(),
+        dtype=None,  # TODO: Use this
+        rngs,
+    ):
+        kernel_initializer = jax.nn.initializers.lecun_normal()
+        self.kernel = nnx.Param(
+            kernel_initializer(rngs.params(), (in_dim, out_dim), dtype=dtype, out_sharding=kernel_sharding)
+        )
+        if use_bias:
+            self.bias = nnx.Param(jnp.zeros((out_dim,), dtype=dtype, out_sharding=bias_sharding))
+        else:
+            self.bias = nnx.data(jnp.zeros((out_dim,), dtype=dtype, out_sharding=bias_sharding))
+
+    def __call__(self, x, *, out_sharding=P()):
+        return jnp.matmul(x, self.kernel, out_sharding=out_sharding) + self.bias
+
+
+# Vision Components
 
 
 # TODO: update to include interpolate_pos_encoding
@@ -112,6 +292,7 @@ class SiglipVisionEmbeddings(nnx.Module):
             padding="valid",
             rngs=rngs,
         )
+        # TODO: shard this
         self.position_embedding = nnx.Embed(self.num_patches, config.hidden_size, rngs=rngs)
         self.position_ids = jnp.expand_dims(jnp.arange(self.num_patches), 0)
 
@@ -127,10 +308,12 @@ class SiglipAttention(nnx.Module):
         self.config = config
         self.num_heads = config.num_attention_heads
         self.head_dim = config.hidden_size // config.num_attention_heads
-        self.k_proj = nnx.Linear(config.hidden_size, config.hidden_size, rngs=rngs)
-        self.v_proj = nnx.Linear(config.hidden_size, config.hidden_size, rngs=rngs)
-        self.q_proj = nnx.Linear(config.hidden_size, config.hidden_size, rngs=rngs)
-        self.out_proj = nnx.Linear(config.hidden_size, config.hidden_size, rngs=rngs)
+        hs = config.hidden_size
+        shd = config.shd_cfg
+        self.k_proj = SHLinear(hs, hs, kernel_sharding=shd.kk, bias_sharding=shd.kb, rngs=rngs)
+        self.v_proj = SHLinear(hs, hs, kernel_sharding=shd.vk, bias_sharding=shd.vb, rngs=rngs)
+        self.q_proj = SHLinear(hs, hs, kernel_sharding=shd.qk, bias_sharding=shd.qb, rngs=rngs)
+        self.out_proj = SHLinear(hs, hs, kernel_sharding=shd.ok, bias_sharding=shd.ob, rngs=rngs)
 
     def __call__(self, x: Array, attn_mask: Array | None):
         batch_size, seq_length, _ = x.shape
@@ -146,12 +329,11 @@ class SiglipAttention(nnx.Module):
 class SiglipMLP(nnx.Module):
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs):
         self.config = config
-        self.act = jax.nn.gelu
-        self.fc1 = nnx.Linear(config.hidden_size, config.intermediate_size, rngs=rngs)
-        self.fc2 = nnx.Linear(config.intermediate_size, config.hidden_size, rngs=rngs)
+        self.fc1 = SHLinear(config.hidden_size, config.intermediate_size, rngs=rngs)
+        self.fc2 = SHLinear(config.intermediate_size, config.hidden_size, rngs=rngs)
 
     def __call__(self, x: Array):
-        return self.fc2(self.act(self.fc1(x)))
+        return self.fc2(jax.nn.gelu(self.fc1(x)))
 
 
 class SiglipEncoderLayer(nnx.Module):
@@ -215,7 +397,7 @@ class SiglipVisionTransformer(nnx.Module):
         return x
 
 
-## LANGUAGE
+# Language components
 
 
 # from qwen3
@@ -227,13 +409,6 @@ class LayerCache(nnx.Module):
         self.size = self.k_cache.shape[1]
         self.start_ind = nnx.Variable(-1 * jnp.ones((batch_size,), dtype=jnp.int32))
         self.cur_ind = nnx.Variable(jnp.zeros((), dtype=jnp.int32))  # scalar for compute efficiency.
-
-
-def shard(x: jnp.ndarray, s: Tuple[str, ...]):
-    mesh = pxla.thread_resources.env.physical_mesh
-    if mesh.empty or jax.devices()[0].platform == "cpu":
-        return x
-    return jax.lax.with_sharding_constraint(x, shd.NamedSharding(mesh, shd.PartitionSpec(*s)))
 
 
 Cache: TypeAlias = list[LayerCache]
@@ -263,11 +438,9 @@ class Gemma3RMSNorm(nnx.Module):
 
 
 class Gemma3TextScaledWordEmbedding(nnx.Module):
-    def __init__(
-        self, num_embeddings: int, embedding_dim: int, padding_idx: int, embed_scale: float = 1.0, *, rngs: nnx.Rngs
-    ):
-        self.weight = nnx.Embed(num_embeddings, embedding_dim, rngs=rngs)
-        self.embed_scale = jnp.array(embed_scale, dtype=jnp.bfloat16).astype(jnp.float32)
+    def __init__(self, cfg: TextConfig, *, rngs: nnx.Rngs):
+        self.weight = nnx.Embed(cfg.vocab_size, cfg.hidden_size, rngs=rngs)
+        self.embed_scale = jnp.array(cfg.hidden_size**0.5, dtype=jnp.bfloat16).astype(jnp.float32)
 
     def __call__(self, input_ids: Array):
         return self.weight(input_ids) * self.embed_scale
@@ -330,26 +503,47 @@ class Gemma3Attention(nnx.Module):
     def __init__(self, config: TextConfig, layer_idx: int, *, rngs: nnx.Rngs):
         self.config = config
         self.layer_idx = layer_idx
-        self.use_sliding = config.layer_types[layer_idx] == AttentionType.SLIDE
+        self.use_sliding = config.layer_types[layer_idx] == AttentionMode.SLIDE
         self.num_kv_heads = self.config.num_key_value_heads
         self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
-        self.q_proj = nnx.Linear(
-            config.hidden_size, config.num_attention_heads * self.head_dim, use_bias=config.attention_bias, rngs=rngs
+        shd = config.shd_cfg
+        self.q_proj = SHLinear(
+            config.hidden_size,
+            config.num_attention_heads * self.head_dim,
+            use_bias=config.attention_bias,
+            kernel_sharding=shd.qk,
+            bias_sharding=shd.qb,
+            rngs=rngs,
         )
-        self.k_proj = nnx.Linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, use_bias=config.attention_bias, rngs=rngs
+        self.k_proj = SHLinear(
+            config.hidden_size,
+            config.num_key_value_heads * self.head_dim,
+            use_bias=config.attention_bias,
+            kernel_sharding=shd.kk,
+            bias_sharding=shd.kb,
+            rngs=rngs,
         )
-        self.v_proj = nnx.Linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, use_bias=config.attention_bias, rngs=rngs
+        self.v_proj = SHLinear(
+            config.hidden_size,
+            config.num_key_value_heads * self.head_dim,
+            use_bias=config.attention_bias,
+            kernel_sharding=shd.vk,
+            bias_sharding=shd.vb,
+            rngs=rngs,
         )
-        self.o_proj = nnx.Linear(
-            config.num_attention_heads * self.head_dim, config.hidden_size, use_bias=config.attention_bias, rngs=rngs
+        self.o_proj = SHLinear(
+            config.num_attention_heads * self.head_dim,
+            config.hidden_size,
+            use_bias=config.attention_bias,
+            kernel_sharding=shd.ok,
+            bias_sharding=shd.ob,
+            rngs=rngs,
         )
         self.q_norm = Gemma3RMSNorm(dim=config.head_dim, eps=config.rms_norm_eps, rngs=rngs)
         self.k_norm = Gemma3RMSNorm(dim=config.head_dim, eps=config.rms_norm_eps, rngs=rngs)
 
-        self.rope_theta = config.rope_local_base_freq if self.use_sliding else config.rope_theta
-        self.factor = 1.0 if self.use_sliding else 8.0
+        self.rope_theta = config.rope_slide_theta if self.use_sliding else config.rope_full_theta
+        self.factor = config.rope_slide_factor if self.use_sliding else config.rope_full_factor
 
         self.n_rep = config.num_attention_heads // config.num_key_value_heads
         self.scale = config.head_dim**-0.5
@@ -385,9 +579,31 @@ class Gemma3Attention(nnx.Module):
 class Gemma3MLP(nnx.Module):
     def __init__(self, config: TextConfig, *, rngs: nnx.Rngs):
         self.config = config
-        self.gate_proj = nnx.Linear(config.hidden_size, config.intermediate_size, use_bias=False, rngs=rngs)
-        self.up_proj = nnx.Linear(config.hidden_size, config.intermediate_size, use_bias=False, rngs=rngs)
-        self.down_proj = nnx.Linear(config.intermediate_size, config.hidden_size, use_bias=False, rngs=rngs)
+        shd = config.shd_cfg
+        self.gate_proj = SHLinear(
+            config.hidden_size,
+            config.intermediate_size,
+            use_bias=False,
+            kernel_sharding=shd.gpk,
+            bias_sharding=shd.gpb,
+            rngs=rngs,
+        )
+        self.up_proj = SHLinear(
+            config.hidden_size,
+            config.intermediate_size,
+            use_bias=False,
+            kernel_sharding=shd.upk,
+            bias_sharding=shd.upb,
+            rngs=rngs,
+        )
+        self.down_proj = SHLinear(
+            config.intermediate_size,
+            config.hidden_size,
+            use_bias=False,
+            kernel_sharding=shd.dpk,
+            bias_sharding=shd.dpb,
+            rngs=rngs,
+        )
 
     def __call__(self, x: Array):
         return self.down_proj(jax.nn.gelu(self.gate_proj(x)) * self.up_proj(x))
@@ -427,23 +643,14 @@ class Gemma3DecoderLayer(nnx.Module):
 class Gemma3TextModel(nnx.Module):
     def __init__(self, config: TextConfig, *, rngs: nnx.Rngs):
         self.config = config
-        # TODO: Move this out of this class into the larger class
-        self.embed_tokens = Gemma3TextScaledWordEmbedding(
-            config.vocab_size,
-            config.hidden_size,
-            "self.padding_idx",
-            embed_scale=self.config.hidden_size**0.5,
-            rngs=rngs,
-        )
         self.layers = nnx.List(
             [Gemma3DecoderLayer(config, layer_idx, rngs=rngs) for layer_idx in range(config.num_hidden_layers)]
         )
         self.norm = Gemma3RMSNorm(config.hidden_size, eps=config.rms_norm_eps, rngs=rngs)
 
     def __call__(self, x, cache: Cache, segment_ids: Array, sliding_mask: Array | None, causal_mask: Array | None):
-        # x = self.embed_tokens(x) # done in higher layer now
         for lt, c, layer in zip(self.config.layer_types, cache, self.layers):
-            mask = sliding_mask if lt == AttentionType.SLIDE else causal_mask
+            mask = sliding_mask if lt == AttentionMode.SLIDE else causal_mask
             x = layer(x, c, segment_ids, mask)
         return self.norm(x)
 
@@ -477,26 +684,26 @@ class Gemma3MultiModalProjector(nnx.Module):
         return x.astype(vision_outputs.dtype)
 
 
-def make_causal_mask(x: Array, layer_cache: LayerCache, token_type_ids: Array):
-    _, t = x.shape
+def make_causal_mask(layer_cache: LayerCache, token_type_ids: Array):
+    b, t = token_type_ids.shape
     c = layer_cache.size
-    tmp1 = jnp.arange(t)
-    tmp2 = jnp.arange(c)
-    my_mask = tmp1[:, None] - tmp2[None, :] >= -layer_cache.cur_ind
+    seq_arange = jnp.arange(t)
+    cache_arange = jnp.arange(c)
+    causal_mask = seq_arange[:, None] - cache_arange[None, :] >= -layer_cache.cur_ind
     tti = token_type_ids.astype(jnp.bool_)
-    tmp3 = jnp.concat([tti, jnp.zeros((1, c - t), dtype=jnp.bool_)], axis=-1)
-    or_mask = tti[:, None, :, None] & tmp3[:, None, None, :]
-    my_mask = my_mask.astype(jnp.bool_) | or_mask
-    return my_mask
+    cache_padded_tti = jnp.concat([tti, jnp.zeros((b, c - t), dtype=jnp.bool_)], axis=-1)
+    image_or_mask = tti[:, None, :, None] & cache_padded_tti[:, None, None, :]
+    causal_mask = causal_mask.astype(jnp.bool_) | image_or_mask
+    return causal_mask
 
 
-def make_window_mask(x, layer_cache, token_type_ids, slide_size: int):
-    my_mask = make_causal_mask(x, layer_cache, token_type_ids)
-    *_, t, c = my_mask.shape
-    tmp1 = jnp.arange(t)
-    tmp2 = jnp.arange(c)
-    slide = tmp1[:, None] - tmp2[None, :] < slide_size
-    return my_mask & slide
+def make_window_mask(layer_cache, token_type_ids, slide_size: int):
+    causal_mask = make_causal_mask(layer_cache, token_type_ids)
+    *_, t, c = causal_mask.shape
+    seq_arange = jnp.arange(t)
+    cache_arange = jnp.arange(c)
+    slide = seq_arange[:, None] - cache_arange[None, :] < slide_size
+    return causal_mask & slide
 
 
 def merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array) -> Array:
@@ -523,6 +730,7 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
 class Gemma3Model(nnx.Module):
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.sliding_window_size = cfg.text_config.sliding_window
+        self.embed_tokens = Gemma3TextScaledWordEmbedding(cfg.text_config, rngs=rngs)
         self.vision_tower = SiglipVisionTransformer(cfg.vision_config, rngs=rngs)
         self.multi_modal_projector = Gemma3MultiModalProjector(cfg, rngs=rngs)
         self.language_model = Gemma3TextModel(cfg.text_config, rngs=rngs)
@@ -531,10 +739,10 @@ class Gemma3Model(nnx.Module):
         self, input_ids: Array, pixel_values: Array, cache: Cache, segment_ids: Array, token_type_ids: Array
     ) -> Array:
         assert input_ids.shape == token_type_ids.shape
-        causal_mask = make_causal_mask(input_ids, cache[0], token_type_ids)
-        sliding_mask = make_window_mask(input_ids, cache[0], token_type_ids, slide_size=self.sliding_window_size)
+        causal_mask = make_causal_mask(cache[0], token_type_ids)
+        sliding_mask = make_window_mask(cache[0], token_type_ids, slide_size=self.sliding_window_size)
 
-        inputs_embeds = self.language_model.embed_tokens(input_ids)
+        inputs_embeds = self.embed_tokens(input_ids)
 
         # Merge text and images
         if pixel_values is not None:
@@ -545,7 +753,7 @@ class Gemma3Model(nnx.Module):
             inputs_embeds = batched_merge_modalities(image_features, inputs_embeds, token_type_ids)
 
         out = self.language_model(inputs_embeds, cache, segment_ids, sliding_mask, causal_mask)
-        out = self.language_model.embed_tokens.weight.attend(out)
+        out = self.embed_tokens.weight.attend(out)
         return out
 
 
@@ -554,4 +762,4 @@ def forward(
     model: nnx.Module, cache: Cache, input_ids: Array, pixel_values: Array, segment_ids: Array, token_type_ids
 ) -> tuple[Array, nnx.Cache]:
     logits = model(input_ids, pixel_values, cache, segment_ids, token_type_ids)
-    return logits[:, -1:None, :], cache
+    return logits[:, -1, :], cache
