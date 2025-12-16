@@ -6,7 +6,7 @@ import dataclasses
 
 @dataclasses.dataclass
 class Dinov3ViTModelOutput:
-    sequence_output: Array
+    last_hidden_state: Array
     pooler_output: Array
 
 @dataclasses.dataclass(frozen=True)
@@ -309,9 +309,9 @@ class Dinov3ViTModel(nnx.Module):
             hidden_states = layer_module(hidden_states, position_embeddings)
         
         sequence_output = self.norm(hidden_states)
-        pooler_output = sequence_output[:, 0, :]
+        pooled_output = sequence_output[:, 0, :]
         
         return Dinov3ViTModelOutput(**{
-            "sequence_output": sequence_output,
-            "pooler_output": pooler_output
+            "last_hidden_state": sequence_output,
+            "pooler_output": pooled_output
             })
