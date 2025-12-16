@@ -19,6 +19,8 @@ Reference: "Transformers are SSMs: Generalized Models and Efficient Algorithms T
 Paper: https://arxiv.org/abs/2405.21060
 """
 
+from __future__ import annotations
+
 import dataclasses
 from typing import Literal
 
@@ -449,6 +451,27 @@ class Mamba2ForCausalLM(nnx.Module):
             loss = optax.softmax_cross_entropy_with_integer_labels(shift_logits, shift_labels).mean()
 
         return {"logits": logits, "loss": loss}
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_id_or_path: str,
+        *,
+        cfg: Mamba2Config | None = None,
+        dtype: jnp.dtype = jnp.float32,
+        seed: int = 0,
+        revision: str = "main",
+    ) -> "Mamba2ForCausalLM":
+        # Local import to avoid hard dependency cycles
+        from bonsai.models.mamba2 import params as mamba2_params
+
+        # If cfg is None, params.create_model_from_huggingface already infers it.
+        if "/" in model_id_or_path and not model_id_or_path.startswith((".", "/")):
+            return mamba2_params.create_model_from_huggingface(
+                model_id_or_path, cfg=cfg, dtype=dtype, seed=seed, revision=revision
+            )
+
+        return mamba2_params.create_model_from_torch_checkpoint(model_id_or_path, cfg=cfg, dtype=dtype, seed=seed)
 
 
 class Mamba2Forecaster(nnx.Module):
