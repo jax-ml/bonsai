@@ -1,5 +1,4 @@
-import gc 
-import json 
+import gc
 import re 
 from enum import Enum 
 
@@ -103,7 +102,6 @@ def _stoi(s):
 def create_model_from_safe_tensors(
     file_dir: str,
     cfg: DINOv3ViTFlaxConfig,
-    param_dtype: jnp.dtype | None = jnp.float32,
     mesh: jax.sharding.Mesh | None = None,
 ) -> Dinov3ViTModel:
     """Load tensors from the safetensors file and create a Dinov3 model (memory-optimized)."""
