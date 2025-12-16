@@ -2,16 +2,96 @@ from jax import Array
 import jax.numpy as jnp
 from flax import nnx
 from typing import Tuple
-from transformers import DINOv3ViTConfig
+import dataclasses 
 
-def make_2tuple(x):
-    if isinstance(x, tuple):
-        assert len(x) == 2
-        return x
-    return (x, x) 
+@dataclasses.dataclass
+class Dinov3ViTModelOutput:
+    sequence_output: Array
+    pooler_output: Array
+
+@dataclasses.dataclass(frozen=True)
+class DINOv3ViTFlaxConfig:
+    model_type = "dinov3_ViT"
+    patch_size: Tuple[int, int] = (16, 16)
+    hidden_size: int = 384
+    intermediate_size: int = 1536
+    num_hidden_layers: int = 12
+    num_attention_heads: int = 6
+    hidden_act: str = "gelu"
+    layer_norm_eps: float = 1e-5
+    rope_theta: float = 100.0
+    image_size: int = 224
+    num_channels: int = 3
+    query_bias: bool = True
+    key_bias: bool = False
+    value_bias: bool = True
+    proj_bias: bool = True
+    mlp_bias: bool = True
+    layerscale_value: float = 1.0
+    use_gated_mlp: bool = False
+    num_register_tokens: int = 4
+    
+    @classmethod
+    def dinov3_vits16(cls):
+        return cls()
+    
+    @classmethod
+    def dinov3_vits16plus(cls):
+        return cls(
+            hidden_size = 384,
+            intermediate_size = 1536,
+            num_hidden_layers = 12,
+            num_attention_heads = 6,
+            hidden_act = "silu",
+            use_gated_mlp = True,
+        )
+    
+    @classmethod
+    def dinov3_vitb16(cls):
+        return cls(
+            hidden_size = 768,
+            intermediate_size = 3072,
+            num_hidden_layers = 12,
+            num_attention_heads = 12,
+            hidden_act = "gelu",
+            use_gated_mlp = False,
+        )
+    
+    @classmethod
+    def dinov3_vitl16(cls):
+        return cls(
+            hidden_size = 1024,
+            intermediate_size = 4096,
+            num_hidden_layers = 24,
+            num_attention_heads = 16,
+            hidden_act = "gelu",
+            use_gated_mlp = False,
+        )
+    
+    @classmethod
+    def dinov3_vith16plus(cls):
+        return cls(
+            hidden_size = 1280,
+            intermediate_size = 5120,
+            num_hidden_layers = 32,
+            num_attention_heads = 20,
+            hidden_act = "silu",
+            use_gated_mlp = True,
+        )
+    
+    @classmethod 
+    def dinov3_vit7b16(cls):
+        return cls(
+            hidden_size = 4096,
+            intermediate_size = 8192,
+            num_hidden_layers = 40,
+            num_attention_heads = 32,
+            hidden_act = "silu",
+            use_gated_mlp = True,
+        )
 
 class DINOv3ViTEmbeddings(nnx.Module):
-    def __init__(self, config: DINOv3ViTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -23,8 +103,8 @@ class DINOv3ViTEmbeddings(nnx.Module):
         self.patch_embeddings = nnx.Conv(
             in_features = config.num_channels,
             out_features = config.hidden_size,
-            kernel_size=make_2tuple(config.patch_size),
-            strides=make_2tuple(config.patch_size),
+            kernel_size=config.patch_size,
+            strides=config.patch_size,
             rngs = rngs
         )
     
@@ -41,18 +121,18 @@ class DINOv3ViTEmbeddings(nnx.Module):
         return jnp.concat([cls_token, register_tokens, patch_embeddings], axis = 1)
 
 class Dinov3ViTRopePositionEmbedding(nnx.Module):
-    def __init__(self, config: DINOv3ViTConfig):
+    def __init__(self, config: DINOv3ViTFlaxConfig):
         super().__init__()
         self.config = config
         self.base = config.rope_theta
         self.head_dim = config.hidden_size // config.num_attention_heads
-        self.num_patches_h = config.image_size // config.patch_size
-        self.num_patches_w = config.image_size // config.patch_size
+        self.num_patches_h = config.image_size // config.patch_size[0]
+        self.num_patches_w = config.image_size // config.patch_size[0]
     
     def __call__(self, pixel_values: Array) -> Tuple[Array, Array]: 
         _, _, height, width = pixel_values.shape
-        num_patches_h = height // self.config.patch_size
-        num_patches_w = width // self.config.patch_size
+        num_patches_h = height // self.config.patch_size[0]
+        num_patches_w = width // self.config.patch_size[0]
 
         coords_h = jnp.arange(0.5, num_patches_h, dtype=jnp.float32) / num_patches_h  # [H]
         coords_w = jnp.arange(0.5, num_patches_w, dtype=jnp.float32) / num_patches_w  # [W]
@@ -71,7 +151,7 @@ class Dinov3ViTRopePositionEmbedding(nnx.Module):
         return (cos, sin) 
     
 class Dinov3LayerScale(nnx.Module):
-    def __init__(self, config: DINOv3ViTConfig):
+    def __init__(self, config: DINOv3ViTFlaxConfig):
         super().__init__()
         self.lambda1 = nnx.Param(jnp.full((config.hidden_size,), config.layerscale_value, dtype=jnp.float32))
     
@@ -108,7 +188,7 @@ def apply_rotary_pos_emb(q: Array, k: Array, cos: Array, sin: Array) -> Tuple[Ar
 
 
 class Dinov3ViTAttention(nnx.Module):
-    def __init__(self, config: DINOv3ViTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         super().__init__()
         self.config = config
 
@@ -149,7 +229,7 @@ class Dinov3ViTAttention(nnx.Module):
         return hidden_states
     
 class Dinov3MLP(nnx.Module):
-    def __init__(self, config: DINOv3ViTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -165,7 +245,7 @@ class Dinov3MLP(nnx.Module):
         return self.down_proj(self.act_fn(self.up_proj(x)))
     
 class Dinov3GatedMLP(nnx.Module):
-    def __init__(self, config: DINOv3ViTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         super().__init__()
         self.config = config 
         self.hidden_size = config.hidden_size
@@ -183,7 +263,7 @@ class Dinov3GatedMLP(nnx.Module):
         return x 
     
 class Dinov3ViTLayer(nnx.Module):
-    def __init__(self, config: DINOv3ViTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         self.norm1 = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.attention = Dinov3ViTAttention(config, rngs=rngs)
         self.layer_scale1 = Dinov3LayerScale(config)
@@ -211,7 +291,7 @@ class Dinov3ViTLayer(nnx.Module):
         return hidden_states
     
 class Dinov3ViTModel(nnx.Module):
-    def __init__(self, config: DINOv3ViTConfig, rngs: nnx.Rngs):
+    def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         super().__init__()
         self.config = config
         self.embeddings = DINOv3ViTEmbeddings(config, rngs=rngs)
@@ -221,7 +301,7 @@ class Dinov3ViTModel(nnx.Module):
         ])
         self.norm = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
     
-    def __call__(self, pixel_values: Array) -> Array:
+    def __call__(self, pixel_values: Array) -> Dinov3ViTModelOutput:
         hidden_states = self.embeddings(pixel_values)
         position_embeddings = self.rope_embeddings(pixel_values)
 
@@ -229,6 +309,9 @@ class Dinov3ViTModel(nnx.Module):
             hidden_states = layer_module(hidden_states, position_embeddings)
         
         sequence_output = self.norm(hidden_states)
-        pooled_output = sequence_output[:, 0, :]
+        pooler_output = sequence_output[:, 0, :]
         
-        return pooled_output
+        return Dinov3ViTModelOutput(**{
+            "sequence_output": sequence_output,
+            "pooler_output": pooler_output
+            })
