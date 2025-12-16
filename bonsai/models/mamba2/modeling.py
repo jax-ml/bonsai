@@ -25,7 +25,6 @@ from typing import Literal
 import jax
 import jax.numpy as jnp
 import optax
-from einops import rearrange, repeat
 from flax import nnx
 
 # Configuration
@@ -93,7 +92,7 @@ def _pad_seq_dim(x: jnp.ndarray, pad_size: int) -> jnp.ndarray:
 def segsum(x: jnp.ndarray) -> jnp.ndarray:
     """Stable segment sum calculation. Input: (..., T) -> Output: (..., T, T)."""
     T = x.shape[-1]
-    x_rep = repeat(x, "... d -> ... d e", e=T)
+    x_rep = jnp.broadcast_to(x[..., None], (*x.shape, T))
     mask_lower = jnp.tril(jnp.ones((T, T), dtype=bool), k=-1)
     x_rep = jnp.where(mask_lower, x_rep, 0.0)
     x_segsum = jnp.cumsum(x_rep, axis=-2)
@@ -158,7 +157,8 @@ def ssd_forward(
 
     # Chunk everything
     def chunk_tensor(t):
-        return rearrange(t, "b (c l) ... -> b c l ...", l=chunk_size)
+        b, cl, *remaining = t.shape
+        return t.reshape(b, cl // chunk_size, chunk_size, *remaining)
 
     x_blk = chunk_tensor(x_disc)
     A_blk = chunk_tensor(A_disc)
@@ -166,7 +166,7 @@ def ssd_forward(
     C_blk = chunk_tensor(C_padded)
 
     # A cumsum over intra-chunk time dimension
-    A_blk2 = rearrange(A_blk, "b c l h -> b h c l")
+    A_blk2 = jnp.transpose(A_blk, (0, 3, 1, 2))
     A_cumsum = jnp.cumsum(A_blk2, axis=-1)
 
     # 1. Intra-chunk (diagonal blocks)
@@ -193,7 +193,8 @@ def ssd_forward(
     Y_off = jnp.einsum("bclhn,bchpn,bhcl->bclhp", C_blk, states, state_decay_out)
 
     y = Y_diag + Y_off
-    y = rearrange(y, "b c l h p -> b (c l) h p")
+    b, c, l, h, p = y.shape
+    y = y.reshape(b, c * l, h, p)
     y = y + D_residual
 
     # Remove padding
@@ -315,14 +316,14 @@ class Mamba2Mixer(nnx.Module):
         x, B_t, C_t = jnp.split(xBC, [self.intermediate_size, self.intermediate_size + self.ssm_state_size], axis=-1)
 
         # 3) SSD forward
-        init_state = rearrange(initial_state, "b h p n -> b 1 h p n") if initial_state is not None else None
+        init_state = initial_state[:, None, ...] if initial_state is not None else None
         A = -jnp.exp(self.A_log.value.astype(jnp.float32))
 
         B_exp = jnp.broadcast_to(jnp.expand_dims(B_t, 2), (B_size, L, self.num_heads, self.ssm_state_size))
         C_exp = jnp.broadcast_to(jnp.expand_dims(C_t, 2), (B_size, L, self.num_heads, self.ssm_state_size))
 
         y, final_state = ssd_forward(
-            x=rearrange(x, "b l (h p) -> b l h p", p=self.head_dim),
+            x=x.reshape(B_size, L, -1, self.head_dim),
             dt=dt,
             A=A,
             B_mat=B_exp,
@@ -335,7 +336,7 @@ class Mamba2Mixer(nnx.Module):
             initial_states=init_state,
             return_final_states=return_final_state,
         )
-        y = rearrange(y, "b l h p -> b l (h p)")
+        y = y.reshape(B_size, L, -1)
 
         # 4) Residual gate normalization
         y = self.norm(y, residual=z)
