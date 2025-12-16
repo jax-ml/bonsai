@@ -9,10 +9,9 @@ from flax import nnx
 import safetensors
 from etils import epath 
 
-from transformers import DINOv3ViTConfig
-from bonsai.models.dinov3.modeling import Dinov3ViTModel
+from bonsai.models.dinov3.modeling import Dinov3ViTModel, DINOv3ViTFlaxConfig
 
-def _get_key_and_transform_mapping(cfg: DINOv3ViTConfig):
+def _get_key_and_transform_mapping():
     class Transform(Enum):
         BIAS = (None, None, False)
         LINEAR = ((1, 0), None, False)
@@ -103,7 +102,7 @@ def _stoi(s):
     
 def create_model_from_safe_tensors(
     file_dir: str,
-    cfg: DINOv3ViTConfig,
+    cfg: DINOv3ViTFlaxConfig,
     param_dtype: jnp.dtype | None = jnp.float32,
     mesh: jax.sharding.Mesh | None = None,
 ) -> Dinov3ViTModel:
@@ -120,7 +119,7 @@ def create_model_from_safe_tensors(
     # Only use sharding if mesh is provided
     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
-    key_mapping = _get_key_and_transform_mapping(cfg)
+    key_mapping = _get_key_and_transform_mapping()
 
     conversion_errors = []
     for f in files:
@@ -149,17 +148,3 @@ def create_model_from_safe_tensors(
     m = nnx.merge(graph_def, state_dict)
     m.eval()
     return m
-
-
-def load_model_config(model_path: str) -> DINOv3ViTConfig:
-    """Load the model config from the model path."""
-    model_dir = epath.Path(model_path).expanduser()
-    config_path = model_dir / "config.json"
-
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found at {config_path}")
-
-    with config_path.open("r") as f:
-        config_dict = json.load(f)
-
-    return DINOv3ViTConfig(**config_dict)
