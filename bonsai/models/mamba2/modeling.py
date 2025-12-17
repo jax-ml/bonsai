@@ -172,11 +172,11 @@ def ssd_forward(
     A_cumsum = jnp.cumsum(A_blk2, axis=-1)
 
     # 1. Intra-chunk (diagonal blocks)
-    L_mat = jnp.exp(segsum(A_cumsum))
+    L_mat = jnp.exp(segsum(A_blk2))
     Y_diag = jnp.einsum("bclhn,bcshn,bhcls,bcshp->bclhp", C_blk, B_blk, L_mat, x_blk)
 
     # 2. States within each chunk
-    decay_states = jnp.exp(A_cumsum[..., -1:, :] - A_cumsum)
+    decay_states = jnp.exp(A_cumsum[..., -1:] - A_cumsum)
     states = jnp.einsum("bclhn,bhcl,bclhp->bchpn", B_blk, decay_states, x_blk)
 
     # 3. Inter-chunk recurrence
