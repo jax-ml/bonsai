@@ -11,28 +11,31 @@ class ModelConfig:
     patch_size: tuple[int, int]
     num_channels: int
     hidden_dim: int
-    attn_dropout_prob: float
-    dropout_prob: float
     num_heads: int
     mlp_dim: int
-    eps: float
     num_layers: int
-    num_labels: int
+    attn_dropout_prob: float = 0.0
+    dropout_prob: float = 0.0
+    eps: float = 1e-12
+    num_labels: int = 1000
+    out_channels: int | None = None
+    feature_size: int | None = None
+    encoder_channels: tuple[int, ...] = (1, 2, 4, 8)
+    encoder_num_layers: tuple[int, ...] = (0, 2, 1, 0)
+    decoder_channels: tuple[tuple[int, int], ...] = ((16, 8), (8, 4), (4, 2), (2, 1))
 
     @classmethod
-    def vit_p16_224(cls):
+    def unetr(cls):
         return cls(
-            image_size=(224, 224),
+            image_size=(256, 256),
             patch_size=(16, 16),
             num_channels=3,
             hidden_dim=768,
-            attn_dropout_prob=0.0,
-            dropout_prob=0.0,
             num_heads=12,
             mlp_dim=3072,
-            eps=1e-12,
             num_layers=12,
-            num_labels=1000,
+            out_channels=3,
+            feature_size=16,
         )
 
 
