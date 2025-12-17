@@ -1,18 +1,18 @@
-import jax.numpy as jnp 
+import jax.numpy as jnp
+import requests
 from huggingface_hub import snapshot_download
+from PIL import Image
 from transformers import AutoImageProcessor
 
-from PIL import Image
-import requests 
-
+from bonsai.models.dinov3 import modeling as model_lib
 from bonsai.models.dinov3 import params
-from bonsai.models.dinov3 import modeling as model_lib 
+
 
 def run_model():
     model_name = "facebook/dinov3-vitl16-pretrain-lvd1689m"
-    
+
     url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/image_processor_example.png" # Replace with your image URL
-    image = Image.open(requests.get(url, stream=True).raw).convert("RGB") 
+    image = Image.open(requests.get(url, stream=True).raw).convert("RGB")
     processor = AutoImageProcessor.from_pretrained(model_name)
 
     model_ckpt_path = snapshot_download(model_name, allow_patterns=["*.safetensors", "*.json"])

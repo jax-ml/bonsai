@@ -1,14 +1,14 @@
-import jax 
-import jax.numpy as jnp 
+import jax
+import jax.numpy as jnp
 import numpy as np
-
-import torch 
-from huggingface_hub import snapshot_download
-from transformers import DINOv3ViTModel 
-
-from bonsai.models.dinov3 import params
-from bonsai.models.dinov3 import modeling as model_lib
+import torch
 from absl.testing import absltest
+from huggingface_hub import snapshot_download
+from transformers import DINOv3ViTModel
+
+from bonsai.models.dinov3 import modeling as model_lib
+from bonsai.models.dinov3 import params
+
 
 class TestForwardPass(absltest.TestCase):
     def setUp(self):
@@ -57,7 +57,7 @@ class TestForwardPass(absltest.TestCase):
         jx = jax.random.normal(key, self.image_shape, dtype=jnp.float32)
         np_x = np.asarray(jax.device_get(jx))
         tx = torch.tensor(np_x, dtype=torch.float32)
-        
+
         jhs = nnx_emb(jx)
         jpe = nnx_pe(jx)
 
@@ -89,7 +89,7 @@ class TestForwardPass(absltest.TestCase):
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
         torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=5e-2)
-    
+
     def test_pooled_output_embeddings(self):
         key = jax.random.PRNGKey(0)
         jx = jax.random.normal(key, self.image_shape, dtype=jnp.float32)

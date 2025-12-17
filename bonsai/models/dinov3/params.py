@@ -1,14 +1,14 @@
 import gc
-import re 
-from enum import Enum 
+import re
+from enum import Enum
 
-import jax 
-import jax.numpy as jnp 
-from flax import nnx 
+import jax
 import safetensors
-from etils import epath 
+from etils import epath
+from flax import nnx
 
-from bonsai.models.dinov3.modeling import Dinov3ViTModel, DINOv3ViTFlaxConfig
+from bonsai.models.dinov3.modeling import DINOv3ViTFlaxConfig, Dinov3ViTModel
+
 
 def _get_key_and_transform_mapping():
     class Transform(Enum):
@@ -44,11 +44,11 @@ def _get_key_and_transform_mapping():
         r"layer\.([0-9]+)\.mlp\.up_proj\.bias$": (r"layer.\1.mlp.up_proj.bias", Transform.BIAS),
         r"layer\.([0-9]+)\.mlp\.down_proj\.bias$": (r"layer.\1.mlp.down_proj.bias", Transform.BIAS),
 
-        # layer_scale1 / layer_scale2 keys 
+        # layer_scale1 / layer_scale2 keys
         r"layer\.([0-9]+)\.layer_scale1\.lambda1$": (r"layer.\1.layer_scale1.lambda1", Transform.DEFAULT),
         r"layer\.([0-9]+)\.layer_scale2\.lambda1$": (r"layer.\1.layer_scale2.lambda1", Transform.DEFAULT),
 
-        # norm1 / norm2 mapping 
+        # norm1 / norm2 mapping
         r"layer\.([0-9]+)\.norm1\.weight$": (r"layer.\1.norm1.scale", Transform.DEFAULT),
         r"layer\.([0-9]+)\.norm1\.bias$": (r"layer.\1.norm1.bias", Transform.DEFAULT),
         r"layer\.([0-9]+)\.norm2\.weight$": (r"layer.\1.norm2.scale", Transform.DEFAULT),
@@ -98,7 +98,7 @@ def _stoi(s):
         return int(s)
     except ValueError:
         return s
-    
+
 def create_model_from_safe_tensors(
     file_dir: str,
     cfg: DINOv3ViTFlaxConfig,
@@ -138,11 +138,11 @@ def create_model_from_safe_tensors(
                     )
 
         gc.collect()
-    
+
     if conversion_errors:
         full_error_log = "\n".join(conversion_errors)
         raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log: \n{full_error_log}")
-    
+
     m = nnx.merge(graph_def, state_dict)
     m.eval()
     return m
