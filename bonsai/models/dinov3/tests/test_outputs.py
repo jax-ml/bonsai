@@ -1,10 +1,12 @@
+import os
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
 from absl.testing import absltest
-from huggingface_hub import snapshot_download
-from transformers import DINOv3ViTModel
+from safetensors.torch import save_file
+from transformers import DINOv3ViTConfig, DINOv3ViTModel
 
 from bonsai.models.dinov3 import modeling as model_lib
 from bonsai.models.dinov3 import params
@@ -13,12 +15,25 @@ from bonsai.models.dinov3 import params
 class TestForwardPass(absltest.TestCase):
     def setUp(self):
         super().setUp()
-        model_name = "facebook/dinov3-vitl16-pretrain-lvd1689m"
-        model_ckpt_path = snapshot_download(model_name, allow_patterns=["*.safetensors", "*.json"])
+        raw_path = "~/.cache/huggingface/dinov3_vitb16"
+        self.save_dir = os.path.expanduser(raw_path)
+        os.makedirs(self.save_dir, exist_ok=True)
 
-        self.config = model_lib.DINOv3ViTFlaxConfig.dinov3_vitl16()
-        self.bonsai_model = params.create_model_from_safe_tensors(model_ckpt_path, self.config)
-        self.baseline_model = DINOv3ViTModel.from_pretrained(model_name)
+        self.hfconfig = DINOv3ViTConfig(
+            hidden_size=768,
+            intermediate_size=3072,
+            num_hidden_layers=12,
+            num_attention_heads=12,
+            hidden_act="gelu",
+            use_gated_mlp=False,
+            num_register_tokens=4,
+        )
+        self.baseline_model = DINOv3ViTModel(config=self.hfconfig)
+        self.model_ckpt_path = os.path.join(self.save_dir, "model.safetensors")
+        save_file(self.baseline_model.state_dict(), self.model_ckpt_path)
+
+        self.config = model_lib.DINOv3ViTFlaxConfig.dinov3_vitb16()
+        self.bonsai_model = params.create_model_from_safe_tensors(self.save_dir, self.config)
 
         self.bonsai_model.eval()
         self.baseline_model.eval()
@@ -71,7 +86,7 @@ class TestForwardPass(absltest.TestCase):
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
-        torch.testing.assert_close(ty_bonsai, ty, rtol=3e-1, atol=3e-1)
+        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=3e-1)
 
 
     def test_last_hidden_state(self):
