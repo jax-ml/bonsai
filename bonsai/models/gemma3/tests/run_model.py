@@ -15,7 +15,6 @@
 """Run a small inference example for Gemma3."""
 
 import os
-import time
 
 import jax
 import jax.numpy as jnp
@@ -23,13 +22,14 @@ import numpy as np
 import torch
 import tqdm
 from huggingface_hub import snapshot_download
+from jax.sharding import AxisType
 from transformers import Gemma3Processor
 
 from bonsai.models.gemma3 import modeling, params
 from bonsai.utils import Sampler
 
 
-def make_input(processor, dtype=torch.float32, msg1=False):
+def make_input(processor, dtype=torch.float32, msg1=True):
     if msg1:
         messages = [
             {"role": "system", "content": [{"type": "text", "text": "You are a helpful assistant."}]},
@@ -73,12 +73,18 @@ def make_input(processor, dtype=torch.float32, msg1=False):
 
 def run_model():
     model_name: str = "google/gemma-3-4b-it"
-    cfg = modeling.ModelConfig()
     access_token = os.environ["HF_TOKEN"]
     processor = Gemma3Processor.from_pretrained(model_name, token=access_token, use_fast=False)
+
+    fsdp, tp = modeling.ShardMode.FSDP.value, modeling.ShardMode.TP.value
+
+    mesh = jax.make_mesh(((1, 1)), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
+    jax.set_mesh(mesh)
+
     model_ckpt_path = snapshot_download(model_name)
-    bonsai_config = modeling.ModelConfig.gemma3_4b()
-    bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, bonsai_config)
+
+    bonsai_config = modeling.ModelConfig.gemma3_4b_it()
+    bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, bonsai_config, mesh=mesh)
     eot_token_id = processor.tokenizer.convert_tokens_to_ids("<end_of_turn>")
 
     # Make inputs
@@ -86,13 +92,14 @@ def run_model():
 
     gen_steps = 500
     batch_size, num_tokens = n_text.shape
-    cache = modeling.init_cache(cfg, batch_size, num_tokens, gen_steps, jnp.float32)
+    cache = modeling.init_cache(bonsai_config, batch_size, num_tokens, gen_steps, jnp.float32)
 
     source_key = jax.random.key(0)
     sampler = jax.jit(Sampler(temperature=1.0, top_p=0.8, top_k=10))
 
     all_tokens = [n_text]
-    for _ in tqdm.trange(gen_steps):
+    pbar = tqdm.trange(gen_steps, desc="Generating output")
+    for _ in pbar:
         batch_size, num_tokens = n_text.shape
         segment_ids = jnp.ones((batch_size, num_tokens))
         out, cache = modeling.forward(bonsai_model, cache, n_text, n_img, segment_ids, n_tti)
@@ -100,7 +107,8 @@ def run_model():
         source_key, key = jax.random.split(source_key)
         n_text = sampler(out, key=key)
         if jnp.all(n_text == eot_token_id):
-            print("Hit end of token.")
+            pbar.close()
+            print("Hit end of turn.")
             break
         all_tokens.append(n_text)
         n_tti = jnp.zeros((batch_size, 1), dtype=jnp.int32)

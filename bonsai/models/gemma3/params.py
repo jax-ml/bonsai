@@ -198,7 +198,7 @@ def _st_key_to_jax_key(mapping, source_key):
     return subs[0]
 
 
-def _assign_weights(keys, tensor, state_dict, st_key, transform):
+def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
     key, *rest = keys
     if not rest:
@@ -210,9 +210,13 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform):
                 tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
             raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = tensor
+        if sharding_dict is not None:
+            state_dict[key] = jax.device_put(tensor, sharding_dict[key])
+        else:
+            state_dict[key] = jax.device_put(tensor)
     else:
-        _assign_weights(rest, tensor, state_dict[key], st_key, transform)
+        next_sharding = sharding_dict[key] if sharding_dict is not None else None
+        _assign_weights(rest, tensor, state_dict[key], st_key, transform, next_sharding)
 
 
 def _stoi(s):
@@ -222,13 +226,8 @@ def _stoi(s):
         return s
 
 
-# TODO: Update to include sharding
-def create_gemma3_from_pretrained(
-    file_dir: str,
-    cfg: model_lib.ModelConfig,
-    *,
-    mesh: jax.sharding.Mesh | None = None,
-):
+# TODO: Update to optimize parameter loading for larger models
+def create_gemma3_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, mesh: jax.sharding.Mesh | None = None):
     """
     Load safetensor weights from a file, then convert & merge into a flax.nnx ViT model.
 
@@ -246,6 +245,7 @@ def create_gemma3_from_pretrained(
     gemma3 = model_lib.Gemma3Model(cfg, rngs=nnx.Rngs(0))
     graph_def, abs_state = nnx.split(gemma3)
     jax_state = abs_state.to_pure_dict()
+    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
     mapping = _get_key_and_transform_mapping()
     for st_key, tensor in tensor_dict.items():
@@ -254,7 +254,7 @@ def create_gemma3_from_pretrained(
             continue
         keys = [_stoi(k) for k in jax_key.split(r"\.")]
         try:
-            _assign_weights(keys, tensor, jax_state, st_key, transform.value)
+            _assign_weights(keys, tensor, jax_state, st_key, transform.value, sharding)
         except KeyError as e:
             print(f"Key error: {keys} at {e}")
         except ValueError as e:

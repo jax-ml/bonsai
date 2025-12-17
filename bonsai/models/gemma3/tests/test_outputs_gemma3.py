@@ -7,13 +7,13 @@ import numpy as np
 import torch
 from absl.testing import absltest
 from huggingface_hub import snapshot_download
+from jax import P
 from jax.sharding import AxisType
-from jax.typing import DTypeLike
 from tqdm import trange
-from transformers import AutoModel, AutoProcessor, AutoTokenizer, Gemma3Model, SiglipModel
+from transformers import AutoProcessor
 from transformers.cache_utils import DynamicCache
 from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
-from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
+from transformers.models.gemma3 import Gemma3ForConditionalGeneration
 from transformers.models.gemma3.modeling_gemma3 import token_type_ids_mask_function
 
 from bonsai.models.gemma3 import modeling, params
@@ -43,9 +43,9 @@ class TestModuleForwardPasses(absltest.TestCase):
         )
         cls.torch_config = cls.torch_model.config
 
-        cls.bonsai_config = modeling.ModelConfig.gemma3_4b()
+        cls.bonsai_config = modeling.ModelConfig.gemma3_4b_it()
         model_ckpt_path = snapshot_download(cls.model_name)
-        cls.bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, cls.bonsai_config)
+        cls.bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, cls.bonsai_config, mesh=cls.mesh)
 
         cls.batch_size = 1
         cls.cache_size, cls.gen_steps = 512, 10
@@ -351,21 +351,21 @@ class TestModuleForwardPasses(absltest.TestCase):
         nx = tx.detach().cpu().numpy()
 
         ty = tm.q_proj(tx)
-        ny = nm.q_proj(nx)
+        ny = nm.q_proj(nx, out_sharding=P())
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-4, atol=1e-4, err_msg="q")
 
         ty = tm.k_proj(tx)
-        ny = nm.k_proj(nx)
+        ny = nm.k_proj(nx, out_sharding=P())
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-4, atol=1e-4, err_msg="k")
 
         ty = tm.v_proj(tx)
-        ny = nm.v_proj(nx)
+        ny = nm.v_proj(nx, out_sharding=P())
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-4, atol=1e-4, err_msg="v")
 
         tx = torch.randn((1, 281, 2048), device=self.torch_device)
         nx = tx.detach().cpu().numpy()
         ty = tm.o_proj(tx)
-        ny = nm.o_proj(nx)
+        ny = nm.o_proj(nx, out_sharding=P())
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-4, atol=1e-4, err_msg="o")
 
     @unittest.skipIf(SKIP_DONE, "Done")
@@ -436,9 +436,9 @@ class TestModuleForwardPasses(absltest.TestCase):
             n_tti = first_t_inputs["token_type_ids"].detach().cpu().numpy()
 
             if attn_type == "full_attention":
-                mask = modeling.make_causal_mask(nnx_cache[test_layer], n_tti)
+                mask = modeling.make_causal_mask(nnx_cache[test_layer], n_tti, out_sharding=P())
             else:
-                mask = modeling.make_window_mask(nnx_cache[test_layer], n_tti, 1024)
+                mask = modeling.make_window_mask(nnx_cache[test_layer], n_tti, 1024, out_sharding=P())
 
             # run models
             ty = tm(**t_inputs)
@@ -521,9 +521,9 @@ class TestModuleForwardPasses(absltest.TestCase):
             n_tti = first_t_inputs["token_type_ids"].detach().cpu().numpy()
 
             if attn_type == "full_attention":
-                mask = modeling.make_causal_mask(nnx_cache[test_layer], n_tti)
+                mask = modeling.make_causal_mask(nnx_cache[test_layer], n_tti, out_sharding=P())
             else:
-                mask = modeling.make_window_mask(nnx_cache[test_layer], n_tti, 1024)
+                mask = modeling.make_window_mask(nnx_cache[test_layer], n_tti, 1024, out_sharding=P())
 
             # run models
             ty = tm(**t_inputs)
@@ -564,7 +564,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         n_tti = jnp.array(t_inputs["token_type_ids"].detach().cpu().numpy())
         gen_steps = 10
         cache = modeling.init_cache(self.bonsai_config, batch_size, num_tokens, gen_steps)
-        n_mask = modeling.make_causal_mask(cache[0], n_tti)
+        n_mask = modeling.make_causal_mask(cache[0], n_tti, out_sharding=P())
 
         # Full attention
         t_inputs = self._process_torch_inputs(**t_inputs)
@@ -575,7 +575,9 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         # Sliding attention
         t_mask = t_inputs["attention_mask"]["sliding_attention"]
-        n_mask = modeling.make_window_mask(cache[0], n_tti, self.bonsai_config.text_config.sliding_window)
+        n_mask = modeling.make_window_mask(
+            cache[0], n_tti, self.bonsai_config.text_config.sliding_window, out_sharding=P()
+        )
 
         np.testing.assert_allclose(n_mask[:, :, :, :size_for_comp], t_mask.detach().cpu().numpy())
 
@@ -596,8 +598,10 @@ class TestModuleForwardPasses(absltest.TestCase):
         cache = modeling.init_cache(self.bonsai_config, batch_size, num_tokens, 1, jnp.float32)
 
         # Get masks
-        n_causal_mask = modeling.make_causal_mask(cache[0], n_tti)
-        n_sliding_mask = modeling.make_window_mask(cache[0], n_tti, self.bonsai_config.text_config.sliding_window)
+        n_causal_mask = modeling.make_causal_mask(cache[0], n_tti, out_sharding=P())
+        n_sliding_mask = modeling.make_window_mask(
+            cache[0], n_tti, self.bonsai_config.text_config.sliding_window, out_sharding=P()
+        )
 
         # text embeds
         t_inputs_embeds = tm.language_model.embed_tokens(t_inputs["input_ids"])
