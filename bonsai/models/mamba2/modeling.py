@@ -369,9 +369,6 @@ class Mamba2Block(nnx.Module):
         return residual + hs_out, last_state
 
 
-# Main Models
-
-
 class Mamba2Model(nnx.Module):
     """Mamba2 backbone model (no task-specific head)."""
 
@@ -515,9 +512,6 @@ class Mamba2Forecaster(nnx.Module):
         last_hidden = outputs["last_hidden_state"][:, -1, :]
         out = self.output_proj(last_hidden)
         return out.reshape(x.shape[0], self.forecast_horizon, self.output_dim)
-
-
-# JIT-compiled forward pass
 
 
 @jax.jit
