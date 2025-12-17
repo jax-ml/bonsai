@@ -261,14 +261,6 @@ class TestMamba2Forecaster(absltest.TestCase):
 class TestParameters(absltest.TestCase):
     """Tests for parameter utilities."""
 
-    def test_count_parameters(self):
-        """Test parameter counting."""
-        cfg = modeling.Mamba2Config.tiny()
-        model = modeling.Mamba2ForCausalLM(cfg, rngs=nnx.Rngs(0))
-        num_params = params.count_parameters(model)
-        self.assertGreater(num_params, 0)
-        self.assertIsInstance(num_params, int)
-
     def test_create_random_model(self):
         """Test random model creation."""
         cfg = modeling.Mamba2Config.tiny()

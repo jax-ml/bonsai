@@ -33,8 +33,6 @@ def run_model():
 
     print("\n1. Creating model...")
     model = params.create_random_model(cfg, seed=42)
-    num_params = params.count_parameters(model)
-    print(f"   Model created with {num_params:,} parameters")
 
     batch_size, seq_len = 2, 64
     input_ids = jax.random.randint(jax.random.PRNGKey(0), (batch_size, seq_len), 0, cfg.vocab_size)
@@ -87,8 +85,6 @@ def run_forecaster():
         forecast_horizon=24,
         seed=42,
     )
-    num_params = params.count_parameters(model)
-    print(f"   Model created with {num_params:,} parameters")
 
     batch_size, seq_len, input_dim = 4, 100, 10
     x = jax.random.normal(jax.random.PRNGKey(0), (batch_size, seq_len, input_dim))
