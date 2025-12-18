@@ -94,12 +94,10 @@ def _pad_seq_dim(x: jnp.ndarray, pad_size: int) -> jnp.ndarray:
 def segsum(x: jnp.ndarray) -> jnp.ndarray:
     """Stable segment sum calculation. Input: (..., T) -> Output: (..., T, T)."""
     T = x.shape[-1]
-    x_rep = jnp.broadcast_to(x[..., None], (*x.shape, T))
-    mask_lower = jnp.tril(jnp.ones((T, T), dtype=bool), k=-1)
-    x_rep = jnp.where(mask_lower, x_rep, 0.0)
-    x_segsum = jnp.cumsum(x_rep, axis=-2)
-    mask_diag = jnp.tril(jnp.ones((T, T), dtype=bool), k=0)
-    x_segsum = jnp.where(mask_diag, x_segsum, jnp.array(-jnp.inf, dtype=x_segsum.dtype))
+    x_cumsum = jnp.cumsum(x, axis=-1)
+    x_segsum = x_cumsum[..., :, None] - x_cumsum[..., None, :]
+    mask = jnp.tril(jnp.ones((T, T), dtype=bool), k=0)
+    x_segsum = jnp.where(mask, x_segsum, -jnp.inf)
     return x_segsum
 
 
