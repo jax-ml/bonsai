@@ -25,7 +25,6 @@ def _get_key_and_transform_mapping():
         r"embeddings\.register_tokens$": ("embeddings.register_tokens", Transform.DEFAULT),
         r"embeddings\.patch_embeddings\.weight$": ("embeddings.patch_embeddings.kernel", Transform.CONV2D),
         r"embeddings\.patch_embeddings\.bias$": ("embeddings.patch_embeddings.bias", Transform.BIAS),
-
         # Attention weights and biases
         r"layer\.([0-9]+)\.attention\.q_proj\.weight$": (r"layer.\1.attention.q_proj.kernel", Transform.LINEAR),
         r"layer\.([0-9]+)\.attention\.k_proj\.weight$": (r"layer.\1.attention.k_proj.kernel", Transform.LINEAR),
@@ -35,7 +34,6 @@ def _get_key_and_transform_mapping():
         r"layer\.([0-9]+)\.attention\.k_proj\.bias$": (r"layer.\1.attention.k_proj.bias", Transform.BIAS),
         r"layer\.([0-9]+)\.attention\.v_proj\.bias$": (r"layer.\1.attention.v_proj.bias", Transform.BIAS),
         r"layer\.([0-9]+)\.attention\.o_proj\.bias$": (r"layer.\1.attention.o_proj.bias", Transform.BIAS),
-
         # MLP (gated or not)
         r"layer\.([0-9]+)\.mlp\.gate_proj\.weight$": (r"layer.\1.mlp.gate_proj.kernel", Transform.LINEAR),
         r"layer\.([0-9]+)\.mlp\.up_proj\.weight$": (r"layer.\1.mlp.up_proj.kernel", Transform.LINEAR),
@@ -43,17 +41,14 @@ def _get_key_and_transform_mapping():
         r"layer\.([0-9]+)\.mlp\.gate_proj\.bias$": (r"layer.\1.mlp.gate_proj.bias", Transform.BIAS),
         r"layer\.([0-9]+)\.mlp\.up_proj\.bias$": (r"layer.\1.mlp.up_proj.bias", Transform.BIAS),
         r"layer\.([0-9]+)\.mlp\.down_proj\.bias$": (r"layer.\1.mlp.down_proj.bias", Transform.BIAS),
-
         # layer_scale1 / layer_scale2 keys
         r"layer\.([0-9]+)\.layer_scale1\.lambda1$": (r"layer.\1.layer_scale1.lambda1", Transform.DEFAULT),
         r"layer\.([0-9]+)\.layer_scale2\.lambda1$": (r"layer.\1.layer_scale2.lambda1", Transform.DEFAULT),
-
         # norm1 / norm2 mapping
         r"layer\.([0-9]+)\.norm1\.weight$": (r"layer.\1.norm1.scale", Transform.DEFAULT),
         r"layer\.([0-9]+)\.norm1\.bias$": (r"layer.\1.norm1.bias", Transform.DEFAULT),
         r"layer\.([0-9]+)\.norm2\.weight$": (r"layer.\1.norm2.scale", Transform.DEFAULT),
         r"layer\.([0-9]+)\.norm2\.bias$": (r"layer.\1.norm2.bias", Transform.DEFAULT),
-
         # final model norm
         r"norm\.weight": ("norm.scale", Transform.DEFAULT),
         r"norm\.bias": ("norm.bias", Transform.DEFAULT),
@@ -69,6 +64,7 @@ def _torch_key_to_jax_key(mapping, source_key):
     if len(subs) != 1:
         raise ValueError(f"Only one key should be found: {subs[0]}")
     return subs[0]
+
 
 def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
@@ -93,11 +89,13 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
         next_sharding = sharding_dict[key] if sharding_dict is not None else None
         _assign_weights(rest, tensor, state_dict[key], st_key, transform, next_sharding)
 
+
 def _stoi(s):
     try:
         return int(s)
     except ValueError:
         return s
+
 
 def create_model_from_safe_tensors(
     file_dir: str,
@@ -109,9 +107,7 @@ def create_model_from_safe_tensors(
     if not files:
         raise ValueError(f"No safetensors found in {file_dir}")
 
-    dinov3 = nnx.eval_shape(
-        lambda: Dinov3ViTModel(cfg, rngs=nnx.Rngs(0))
-    )
+    dinov3 = nnx.eval_shape(lambda: Dinov3ViTModel(cfg, rngs=nnx.Rngs(0)))
     graph_def, abs_state = nnx.split(dinov3)
     state_dict = abs_state.to_pure_dict()
     # Only use sharding if mesh is provided

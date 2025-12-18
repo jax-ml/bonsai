@@ -5,6 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 from absl.testing import absltest
+from huggingface_hub import constants
 from safetensors.torch import save_file
 from transformers import DINOv3ViTConfig, DINOv3ViTModel
 
@@ -15,8 +16,7 @@ from bonsai.models.dinov3 import params
 class TestForwardPass(absltest.TestCase):
     def setUp(self):
         super().setUp()
-        raw_path = "~/.cache/huggingface/dinov3_vitb16"
-        self.save_dir = os.path.expanduser(raw_path)
+        self.save_dir = constants.default_cache_path
         os.makedirs(self.save_dir, exist_ok=True)
 
         self.hfconfig = DINOv3ViTConfig(
@@ -88,7 +88,6 @@ class TestForwardPass(absltest.TestCase):
 
         torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=3e-1)
 
-
     def test_last_hidden_state(self):
         key = jax.random.PRNGKey(0)
         jx = jax.random.normal(key, self.image_shape, dtype=jnp.float32)
@@ -120,6 +119,7 @@ class TestForwardPass(absltest.TestCase):
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
         torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=2e-2)
+
 
 if __name__ == "__main__":
     absltest.main()
