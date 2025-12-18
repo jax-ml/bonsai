@@ -11,6 +11,7 @@ class Dinov3ViTModelOutput:
     last_hidden_state: Array
     pooler_output: Array
 
+
 @dataclasses.dataclass(frozen=True)
 class DINOv3ViTFlaxConfig:
     model_type = "dinov3_ViT"
@@ -92,6 +93,7 @@ class DINOv3ViTFlaxConfig:
             use_gated_mlp=True,
         )
 
+
 class DINOv3ViTEmbeddings(nnx.Module):
     def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         super().__init__()
@@ -124,6 +126,7 @@ class DINOv3ViTEmbeddings(nnx.Module):
         )
         return jnp.concat([cls_token, register_tokens, patch_embeddings], axis=1)
 
+
 class Dinov3ViTRopePositionEmbedding(nnx.Module):
     def __init__(self, config: DINOv3ViTFlaxConfig):
         super().__init__()
@@ -140,7 +143,7 @@ class Dinov3ViTRopePositionEmbedding(nnx.Module):
 
         coords_h = jnp.arange(0.5, num_patches_h, dtype=jnp.float32) / num_patches_h  # [H]
         coords_w = jnp.arange(0.5, num_patches_w, dtype=jnp.float32) / num_patches_w  # [W]
-        coords = jnp.stack(jnp.meshgrid(coords_h, coords_w, indexing="ij"), axis=-1) # [H, W, 2]
+        coords = jnp.stack(jnp.meshgrid(coords_h, coords_w, indexing="ij"), axis=-1)  # [H, W, 2]
         coords = coords.reshape(-1, 2)
         coords = 2 * coords - 1.0
 
@@ -154,6 +157,7 @@ class Dinov3ViTRopePositionEmbedding(nnx.Module):
 
         return (cos, sin)
 
+
 class Dinov3LayerScale(nnx.Module):
     def __init__(self, config: DINOv3ViTFlaxConfig):
         super().__init__()
@@ -162,12 +166,14 @@ class Dinov3LayerScale(nnx.Module):
     def __call__(self, x: Array) -> Array:
         return x * self.lambda1
 
+
 def rotate_half(x: Array) -> Array:
     d = x.shape[-1]
     assert d % 2 == 0
     x1 = x[..., : d // 2]
     x2 = x[..., d // 2 :]
     return jnp.concatenate((-x2, x1), axis=-1)
+
 
 def apply_rotary_pos_emb(q: Array, k: Array, cos: Array, sin: Array) -> Tuple[Array, Array]:
     q = q.astype(jnp.bfloat16)
@@ -240,6 +246,7 @@ class Dinov3ViTAttention(nnx.Module):
         hidden_states = self.o_proj(hidden_states)
         return hidden_states
 
+
 class Dinov3MLP(nnx.Module):
     def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         super().__init__()
@@ -255,6 +262,7 @@ class Dinov3MLP(nnx.Module):
 
     def __call__(self, x):
         return self.down_proj(self.act_fn(self.up_proj(x)))
+
 
 class Dinov3GatedMLP(nnx.Module):
     def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
@@ -273,6 +281,7 @@ class Dinov3GatedMLP(nnx.Module):
     def __call__(self, x):
         x = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
         return x
+
 
 class Dinov3ViTLayer(nnx.Module):
     def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
@@ -301,6 +310,7 @@ class Dinov3ViTLayer(nnx.Module):
         hidden_states = hidden_states + residual
         return hidden_states
 
+
 class Dinov3ViTModel(nnx.Module):
     def __init__(self, config: DINOv3ViTFlaxConfig, rngs: nnx.Rngs):
         super().__init__()
@@ -320,4 +330,4 @@ class Dinov3ViTModel(nnx.Module):
         sequence_output = self.norm(hidden_states)
         pooled_output = sequence_output[:, 0, :]
 
-        return Dinov3ViTModelOutput(**{"last_hidden_state": sequence_output,"pooler_output": pooled_output})
+        return Dinov3ViTModelOutput(**{"last_hidden_state": sequence_output, "pooler_output": pooled_output})
