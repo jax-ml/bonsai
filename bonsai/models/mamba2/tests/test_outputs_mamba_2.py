@@ -17,6 +17,8 @@
 Run with: python -m absl.testing.absltest bonsai/models/mamba2/tests/test_outputs.py
 """
 
+import os
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -347,6 +349,66 @@ class TestGradients(absltest.TestCase):
 
         loss, _grads = nnx.value_and_grad(loss_fn)(model, input_ids, labels)
         self.assertFalse(jnp.isnan(loss))
+
+
+class TestGoldenParity(absltest.TestCase):
+    """Tests for parity with mamba_ssm reference outputs."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        artifacts_dir = os.path.join(os.path.dirname(__file__), "artifacts")
+        cls.golden = np.load(os.path.join(artifacts_dir, "golden_mamba2_130m.npz"))
+
+    def test_hidden_state_parity(self):
+        """Test last_hidden_state matches mamba_ssm reference within numerical tolerance."""
+        cfg = modeling.Mamba2Config(
+            vocab_size=50288,
+            hidden_size=768,
+            state_size=128,
+            num_hidden_layers=24,
+            head_dim=64,
+            expand=2,
+            conv_kernel=4,
+        )
+        model = modeling.Mamba2ForCausalLM.from_pretrained("state-spaces/mamba2-130m", cfg=cfg)
+
+        input_ids = jnp.array(self.golden["input_ids"], dtype=jnp.int32)
+        outputs = model.backbone(input_ids=input_ids)
+        bonsai_hidden = np.array(outputs["last_hidden_state"])
+        golden_hidden = self.golden["last_hidden_state"]
+
+        max_diff = np.max(np.abs(bonsai_hidden - golden_hidden))
+        mean_diff = np.mean(np.abs(bonsai_hidden - golden_hidden))
+
+        # Tolerances account for Triton vs JAX numerical differences across 24 layers
+        self.assertLess(max_diff, 1e-1, f"Max diff {max_diff:.2e} exceeds tolerance")
+        self.assertLess(mean_diff, 1e-3, f"Mean diff {mean_diff:.2e} exceeds tolerance")
+
+    def test_logits_parity(self):
+        """Test logits match mamba_ssm reference within numerical tolerance."""
+        cfg = modeling.Mamba2Config(
+            vocab_size=50288,
+            hidden_size=768,
+            state_size=128,
+            num_hidden_layers=24,
+            head_dim=64,
+            expand=2,
+            conv_kernel=4,
+        )
+        model = modeling.Mamba2ForCausalLM.from_pretrained("state-spaces/mamba2-130m", cfg=cfg)
+
+        input_ids = jnp.array(self.golden["input_ids"], dtype=jnp.int32)
+        outputs = model(input_ids=input_ids)
+        bonsai_logits = np.array(outputs["logits"])[:, :, :256]
+        golden_logits = self.golden["logits_slice"]
+
+        max_diff = np.max(np.abs(bonsai_logits - golden_logits))
+        mean_diff = np.mean(np.abs(bonsai_logits - golden_logits))
+
+        # Logits have additional lm_head matmul, slightly higher tolerance
+        self.assertLess(max_diff, 2e-1, f"Max diff {max_diff:.2e} exceeds tolerance")
+        self.assertLess(mean_diff, 5e-2, f"Mean diff {mean_diff:.2e} exceeds tolerance")
 
 
 if __name__ == "__main__":
