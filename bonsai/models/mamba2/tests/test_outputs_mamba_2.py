@@ -19,6 +19,11 @@ Run with: python -m absl.testing.absltest bonsai/models/mamba2/tests/test_output
 
 import os
 
+os.environ["JAX_DEFAULT_MATMUL_PRECISION"] = "highest"
+import jax
+
+jax.config.update("jax_default_matmul_precision", "highest")
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -378,12 +383,11 @@ class TestGoldenParity(absltest.TestCase):
         bonsai_hidden = np.array(outputs["last_hidden_state"])
         golden_hidden = self.golden["last_hidden_state"]
 
-        max_diff = np.max(np.abs(bonsai_hidden - golden_hidden))
-        mean_diff = np.mean(np.abs(bonsai_hidden - golden_hidden))
-
-        # Tolerances account for Triton vs JAX numerical differences across 24 layers
-        self.assertLess(max_diff, 1e-1, f"Max diff {max_diff:.2e} exceeds tolerance")
-        self.assertLess(mean_diff, 1e-3, f"Mean diff {mean_diff:.2e} exceeds tolerance")
+        # fp32=1e-5, bf16=1e-3 (see ViT parity tests).
+        # atol is an output-level floor to avoid near-zero blowups
+        rtol = 1e-5 if bonsai_hidden.dtype == np.float32 else 1e-3
+        atol = 1e-1
+        np.testing.assert_allclose(bonsai_hidden, golden_hidden, rtol=rtol, atol=atol)
 
     def test_logits_parity(self):
         """Test logits match mamba_ssm reference within numerical tolerance."""
@@ -403,12 +407,11 @@ class TestGoldenParity(absltest.TestCase):
         bonsai_logits = np.array(outputs["logits"])[:, :, :256]
         golden_logits = self.golden["logits_slice"]
 
-        max_diff = np.max(np.abs(bonsai_logits - golden_logits))
-        mean_diff = np.mean(np.abs(bonsai_logits - golden_logits))
-
-        # Logits have additional lm_head matmul, slightly higher tolerance
-        self.assertLess(max_diff, 2e-1, f"Max diff {max_diff:.2e} exceeds tolerance")
-        self.assertLess(mean_diff, 5e-2, f"Mean diff {mean_diff:.2e} exceeds tolerance")
+        # fp32=1e-5, bf16=1e-3 (see ViT parity tests).
+        # atol is an output-level floor to avoid near-zero blowups
+        rtol = 1e-5 if bonsai_logits.dtype == np.float32 else 1e-3
+        atol = 2e-1
+        np.testing.assert_allclose(bonsai_logits, golden_logits, rtol=rtol, atol=atol)
 
 
 if __name__ == "__main__":
