@@ -12,11 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for Mamba2 model outputs.
-
-Run with: python -m absl.testing.absltest bonsai/models/mamba2/tests/test_outputs.py
-"""
-
 import os
 
 os.environ["JAX_DEFAULT_MATMUL_PRECISION"] = "highest"
