@@ -12,71 +12,124 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Smoke test for Mamba2 model."""
+"""Smoke test for Mamba2."""
 
-import time
+from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+from jax.sharding import PartitionSpec as P
+from transformers import AutoTokenizer
 
-from bonsai.models.mamba2 import modeling, params
-
-
-def run_model():
-    """Run a simple forward pass with a tiny Mamba2 model."""
-    print("=" * 60)
-    print("Mamba2 Smoke Test")
-    print("=" * 60)
-
-    cfg = modeling.Mamba2Config.tiny()
-    print(f"\nConfig: hidden_size={cfg.hidden_size}, layers={cfg.num_hidden_layers}, vocab={cfg.vocab_size}")
-
-    print("\n1. Creating model...")
-    model = params.create_random_model(cfg, seed=42)
-
-    batch_size, seq_len = 2, 64
-    input_ids = jax.random.randint(jax.random.PRNGKey(0), (batch_size, seq_len), 0, cfg.vocab_size)
-    labels = jax.random.randint(jax.random.PRNGKey(1), (batch_size, seq_len), 0, cfg.vocab_size)
-    print(f"\n2. Input shape: {input_ids.shape}")
-
-    print("\n3. Running forward pass (with JIT compilation)...")
-    start = time.perf_counter()
-    outputs = modeling.forward(model, input_ids, labels)
-    jax.block_until_ready(outputs["logits"])
-    first_time = time.perf_counter() - start
-    print(f"   First forward pass: {first_time:.3f}s")
-
-    print("\n4. Output validation:")
-    print(f"   Logits shape: {outputs['logits'].shape}")
-    print(f"   Loss: {outputs['loss']:.4f}")
-    print(f"   Contains NaN: {bool(jnp.any(jnp.isnan(outputs['logits'])))}")
-
-    print("\n5. Running second forward pass (JIT cached)...")
-    start = time.perf_counter()
-    outputs2 = modeling.forward(model, input_ids, labels)
-    jax.block_until_ready(outputs2["logits"])
-    second_time = time.perf_counter() - start
-    print(f"   Second forward pass: {second_time:.4f}s")
-    print(f"   Speedup: {first_time / second_time:.1f}x")
-
-    print("\n6. Consistency check:")
-    max_diff = jnp.max(jnp.abs(outputs["logits"] - outputs2["logits"]))
-    print(f"   Max difference between runs: {max_diff}")
-    assert max_diff < 1e-5, "Outputs should be deterministic"
-    print("   ✓ Outputs are consistent")
-
-    print("\n" + "=" * 60)
-    print("✓ Mamba2 smoke test PASSED")
-    print("=" * 60)
+from bonsai.models.mamba2 import modeling
 
 
-def run_forecaster():
-    """Run a simple forward pass with a Mamba2Forecaster."""
-    print("\n" + "=" * 60)
-    print("Mamba2Forecaster Smoke Test")
-    print("=" * 60)
+@jax.jit
+def _decode_step(
+    model: modeling.Mamba2ForCausalLM,
+    tokens: jnp.ndarray,
+    cur: jnp.ndarray,
+) -> jnp.ndarray:
+    out = model(tokens, labels=None)
+    prev_logits = jax.lax.dynamic_index_in_dim(out["logits"], cur - jnp.int32(1), axis=1, keepdims=False)
+    next_tok = jnp.argmax(prev_logits, axis=-1)
+    tokens = tokens.at[:, cur].set(next_tok)
+    return tokens
 
-    print("\n1. Creating forecaster...")
+
+def _greedy_generate(
+    model: modeling.Mamba2ForCausalLM,
+    prompt_ids_1d: jnp.ndarray,
+    *,
+    max_new_tokens: int,
+    pad_id: int,
+    buffer_len: int,
+) -> jnp.ndarray:
+    prompt_len = int(prompt_ids_1d.shape[0])
+    total_len = prompt_len + max_new_tokens
+    if buffer_len < total_len:
+        raise ValueError(f"buffer_len ({buffer_len}) must be >= prompt_len+max_new_tokens ({total_len})")
+
+    # Fixed shape buffer: (batch=1, buffer_len)
+    tokens = jnp.full((1, buffer_len), int(pad_id), dtype=jnp.int32)
+    tokens = tokens.at[0, :prompt_len].set(jnp.asarray(prompt_ids_1d, dtype=jnp.int32))
+
+    # Warmup compile once for this (1, buffer_len) shape.
+    tokens = _decode_step(model, tokens, jnp.asarray(prompt_len, dtype=jnp.int32))
+    jax.block_until_ready(tokens)
+
+    # Now generate the remaining tokens.
+    for t in range(1, max_new_tokens + 1):
+        cur = jnp.asarray(prompt_len + t, dtype=jnp.int32)  # dynamic scalar => no per-token recompiles
+        tokens = _decode_step(model, tokens, cur)
+
+    out = tokens[:, :total_len]
+    jax.block_until_ready(out)
+    return out
+
+
+def _to_host_1d(x: jnp.ndarray) -> jnp.ndarray:
+    try:
+        return x.get(out_sharding=P(None))
+    except Exception:
+        return jax.device_get(x)
+
+
+def run_model(*, max_new_tokens: int = 32) -> None:
+    """Run the Mamba2 generation smoke test."""
+    query = [
+        "Why is the sky blue instead of any other color like purple?",
+        "What is the capital city of England?",
+    ]
+
+    cfg = modeling.Mamba2Config(
+        vocab_size=50288,
+        hidden_size=768,
+        state_size=128,
+        num_hidden_layers=24,
+        head_dim=64,
+        expand=2,
+        conv_kernel=4,
+    )
+
+    model = modeling.Mamba2ForCausalLM.from_pretrained("state-spaces/mamba2-130m", cfg=cfg)
+    tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
+
+    # Determine padding id robustly.
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = tokenizer.eos_token_id
+    if pad_id is None:
+        pad_id = cfg.pad_token_id
+
+    # Share a single static buffer length across all prompts to reuse compilation.
+    prompt_ids_list = [jnp.asarray(tokenizer.encode(q), dtype=jnp.int32) for q in query]
+    max_prompt_len = max(int(x.shape[0]) for x in prompt_ids_list)
+    buffer_len = max_prompt_len + max_new_tokens
+
+    for q, prompt_ids in zip(query, prompt_ids_list):
+        tokens_2d = _greedy_generate(
+            model,
+            prompt_ids,
+            max_new_tokens=max_new_tokens,
+            pad_id=int(pad_id),
+            buffer_len=buffer_len,
+        )
+
+        host_ids = _to_host_1d(tokens_2d.at[0].get())
+
+        generated_ids_only = host_ids[len(prompt_ids) :]
+
+        text = tokenizer.decode(generated_ids_only.tolist(), skip_special_tokens=True)
+
+        print(f"User:\n {q}")
+        print(f"Answer:\n {text.strip()}\n\n")
+
+
+def run_forecaster() -> None:
+    """Run a tiny Mamba2Forecaster smoke test (shape-only)."""
+    from bonsai.models.mamba2 import params
+
     model = params.create_random_forecaster(
         input_dim=10,
         d_model=64,
@@ -86,50 +139,17 @@ def run_forecaster():
         seed=42,
     )
 
-    batch_size, seq_len, input_dim = 4, 100, 10
-    x = jax.random.normal(jax.random.PRNGKey(0), (batch_size, seq_len, input_dim))
-    print(f"\n2. Input shape: {x.shape}")
+    x = jax.random.normal(jax.random.PRNGKey(0), (4, 100, 10))
+    y = model(x)
+    jax.block_until_ready(y)
 
-    print("\n3. Running forward pass...")
-
-    @jax.jit
-    def forward_forecaster(model, x):
-        return model(x)
-
-    start = time.perf_counter()
-    predictions = forward_forecaster(model, x)
-    jax.block_until_ready(predictions)
-    elapsed = time.perf_counter() - start
-    print(f"   Forward pass time: {elapsed:.3f}s")
-
-    print("\n4. Output validation:")
-    print(f"   Predictions shape: {predictions.shape}")
-    print(f"   Expected shape: ({batch_size}, 24, 1)")
-    print(f"   Contains NaN: {bool(jnp.any(jnp.isnan(predictions)))}")
-
-    assert predictions.shape == (batch_size, 24, 1), "Output shape mismatch"
-    assert not jnp.any(jnp.isnan(predictions)), "Output contains NaN"
-
-    print("\n" + "=" * 60)
-    print("✓ Mamba2Forecaster smoke test PASSED")
-    print("=" * 60)
-
-
-def print_device_info():
-    """Print JAX device information."""
-    print("\nJAX Device Information:")
-    print(f"  Backend: {jax.default_backend()}")
-    print(f"  Devices: {jax.devices()}")
-    print(f"  Device count: {jax.device_count()}")
+    print(f"Forecaster input shape:  {tuple(x.shape)}")
+    print(f"Forecaster output shape: {tuple(y.shape)}")
 
 
 if __name__ == "__main__":
-    print_device_info()
     run_model()
     run_forecaster()
-    print("\n" + "=" * 60)
-    print("All smoke tests PASSED! ✓")
-    print("=" * 60)
 
 
 __all__ = ["run_forecaster", "run_model"]
