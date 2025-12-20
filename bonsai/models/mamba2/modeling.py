@@ -223,7 +223,7 @@ class RMSNorm(nnx.Module):
         if residual is not None and self.gate_residual:
             x = x * nnx.silu(residual.astype(jnp.float32))
         variance = jnp.mean(x**2, axis=-1, keepdims=True)
-        x = x * jax.lax.rsqrt(variance + self.eps) * self.weight.value
+        x = x * jax.lax.rsqrt(variance + self.eps) * self.weight[:]
         return x.astype(hidden_states.dtype)
 
 
@@ -317,7 +317,7 @@ class Mamba2Mixer(nnx.Module):
 
         # 3) SSD forward
         init_state = initial_state[:, None, ...] if initial_state is not None else None
-        A = -jnp.exp(self.A_log.value.astype(jnp.float32))
+        A = -jnp.exp(self.A_log[:].astype(jnp.float32))
 
         B_exp = jnp.broadcast_to(jnp.expand_dims(B_t, 2), (B_size, L, self.num_heads, self.ssm_state_size))
         C_exp = jnp.broadcast_to(jnp.expand_dims(C_t, 2), (B_size, L, self.num_heads, self.ssm_state_size))
@@ -329,8 +329,8 @@ class Mamba2Mixer(nnx.Module):
             B_mat=B_exp,
             C_mat=C_exp,
             chunk_size=self.chunk_size,
-            D=self.D.value,
-            dt_bias=self.dt_bias.value,
+            D=self.D[:],
+            dt_bias=self.dt_bias[:],
             dt_min=self.dt_min,
             dt_max=self.dt_max,
             initial_states=init_state,
@@ -435,7 +435,7 @@ class Mamba2ForCausalLM(nnx.Module):
         hidden_states = backbone_outputs["last_hidden_state"]
 
         if self.cfg.tie_word_embeddings:
-            logits = hidden_states @ self.backbone.embedder.embedding.value.T
+            logits = hidden_states @ self.backbone.embedder.embedding[:].T
         else:
             logits = self.lm_head(hidden_states)
 

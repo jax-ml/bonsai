@@ -187,7 +187,7 @@ def _set_nested_attr(obj: Any, path: str, value: Any) -> None:
 
     attr = getattr(obj, final_part)
     if isinstance(attr, nnx.Param):
-        attr.value = value
+        attr[...] = value
     else:
         setattr(obj, final_part, value)
 
