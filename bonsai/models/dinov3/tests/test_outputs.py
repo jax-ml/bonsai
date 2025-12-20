@@ -86,7 +86,7 @@ class TestForwardPass(absltest.TestCase):
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=3e-1)
+        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=3e-3)
 
     def test_last_hidden_state(self):
         key = jax.random.PRNGKey(0)
@@ -102,7 +102,7 @@ class TestForwardPass(absltest.TestCase):
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=5e-2)
+        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=3e-2)
 
     def test_pooled_output_embeddings(self):
         key = jax.random.PRNGKey(0)
