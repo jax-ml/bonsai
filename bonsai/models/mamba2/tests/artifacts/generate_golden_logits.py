@@ -12,14 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Generate golden .npz artifacts for Mamba2 parity tests.
-
-Requires CUDA and mamba_ssm: pip install mamba_ssm
-
-Usage:
-    python generate_golden.py
-"""
-
 import os
 
 import numpy as np
