@@ -12,12 +12,17 @@ from jax.sharding import AxisType
 from transformers import AutoProcessor
 
 from bonsai.models.gemma3 import modeling
+from bonsai.models.gemma3.tests.test_outputs_gemma3 import check_hf_token
+
+SKIP_ALL: bool = False
 
 
 class TestSharding(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        if SKIP_ALL:
+            return
         cls.model_name: str = "google/gemma-3-4b-it"
         access_token = os.environ["HF_TOKEN"]
         cls.processor = AutoProcessor.from_pretrained(cls.model_name, token=access_token, use_fast=False)
@@ -30,9 +35,6 @@ class TestSharding(absltest.TestCase):
 
         cls.bonsai_config = modeling.ModelConfig.gemma3_4b_it(True, True)
         cls.bonsai_model = modeling.Gemma3Model(cls.bonsai_config, rngs=nnx.Rngs(0))
-
-        cls.batch_size = 1
-        cls.cache_size, cls.gen_steps = 512, 10
 
     def _make_torch_input(self):
         messages = [
@@ -56,6 +58,7 @@ class TestSharding(absltest.TestCase):
 
         return {k: v.to(device=self.torch_device) for k, v in out.items()}
 
+    @unittest.skipIf(SKIP_ALL, "Done")
     def test_full(self):
         nm = self.bonsai_model
         fsdp = modeling.ShardMode.FSDP.value
@@ -87,4 +90,9 @@ class TestSharding(absltest.TestCase):
 
 
 if __name__ == "__main__":
+    err = check_hf_token()
+    if err:
+        SKIP_ALL = True
+        print("Failed to access HF_TOKEN or download Processor:")
+        print(err)
     absltest.main()

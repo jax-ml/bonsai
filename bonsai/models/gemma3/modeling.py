@@ -288,6 +288,7 @@ class ModelConfig:
 # General Components
 
 
+# TODO: Replace with nnx.Linear once explicit sharding is supported.
 class SHLinear(nnx.Module):
     """Sharded Linear layer"""
 
@@ -315,6 +316,7 @@ class SHLinear(nnx.Module):
         return jnp.matmul(x, self.kernel, out_sharding=out_sharding) + self.bias
 
 
+# TODO: Replace with nnx.Embed once explicit sharding is supported.
 class SHEmbed(nnx.Embed):
     """Sharded Embedding layer"""
 
