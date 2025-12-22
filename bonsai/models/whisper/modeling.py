@@ -168,7 +168,7 @@ class WhisperEncoder(nnx.Module):
         inputs_embeds = jax.nn.gelu(self.conv1(input_features))
         inputs_embeds = jax.nn.gelu(self.conv2(inputs_embeds))
 
-        all_positions = jnp.arange(self.embed_positions.num_embeddings, device=inputs_embeds.device)
+        all_positions = jnp.arange(self.embed_positions.num_embeddings)
         hidden_states = inputs_embeds + self.embed_positions(all_positions)
 
         for encoder_layer in self.layers:
