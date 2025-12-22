@@ -21,9 +21,6 @@ from bonsai.models.gemma3 import modeling, params
 # used for skipping smaller tests
 SKIP_DONE: bool = True
 
-# used for model loading error checking
-SKIP_ALL: bool = False
-
 
 def check_hf_token():
     try:
@@ -40,8 +37,6 @@ class TestModuleForwardPasses(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        if SKIP_ALL:
-            return
         cls.model_name: str = "google/gemma-3-4b-it"
         cls.torch_device = "cpu"
         access_token = os.environ["HF_TOKEN"]
@@ -265,7 +260,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         )
 
     # Vision tests
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_image_emb(self):
         tm = self.torch_model.model.vision_tower.vision_model.embeddings
         nm = self.bonsai_model.vision_tower.embeddings
@@ -281,7 +276,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-5, atol=1e-5)
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_siglip_encoder_layer(self):
         tm = self.torch_model.model.vision_tower.vision_model.encoder.layers[0]
         nm = self.bonsai_model.vision_tower.encoder.layers[0]
@@ -295,7 +290,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-4, atol=1e-4)
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_vision_model(self):
         # only have deviations on .0567% of the entries and on order 7e-3
         tm = self.torch_model.model.vision_tower
@@ -313,7 +308,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-2, atol=1e-2)
 
     # Language tests
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_text_embedding(self):
         self._upgrade_dtypes()
         tm = self.torch_model.model.language_model.embed_tokens
@@ -333,7 +328,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy())
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_attn_projs(self):
         tm = self.torch_model.model.language_model.layers[0].self_attn
         nm = self.bonsai_model.language_model.layers[0].self_attn
@@ -359,7 +354,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         ny = nm.o_proj(nx, out_sharding=P())
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-4, atol=1e-4, err_msg="o")
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_attn_norms(self):
         tm = self.torch_model.model.language_model.layers[0].self_attn
         nm = self.bonsai_model.language_model.layers[0].self_attn
@@ -382,7 +377,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         ny = nm.k_norm(nx)
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-5, atol=1e-5, err_msg="k")
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_sin_cos(self):
         batch_size, seq_len, dim = 2, 10, 256
         hidden_states = torch.ones((batch_size, seq_len, dim))
@@ -406,7 +401,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         torch.testing.assert_close(torch.tensor(js), ts)
         torch.testing.assert_close(torch.tensor(jc), tc)
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_text_decoder_layer(self):
         first_t_inputs = self._make_torch_input()
         start_t_inputs = self._process_torch_inputs(**first_t_inputs)
@@ -449,7 +444,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     # multi modal tests
 
-    @unittest.skipIf(SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_multi_modal_projector(self):
         t_inputs = self._make_torch_input()
         tm = self.torch_model.model
@@ -463,7 +458,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         torch.testing.assert_close(torch.tensor(ny), ty, rtol=1e-4, atol=1e-4)
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_text_image_merge(self):
         nm = self.bonsai_model
         t_inputs = self._make_torch_input()
@@ -485,7 +480,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         np.testing.assert_allclose(n_ans, t_ans.detach().cpu().numpy(), rtol=1e-3, atol=1e-3)
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_text_layers_in_order(self):
         first_t_inputs = self._make_torch_input()
         start_t_inputs = self._process_torch_inputs(**first_t_inputs)
@@ -528,7 +523,7 @@ class TestModuleForwardPasses(absltest.TestCase):
                 found_exception = True
         assert not found_exception, "FOUND EXCEPTION"
 
-    @unittest.skipIf(SKIP_DONE or SKIP_ALL, "Done")
+    @unittest.skipIf(SKIP_DONE, "Done")
     def test_masks(self):
         # Make a really long input so we can test the sliding window
         # This only tests for the pre-fill stage
@@ -659,7 +654,6 @@ class TestModuleForwardPasses(absltest.TestCase):
         assert not found_error, "Found errors in text decoder layers"
         # NOTE: some errors are expected here since errors compound with layer
 
-    @unittest.skipIf(SKIP_ALL, "Done")
     def test_full(self):
         tm = self.torch_model
         nm = self.bonsai_model
@@ -713,7 +707,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 if __name__ == "__main__":
     err = check_hf_token()
     if err:
-        SKIP_ALL = True
         print("Failed to access HF_TOKEN or download Processor:")
         print(err)
-    absltest.main()
+    else:
+        absltest.main()
