@@ -15,6 +15,7 @@ from bonsai.models.gemma3 import modeling
 from bonsai.models.gemma3.tests.test_outputs_gemma3 import check_hf_token
 
 
+@unittest.skipIf(check_hf_token(), "Skipping TestSharding due to HF_TOKEN failure.")
 class TestSharding(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -85,9 +86,4 @@ class TestSharding(absltest.TestCase):
 
 
 if __name__ == "__main__":
-    err = check_hf_token()
-    if err:
-        print("Failed to access HF_TOKEN or download Processor:")
-        print(err)
-    else:
-        absltest.main()
+    absltest.main()

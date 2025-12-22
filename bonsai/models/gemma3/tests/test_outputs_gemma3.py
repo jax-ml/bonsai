@@ -27,10 +27,13 @@ def check_hf_token():
         access_token = os.environ["HF_TOKEN"]
         AutoProcessor.from_pretrained("google/gemma-3-4b-it", token=access_token, use_fast=False)
     except Exception as e:
-        return e
-    return None
+        print("Failed to access HF_TOKEN or download Processor:")
+        print(e)
+        return True
+    return False
 
 
+@unittest.skipIf(check_hf_token(), "Skipping TestModuleForwardPasses due to HF_TOKEN failure.")
 class TestModuleForwardPasses(absltest.TestCase):
     # Using this for faster testing. This way we can avoid reloading the model.
     # Make sure not to modify the Gemma3 model in inconsistent ways between tests.
@@ -705,9 +708,4 @@ class TestModuleForwardPasses(absltest.TestCase):
 
 
 if __name__ == "__main__":
-    err = check_hf_token()
-    if err:
-        print("Failed to access HF_TOKEN or download Processor:")
-        print(err)
-    else:
-        absltest.main()
+    absltest.main()
