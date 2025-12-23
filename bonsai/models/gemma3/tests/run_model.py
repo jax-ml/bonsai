@@ -30,34 +30,21 @@ from bonsai.utils import Sampler
 
 
 def make_input(processor, dtype=torch.float32, msg1=True):
-    if msg1:
-        messages = [
-            {"role": "system", "content": [{"type": "text", "text": "You are a helpful assistant."}]},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "url": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/pipeline-cat-chonk.jpeg",
-                    },
-                    {"type": "text", "text": "What is shown in this image?"},
-                ],
-            },
-        ]
-    else:
-        messages = [
-            {"role": "system", "content": [{"type": "text", "text": "You are a helpful assistant."}]},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg",
-                    },
-                    {"type": "text", "text": "Describe this image in detail."},
-                ],
-            },
-        ]
+    url_prefix = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main"
+    url = "pipeline-cat-chonk.jpeg" if msg1 else "bee.jpg"
+    prompt = "What is shown in this image?" if msg1 else "Describe this image in detail."
+    img_key = "url" if msg1 else "image"
+
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": "You are a helpful assistant."}]},
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", img_key: f"{url_prefix}/{url}"},
+                {"type": "text", "text": prompt},
+            ],
+        },
+    ]
 
     t_inputs = processor.apply_chat_template(
         messages, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt"
