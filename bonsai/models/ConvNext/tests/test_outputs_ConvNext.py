@@ -58,9 +58,6 @@ class TestModuleForwardPasses(absltest.TestCase):
 
                 torch.testing.assert_close(torch.tensor(j_out), t_out.permute(0, 2, 3, 1), rtol=5e-4, atol=5e-4)
 
-    def test_drop_path(self):
-        pass
-
     def test_full(self):
         jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
         tx = torch.tensor(jx).permute(0, 3, 1, 2)
