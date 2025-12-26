@@ -1,181 +1,165 @@
-from typing import Optional, Sequence
+from dataclasses import dataclass
+from functools import partial
+from typing import Sequence
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 from flax import nnx
 
 
-class DropPath(nnx.Module):
-    """
-    Stochastic depth (DropPath) module, compatible with JAX jit.
-    """
+# TODO: Improve the config and add others
+@dataclass
+class ModelConfig:
+    stage_depths: Sequence[int]
+    stage_dims: Sequence[int]
+    drop_path_rate: float
+    num_classes: int
+    in_channels: int = 3
+    patch_size: tuple[int, int] = (4, 4)
+    layernorm_eps: float = 1e-12
+    layer_scale_init_value: float = 1e-6
 
+    @classmethod
+    def convnext_tiny_224(cls, *, drop_path_rate: float = 0.0, num_classes: int = 1000):
+        return cls(
+            stage_depths=(3, 3, 9, 3),
+            stage_dims=(96, 192, 384, 768),
+            drop_path_rate=drop_path_rate,
+            num_classes=num_classes,
+        )
+
+    @classmethod
+    def convnext_small_224(cls, *, drop_path_rate: float = 0.0, num_classes: int = 1000):
+        return cls(
+            stage_depths=(3, 3, 27, 3),
+            stage_dims=(96, 192, 384, 768),
+            drop_path_rate=drop_path_rate,
+            num_classes=num_classes,
+        )
+
+    @classmethod
+    def convnext_base_224(cls, *, drop_path_rate: float = 0.0, num_classes: int = 1000):
+        return cls(
+            stage_depths=(3, 3, 27, 3),
+            stage_dims=(128, 256, 512, 1024),
+            drop_path_rate=drop_path_rate,
+            num_classes=num_classes,
+        )
+
+    @classmethod
+    def convnext_large_224(cls, *, drop_path_rate: float = 0.0, num_classes: int = 1000):
+        return cls(
+            stage_depths=(3, 3, 27, 3),
+            stage_dims=(192, 384, 768, 1536),
+            drop_path_rate=drop_path_rate,
+            num_classes=num_classes,
+        )
+
+
+# TODO: Add a test
+class DropPath(nnx.Module):
     def __init__(self, drop_prob: float = 0.0):
         self.drop_prob = drop_prob
 
-    def __call__(self, x, rng: Optional[jax.Array] = None, train: bool = True):
-        train_flag = jnp.asarray(train)
-
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        def apply_drop(_):
-            keep_prob = jnp.asarray(1.0) - self.drop_prob
-            shape = (x.shape[0],) + (1,) * (x.ndim - 1)
-            mask = jax.random.bernoulli(rng, p=keep_prob, shape=shape)
-            return (x * mask) / keep_prob
-
-        def no_drop(_):
+    def __call__(self, x, *, rngs: jax.Array, train: bool):
+        if self.drop_prob < 1e-8 or not train:
             return x
 
-        cond = jnp.logical_or(self.drop_prob == 0.0, jnp.logical_not(train_flag))
-        return jax.lax.cond(cond, no_drop, apply_drop, operand=None)
+        keep_prob = jnp.asarray(1.0) - self.drop_prob
+        shape = (x.shape[0],) + (1,) * (x.ndim - 1)
+        mask = jax.random.bernoulli(rngs, p=keep_prob, shape=shape)
+        return (x * mask) / keep_prob
 
 
 class Block(nnx.Module):
-    def __init__(self, dim: int, drop_path: float = 0.0, layer_scale_init_value=1e-6, *, rngs: nnx.Rngs):
-        self.dwconv = nnx.Conv(
-            in_features=dim,
-            out_features=dim,
-            kernel_size=(7, 7),
-            padding=3,
-            feature_group_count=dim,
-            rngs=rngs,
-        )
-        self.norm = nnx.LayerNorm(dim, epsilon=1e-6, rngs=rngs)
+    def __init__(self, cfg: ModelConfig, stage_idx: int, drop_path_rate: float, *, rngs: nnx.Rngs):
+        dim = cfg.stage_dims[stage_idx]
+        self.dwconv = nnx.Conv(dim, dim, (7, 7), padding=(3, 3), feature_group_count=dim, rngs=rngs)
+        self.norm = nnx.LayerNorm(dim, epsilon=cfg.layernorm_eps, rngs=rngs)
         self.pwconv1 = nnx.Linear(dim, 4 * dim, rngs=rngs)
-        # Use exact GELU to match PyTorch
-        self.activation = lambda x: jax.nn.gelu(x, approximate=False)
         self.pwconv2 = nnx.Linear(4 * dim, dim, rngs=rngs)
 
-        self.gamma = nnx.Param(layer_scale_init_value * jnp.ones((dim))) if layer_scale_init_value > 0 else None
-        self.drop_path = DropPath(drop_path)
+        self.gamma = nnx.Param(cfg.layer_scale_init_value * jnp.ones((dim))) if cfg.layer_scale_init_value > 0 else None
+        self.drop_path = DropPath(drop_path_rate)
 
-    def __call__(self, x, rng: Optional[jax.Array] = None, train: bool = True):
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        input_ = x
+    def __call__(self, x, *, rngs, train):
+        res = x
         x = self.dwconv(x)
         x = self.norm(x)
         x = self.pwconv1(x)
-        x = self.activation(x)
+        x = jax.nn.gelu(x, approximate=False)
         x = self.pwconv2(x)
 
         if self.gamma is not None:
             x = self.gamma.value * x
 
-        x = input_ + self.drop_path(x, rng=rng, train=train)
+        return res + self.drop_path(x, rngs=rngs, train=train)
+
+
+class Stage(nnx.Module):
+    def __init__(self, cfg: ModelConfig, stage_idx: int, drop_path_rates: Sequence[int], *, rngs: nnx.Rngs):
+        in_ch = cfg.stage_dims[max(0, stage_idx - 1)]
+        out_ch = cfg.stage_dims[stage_idx]
+        s = 2 if stage_idx > 0 else 1
+
+        # Channels first on stage
+        self.downsample_layers = nnx.List()
+        if in_ch != out_ch or s > 1:
+            self.downsample_layers.append(nnx.LayerNorm(in_ch, epsilon=cfg.layernorm_eps, rngs=rngs))
+            self.downsample_layers.append(nnx.Conv(in_ch, out_ch, kernel_size=(2, 2), strides=(s, s), rngs=rngs))
+
+        self.layers = nnx.List(
+            [Block(cfg, stage_idx, drop_path_rates[i], rngs=rngs) for i in range(cfg.stage_depths[stage_idx])]
+        )
+
+    def __call__(self, x, *, rngs, train: bool):
+        for l in self.downsample_layers:
+            x = l(x)
+        for l in self.layers:
+            x = l(x, rngs=rngs, train=train)
         return x
-
-
-class EmbeddingsWrapper(nnx.Module):
-    """
-    Thin wrapper so `embeddings` returns NCHW (PyTorch style) like HF ConvNeXt 'embeddings'.
-    Internally uses a provided `stem` module (which expects NHWC input and returns NHWC).
-    """
-
-    def __init__(self, stem: nnx.Module):
-        self.stem = stem
-
-    def __call__(self, x):
-        # stem expects NHWC (JAX image layout). If test provides NHWC, OK.
-        # Convert stem output (NHWC) -> NCHW to match HF torch embeddings.
-        out = self.stem(x)
-        return jnp.transpose(out, (0, 3, 1, 2))
 
 
 class ConvNeXt(nnx.Module):
     def __init__(
         self,
-        in_chans: int = 3,
-        num_classes: int = 1000,
-        depths: Sequence[int] = (3, 3, 27, 3),
-        dims: Sequence[int] = (192, 384, 768, 1536),
-        drop_path_rate: float = 0.0,
-        layer_scale_init_value: float = 1e-6,
-        head_init_scale: float = 1.0,
+        cfg: ModelConfig,
         *,
         rngs: nnx.Rngs,
     ):
-        self.downsample_layers = nnx.List()
-        self.depths = depths
-
-        # stem: produces NHWC
-        stem = nnx.Sequential(
-            nnx.Conv(in_features=in_chans, out_features=dims[0], kernel_size=(4, 4), strides=(4, 4), rngs=rngs),
-            nnx.LayerNorm(dims[0], epsilon=1e-6, rngs=rngs),
+        # Channels first on layernorm
+        self.embedding_layer = nnx.Sequential(
+            nnx.Conv(cfg.in_channels, cfg.stage_dims[0], cfg.patch_size, cfg.patch_size, rngs=rngs),
+            nnx.LayerNorm(cfg.stage_dims[0], epsilon=cfg.layernorm_eps, rngs=rngs),
         )
 
-        self.embeddings = EmbeddingsWrapper(stem)
+        splits = np.cumsum(cfg.stage_depths)
+        dp_rates = np.split(np.linspace(0, cfg.drop_path_rate, splits[-1]), splits[:-1])
+        self.stages = nnx.List([Stage(cfg, i, dpr, rngs=rngs) for i, dpr in enumerate(dp_rates)])
 
-        self.downsample_layers.append(stem)
+        self.norm = nnx.LayerNorm(cfg.stage_dims[-1], epsilon=cfg.layernorm_eps, rngs=rngs)
+        self.head = nnx.Linear(cfg.stage_dims[-1], cfg.num_classes, rngs=rngs)
 
-        for i in range(3):
-            downsample_layer = nnx.Sequential(
-                nnx.LayerNorm(dims[i], epsilon=1e-6, rngs=rngs),
-                nnx.Conv(
-                    in_features=dims[i],
-                    out_features=dims[i + 1],
-                    kernel_size=(2, 2),
-                    strides=(2, 2),
-                    rngs=rngs,
-                ),
-            )
-            self.downsample_layers.append(downsample_layer)
+    def __call__(self, x, *, rngs: jax.Array, train: bool = False):
+        """x is a batch of images of shape (B, H, W, C)"""
+        x = self.embedding_layer(x)
+        for l in self.stages:
+            x = l(x, rngs=rngs, train=train)
 
-        # stages and blocks
-        self.stages = nnx.List()
-        dp_rates = list(jnp.linspace(0, drop_path_rate, sum(depths)))
-        curr = 0
-        for i in range(4):
-            stage_blocks = nnx.List()
-            for j in range(depths[i]):
-                stage_blocks.append(
-                    Block(
-                        dim=dims[i],
-                        drop_path=dp_rates[curr + j],
-                        layer_scale_init_value=layer_scale_init_value,
-                        rngs=rngs,
-                    )
-                )
-            self.stages.append(stage_blocks)
-            curr += depths[i]
-
-        self.norm = nnx.LayerNorm(dims[-1], epsilon=1e-6, rngs=rngs)
-        self.head = nnx.Linear(dims[-1], num_classes, rngs=rngs)
-
-    def __call__(self, x, rng: Optional[jax.Array] = None, train: bool = False):
-        """
-        Forward pass.
-        `x` expected in NHWC (JAX default). This function keeps the model internally NHWC.
-        """
-        if rng is None:
-            rng = jax.random.PRNGKey(0)
-
-        for i in range(4):
-            x = self.downsample_layers[i](x)
-
-            for block in self.stages[i]:
-                rng, block_rng = jax.random.split(rng)
-                x = block(x, rng=block_rng, train=train)
-
-        # global average pool over H, W (NHWC)
         x = jnp.mean(x, axis=(1, 2))
-
         x = self.norm(x)
-        x = self.head(x)
-        return x
+        return self.head(x)
 
 
-@jax.jit
+@partial(jax.jit, static_argnames=["graph_def", "train"])
 def forward(
     graph_def: nnx.GraphDef,
     state: nnx.State,
     x: jax.Array,
     *,
-    rng: Optional[jax.Array] = None,
+    rngs: jax.Array,
     train: bool = False,
 ):
     model = nnx.merge(graph_def, state)
-    return model(x, rng=rng, train=train)
+    return model(x, rngs=rngs, train=train)
