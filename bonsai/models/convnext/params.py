@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from etils import epath
 from flax import nnx
 
-from bonsai.models.ConvNext import modeling as model_lib
+from bonsai.models.convnext import modeling as model_lib
 
 
 def _get_key_and_transform_mapping():

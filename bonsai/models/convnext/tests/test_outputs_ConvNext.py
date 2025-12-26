@@ -5,8 +5,8 @@ from absl.testing import absltest, parameterized
 from huggingface_hub import snapshot_download
 from transformers import ConvNextForImageClassification
 
-from bonsai.models.ConvNext import modeling as model_lib
-from bonsai.models.ConvNext import params
+from bonsai.models.convnext import modeling as model_lib
+from bonsai.models.convnext import params
 
 
 class TestModuleForwardPasses(absltest.TestCase):

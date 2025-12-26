@@ -5,8 +5,8 @@ import jax.numpy as jnp
 from flax import nnx
 from huggingface_hub import snapshot_download
 
-from bonsai.models.ConvNext import modeling as model_lib
-from bonsai.models.ConvNext import params
+from bonsai.models.convnext import modeling as model_lib
+from bonsai.models.convnext import params
 
 
 def run_model():
