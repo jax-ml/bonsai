@@ -36,6 +36,7 @@ qwen3 = []
 resnet50 = []
 sam2 = ["pillow>=11.3.0"]
 vgg19 = ["h5py", "keras_hub", "tensorflow"]
+gemma3 = ["sentencepiece"]
 
 dev = [
   "xprof",
