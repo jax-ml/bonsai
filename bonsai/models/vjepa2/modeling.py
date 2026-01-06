@@ -75,7 +75,7 @@ class VJEPA2FlaxConfig:
     num_pooler_layers: int = 3
 
     # Classification params (optional)
-    num_labels: int = 174  # SSv2 default
+    num_labels: int = 174  # SSv2 default, 48 for diving48
 
     @classmethod
     def vitl_fpc64_256(cls):
@@ -115,7 +115,10 @@ class VJEPA2FlaxConfig:
     
     @classmethod
     def vitl_fpc32_256(cls):
-        return cls(frames_per_clip=32)
+        return cls(
+            frames_per_clip=32,
+            num_labels=48,
+        )
     
     @classmethod
     def vitg_fpc32_384(cls):
@@ -663,7 +666,7 @@ class VJEPA2PredictorEmbeddings(nnx.Module):
 
         # Get mask token
         mask_index = mask_index % self.config.pred_num_mask_tokens
-        target_token = self.mask_tokens.value[mask_index]  # (1, 1, pred_hidden_size)
+        target_token = self.mask_tokens[mask_index]  # (1, 1, pred_hidden_size)
 
         # Determine number of patches from target mask
         max_patch_num = int(jnp.max(target_mask[0])) + 1
@@ -979,7 +982,7 @@ class VJEPA2AttentivePooler(nnx.Module):
             hidden_state = layer(hidden_state)
 
         # Cross-attention with query tokens
-        queries = jnp.tile(self.query_tokens.value, (batch_size, 1, 1))
+        queries = jnp.tile(self.query_tokens[...], (batch_size, 1, 1))
         hidden_state = self.cross_attention_layer(queries, hidden_state)
 
         # Squeeze the sequence dimension

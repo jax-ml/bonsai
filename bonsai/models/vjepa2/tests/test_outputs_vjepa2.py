@@ -8,6 +8,7 @@ from absl.testing import absltest
 from huggingface_hub import constants
 from safetensors.torch import save_file
 from transformers import VJEPA2Config, VJEPA2Model
+from transformers import VJEPA2ForVideoClassification as VJEPA2ForVideoClassificationTorch
 
 from bonsai.models.vjepa2 import modeling as model_lib
 from bonsai.models.vjepa2 import params
@@ -135,9 +136,6 @@ class TestVideoClassification(absltest.TestCase):
         super().setUp()
         self.save_dir = constants.default_cache_path
         os.makedirs(self.save_dir, exist_ok=True)
-
-        # Import PyTorch classification model
-        from transformers import VJEPA2ForVideoClassification as VJEPA2ForVideoClassificationTorch
 
         # Small config for testing - matching standard_test
         self.hfconfig = VJEPA2Config(
