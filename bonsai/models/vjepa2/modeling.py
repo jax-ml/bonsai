@@ -81,54 +81,54 @@ class VJEPA2FlaxConfig:
     def vitl_fpc64_256(cls):
         """ViT-Large with 64 frames per clip, 256 crop size."""
         return cls()
-    
+
     @classmethod
     def vith_fpc64_256(cls):
         return cls(
-            hidden_size = 2180,
-            num_attention_heads = 16,
-            num_hidden_layers = 32,
+            hidden_size=2180,
+            num_attention_heads=16,
+            num_hidden_layers=32,
         )
-    
+
     @classmethod
     def vitg_fpc64_256(cls):
         return cls(
-            hidden_size = 1408,
-            num_attention_heads = 22,
-            num_hidden_layers = 40,
-            mlp_ratio = 4.363636363636363,
+            hidden_size=1408,
+            num_attention_heads=22,
+            num_hidden_layers=40,
+            mlp_ratio=4.363636363636363,
         )
-    
+
     @classmethod
     def vitg_fpc64_384(cls):
         return cls(
-            crop_size = 384,
-            hidden_size = 1408,
-            num_attention_heads = 22,
-            num_hidden_layers = 40,
-            mlp_ratio = 4.363636363636363,
+            crop_size=384,
+            hidden_size=1408,
+            num_attention_heads=22,
+            num_hidden_layers=40,
+            mlp_ratio=4.363636363636363,
         )
 
     @classmethod
     def vitl_fpc16_256(cls):
         return cls(frames_per_clip=16)
-    
+
     @classmethod
     def vitl_fpc32_256(cls):
         return cls(
             frames_per_clip=32,
             num_labels=48,
         )
-    
+
     @classmethod
     def vitg_fpc32_384(cls):
         return cls(
-            frames_per_clip = 32,
-            crop_size = 384,
-            hidden_size = 1408,
-            num_attention_heads = 22,
-            num_hidden_layers = 40,
-            mlp_ratio = 4.363636363636363,
+            frames_per_clip=32,
+            crop_size=384,
+            hidden_size=1408,
+            num_attention_heads=22,
+            num_hidden_layers=40,
+            mlp_ratio=4.363636363636363,
         )
 
     @classmethod
@@ -145,6 +145,7 @@ class VJEPA2FlaxConfig:
             frames_per_clip=4,
             num_pooler_layers=1,
         )
+
 
 ACT2FN = {
     "gelu": nnx.gelu,
@@ -200,9 +201,7 @@ class VJEPA2Embeddings(nnx.Module):
         super().__init__()
         self.config = config
         self.hidden_size = hidden_size
-        self.patch_embeddings = VJEPA2PatchEmbeddings3D(
-            config, hidden_size=hidden_size, rngs=rngs
-        )
+        self.patch_embeddings = VJEPA2PatchEmbeddings3D(config, hidden_size=hidden_size, rngs=rngs)
 
     def __call__(self, pixel_values_videos: Array) -> Array:
         """
@@ -233,42 +232,34 @@ def rotate_queries_or_keys(x: Array, pos: Array, dim: int) -> Array:
     Returns:
         Rotated tensor of same shape as input but only for first `dim` dimensions
     """
-    # Compute frequencies
-    omega = jnp.arange(dim // 2, dtype=jnp.float32)
-    omega = omega / (dim / 2.0)
-    omega = 1.0 / (10000**omega)  # (dim/2,)
+    _, _, _, D = x.shape
+
+    # Compute frequencies - use input dtype like PyTorch
+    omega = jnp.arange(D // 2, dtype=x.dtype)
+    omega = omega / (D / 2.0)
+    omega = 1.0 / (10000**omega)  # (D/2,)
 
     # Compute angles: pos * omega
-    # pos: (..., N) or (N,), omega: (dim/2,)
-    if pos.ndim == 1:
-        # Broadcasting case: pos is (N,)
-        freq = pos[:, None] * omega[None, :]  # (N, dim/2)
-        freq = freq[None, None, :, :]  # (1, 1, N, dim/2) for broadcasting
-    else:
-        # Full case: pos is (B, num_heads, N)
-        freq = pos[..., None] * omega  # (B, num_heads, N, dim/2)
+    freq = pos[..., None] * omega  # (..., N, D/2)
 
     # Build rotation matrix
-    emb_sin = jnp.sin(freq)  # (..., N, dim/2)
-    emb_cos = jnp.cos(freq)  # (..., N, dim/2)
+    emb_sin = jnp.sin(freq)  # (..., N, D/2)
+    emb_cos = jnp.cos(freq)  # (..., N, D/2)
 
-    # Repeat for full dimension: [sin, sin] or [cos, cos]
-    emb_sin = jnp.tile(emb_sin, (1, 1, 1, 2))  # (..., N, dim)
-    emb_cos = jnp.tile(emb_cos, (1, 1, 1, 2))  # (..., N, dim)
+    # Repeat for full dimension
+    emb_sin = jnp.tile(emb_sin, (1, 1, 1, 2))  # (..., N, D)
+    emb_cos = jnp.tile(emb_cos, (1, 1, 1, 2))  # (..., N, D)
 
-    # Get the part of x we're rotating
-    x_rot = x[..., :dim]
-
-    # Split into pairs and rotate
-    y = x_rot.reshape(x_rot.shape[:-1] + (-1, 2))  # (..., N, dim/2, 2)
-    y1, y2 = y[..., 0], y[..., 1]  # Each (..., N, dim/2)
+    # Split into pairs and rotate like PyTorch
+    y = x.reshape(*x.shape[:-1], -1, 2)  # (..., N, D/2, 2)
+    y1, y2 = y[..., 0], y[..., 1]  # Each (..., N, D/2)
 
     # Stack as (-y2, y1) and flatten
-    y_rotated = jnp.stack((-y2, y1), axis=-1)  # (..., N, dim/2, 2)
-    y_rotated = y_rotated.reshape(x_rot.shape)  # (..., N, dim)
+    y_rotated = jnp.stack((-y2, y1), axis=-1)  # (..., N, D/2, 2)
+    y_rotated = y_rotated.reshape(x.shape)  # (..., N, D)
 
     # Apply rotation: x * cos + rotated * sin
-    rotated = (x_rot * emb_cos) + (y_rotated * emb_sin)
+    rotated = (x * emb_cos) + (y_rotated * emb_sin)
 
     return rotated
 
@@ -289,23 +280,15 @@ class VJEPA2RopeAttention(nnx.Module):
         self.num_attention_heads = num_attention_heads
 
         if hidden_size % num_attention_heads != 0:
-            raise ValueError(
-                f"hidden_size {hidden_size} is not divisible by num_attention_heads {num_attention_heads}"
-            )
+            raise ValueError(f"hidden_size {hidden_size} is not divisible by num_attention_heads {num_attention_heads}")
 
         self.attention_head_size = hidden_size // num_attention_heads
         self.all_head_size = num_attention_heads * self.attention_head_size
 
         # Q, K, V projections
-        self.query = nnx.Linear(
-            hidden_size, self.all_head_size, use_bias=config.qkv_bias, rngs=rngs
-        )
-        self.key = nnx.Linear(
-            hidden_size, self.all_head_size, use_bias=config.qkv_bias, rngs=rngs
-        )
-        self.value = nnx.Linear(
-            hidden_size, self.all_head_size, use_bias=config.qkv_bias, rngs=rngs
-        )
+        self.query = nnx.Linear(hidden_size, self.all_head_size, use_bias=config.qkv_bias, rngs=rngs)
+        self.key = nnx.Linear(hidden_size, self.all_head_size, use_bias=config.qkv_bias, rngs=rngs)
+        self.value = nnx.Linear(hidden_size, self.all_head_size, use_bias=config.qkv_bias, rngs=rngs)
 
         # Output projection
         self.proj = nnx.Linear(hidden_size, hidden_size, rngs=rngs)
@@ -367,9 +350,7 @@ class VJEPA2RopeAttention(nnx.Module):
 
         return frame_ids, height_ids, width_ids
 
-    def apply_rotary_embeddings(
-        self, qk: Array, pos_ids: Tuple[Array, Array, Array]
-    ) -> Array:
+    def apply_rotary_embeddings(self, qk: Array, pos_ids: Tuple[Array, Array, Array]) -> Array:
         """Apply 3D rotary embeddings.
 
         Args:
@@ -383,21 +364,15 @@ class VJEPA2RopeAttention(nnx.Module):
 
         s = 0
         # Rotate depth component
-        qkd = rotate_queries_or_keys(
-            qk[..., s : s + self.d_dim], pos=d_mask, dim=self.d_dim
-        )
+        qkd = rotate_queries_or_keys(qk[..., s : s + self.d_dim], pos=d_mask, dim=self.d_dim)
         s += self.d_dim
 
         # Rotate height component
-        qkh = rotate_queries_or_keys(
-            qk[..., s : s + self.h_dim], pos=h_mask, dim=self.h_dim
-        )
+        qkh = rotate_queries_or_keys(qk[..., s : s + self.h_dim], pos=h_mask, dim=self.h_dim)
         s += self.h_dim
 
         # Rotate width component
-        qkw = rotate_queries_or_keys(
-            qk[..., s : s + self.w_dim], pos=w_mask, dim=self.w_dim
-        )
+        qkw = rotate_queries_or_keys(qk[..., s : s + self.w_dim], pos=w_mask, dim=self.w_dim)
         s += self.w_dim
 
         # Combine rotated dimensions with any remaining unrotated dimensions
@@ -430,19 +405,13 @@ class VJEPA2RopeAttention(nnx.Module):
         value_layer = self.value(hidden_states)
 
         # Reshape to (B, N, num_heads, head_dim) then transpose to (B, num_heads, N, head_dim)
-        query_layer = query_layer.reshape(
-            batch_size, seq_length, self.num_attention_heads, self.attention_head_size
-        )
+        query_layer = query_layer.reshape(batch_size, seq_length, self.num_attention_heads, self.attention_head_size)
         query_layer = query_layer.transpose(0, 2, 1, 3)
 
-        key_layer = key_layer.reshape(
-            batch_size, seq_length, self.num_attention_heads, self.attention_head_size
-        )
+        key_layer = key_layer.reshape(batch_size, seq_length, self.num_attention_heads, self.attention_head_size)
         key_layer = key_layer.transpose(0, 2, 1, 3)
 
-        value_layer = value_layer.reshape(
-            batch_size, seq_length, self.num_attention_heads, self.attention_head_size
-        )
+        value_layer = value_layer.reshape(batch_size, seq_length, self.num_attention_heads, self.attention_head_size)
         value_layer = value_layer.transpose(0, 2, 1, 3)
 
         # Get position IDs and apply rotary embeddings
@@ -451,23 +420,17 @@ class VJEPA2RopeAttention(nnx.Module):
         key_layer = self.apply_rotary_embeddings(key_layer, pos_ids)
 
         # Compute attention: (B, H, N, D) @ (B, H, D, N) -> (B, H, N, N)
-        attn_weights = (
-            jnp.matmul(query_layer, key_layer.transpose(0, 1, 3, 2)) * self.scaling
-        )
+        attn_weights = jnp.matmul(query_layer, key_layer.transpose(0, 1, 3, 2)) * self.scaling
 
         # Softmax
-        attn_weights = nnx.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(
-            query_layer.dtype
-        )
+        attn_weights = nnx.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(query_layer.dtype)
 
         # Apply attention to values: (B, H, N, N) @ (B, H, N, D) -> (B, H, N, D)
         context_layer = jnp.matmul(attn_weights, value_layer)
 
         # Transpose back: (B, H, N, D) -> (B, N, H, D) -> (B, N, H*D)
         context_layer = context_layer.transpose(0, 2, 1, 3)
-        context_layer = context_layer.reshape(
-            batch_size, seq_length, self.all_head_size
-        )
+        context_layer = context_layer.reshape(batch_size, seq_length, self.all_head_size)
 
         # Output projection
         output = self.proj(context_layer)
@@ -510,21 +473,15 @@ class VJEPA2Layer(nnx.Module):
         rngs: nnx.Rngs,
     ):
         super().__init__()
-        self.norm1 = nnx.LayerNorm(
-            hidden_size, epsilon=config.layer_norm_eps, rngs=rngs
-        )
+        self.norm1 = nnx.LayerNorm(hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.attention = VJEPA2RopeAttention(
             config,
             hidden_size=hidden_size,
             num_attention_heads=num_attention_heads,
             rngs=rngs,
         )
-        self.norm2 = nnx.LayerNorm(
-            hidden_size, epsilon=config.layer_norm_eps, rngs=rngs
-        )
-        self.mlp = VJEPA2MLP(
-            config, hidden_size=hidden_size, mlp_ratio=mlp_ratio, rngs=rngs
-        )
+        self.norm2 = nnx.LayerNorm(hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
+        self.mlp = VJEPA2MLP(config, hidden_size=hidden_size, mlp_ratio=mlp_ratio, rngs=rngs)
 
     def __call__(
         self,
@@ -545,6 +502,7 @@ class VJEPA2Layer(nnx.Module):
 
         return hidden_states
 
+
 class VJEPA2Encoder(nnx.Module):
     """VJEPA2 Encoder consisting of embeddings and transformer layers."""
 
@@ -552,9 +510,7 @@ class VJEPA2Encoder(nnx.Module):
         super().__init__()
         self.config = config
 
-        self.embeddings = VJEPA2Embeddings(
-            config, hidden_size=config.hidden_size, rngs=rngs
-        )
+        self.embeddings = VJEPA2Embeddings(config, hidden_size=config.hidden_size, rngs=rngs)
 
         self.layer = nnx.List(
             [
@@ -569,9 +525,7 @@ class VJEPA2Encoder(nnx.Module):
             ]
         )
 
-        self.layernorm = nnx.LayerNorm(
-            config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs
-        )
+        self.layernorm = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
 
     def __call__(self, pixel_values_videos: Array) -> VJEPA2EncoderOutput:
         """
@@ -590,6 +544,7 @@ class VJEPA2Encoder(nnx.Module):
 
         return VJEPA2EncoderOutput(last_hidden_state=hidden_states)
 
+
 def apply_masks(tensor: Array, masks: list) -> Array:
     """Apply masks to tensor.
 
@@ -607,9 +562,7 @@ def apply_masks(tensor: Array, masks: list) -> Array:
         feature_dim = tensor.shape[-1]
 
         # Expand mask for gathering: (B, num_keep) -> (B, num_keep, D)
-        mask_expanded = jnp.broadcast_to(
-            mask[..., None], (batch_size, mask.shape[1], feature_dim)
-        )
+        mask_expanded = jnp.broadcast_to(mask[..., None], (batch_size, mask.shape[1], feature_dim))
 
         # Gather along sequence dimension
         gathered = jnp.take_along_axis(tensor, mask_expanded.astype(jnp.int32), axis=1)
@@ -625,15 +578,11 @@ class VJEPA2PredictorEmbeddings(nnx.Module):
         super().__init__()
         self.config = config
 
-        self.predictor_embeddings = nnx.Linear(
-            config.hidden_size, config.pred_hidden_size, rngs=rngs
-        )
+        self.predictor_embeddings = nnx.Linear(config.hidden_size, config.pred_hidden_size, rngs=rngs)
 
         # Mask tokens: (num_mask_tokens, 1, 1, pred_hidden_size)
         if config.pred_zero_init_mask_tokens:
-            mask_tokens = jnp.zeros(
-                (config.pred_num_mask_tokens, 1, 1, config.pred_hidden_size)
-            )
+            mask_tokens = jnp.zeros((config.pred_num_mask_tokens, 1, 1, config.pred_hidden_size))
         else:
             mask_tokens = (
                 jax.random.normal(
@@ -707,9 +656,7 @@ class VJEPA2Predictor(nnx.Module):
             ]
         )
 
-        self.layernorm = nnx.LayerNorm(
-            config.pred_hidden_size, epsilon=config.layer_norm_eps, rngs=rngs
-        )
+        self.layernorm = nnx.LayerNorm(config.pred_hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.proj = nnx.Linear(config.pred_hidden_size, config.hidden_size, rngs=rngs)
 
     def sort_tokens(
@@ -723,21 +670,15 @@ class VJEPA2Predictor(nnx.Module):
         position_masks = jnp.take_along_axis(position_masks, argsort, axis=1)
 
         # Gather hidden states
-        hidden_states_argsort = jnp.broadcast_to(
-            argsort[..., None], hidden_states.shape
-        )
-        hidden_states = jnp.take_along_axis(
-            hidden_states, hidden_states_argsort, axis=1
-        )
+        hidden_states_argsort = jnp.broadcast_to(argsort[..., None], hidden_states.shape)
+        hidden_states = jnp.take_along_axis(hidden_states, hidden_states_argsort, axis=1)
 
         return hidden_states, position_masks
 
     def unsort_tokens(self, hidden_states: Array, argsort: Array) -> Array:
         """Unsort tokens back to original order."""
         reverse_argsort = jnp.argsort(argsort, axis=1)
-        reverse_argsort = jnp.broadcast_to(
-            reverse_argsort[..., None], hidden_states.shape
-        )
+        reverse_argsort = jnp.broadcast_to(reverse_argsort[..., None], hidden_states.shape)
         hidden_states = jnp.take_along_axis(hidden_states, reverse_argsort, axis=1)
         return hidden_states
 
@@ -761,15 +702,11 @@ class VJEPA2Predictor(nnx.Module):
         _, n_ctxt, _ = encoder_hidden_states.shape
 
         # Get predictor embeddings
-        hidden_states, position_masks = self.embeddings(
-            encoder_hidden_states, context_mask, target_mask
-        )
+        hidden_states, position_masks = self.embeddings(encoder_hidden_states, context_mask, target_mask)
 
         # Sort tokens by position
         argsort = jnp.argsort(position_masks, axis=1)
-        hidden_states, position_masks = self.sort_tokens(
-            hidden_states, position_masks, argsort
-        )
+        hidden_states, position_masks = self.sort_tokens(hidden_states, position_masks, argsort)
 
         # Apply transformer layers
         for layer_module in self.layer:
@@ -811,26 +748,16 @@ class VJEPA2PoolerSelfAttention(nnx.Module):
         values = self.v_proj(hidden_states)
 
         # Reshape to (B, N, H, D) then transpose to (B, H, N, D)
-        queries = queries.reshape(
-            batch_size, seq_length, self.num_heads, self.head_dim
-        ).transpose(0, 2, 1, 3)
-        keys = keys.reshape(
-            batch_size, seq_length, self.num_heads, self.head_dim
-        ).transpose(0, 2, 1, 3)
-        values = values.reshape(
-            batch_size, seq_length, self.num_heads, self.head_dim
-        ).transpose(0, 2, 1, 3)
+        queries = queries.reshape(batch_size, seq_length, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        keys = keys.reshape(batch_size, seq_length, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        values = values.reshape(batch_size, seq_length, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
 
         # Attention
         attn_weights = jnp.matmul(queries, keys.transpose(0, 1, 3, 2)) * self.scale
-        attn_weights = nnx.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(
-            queries.dtype
-        )
+        attn_weights = nnx.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(queries.dtype)
 
         attn_output = jnp.matmul(attn_weights, values)
-        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(
-            batch_size, seq_length, self.embed_dim
-        )
+        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(batch_size, seq_length, self.embed_dim)
 
         return self.out_proj(attn_output)
 
@@ -859,26 +786,16 @@ class VJEPA2PoolerCrossAttention(nnx.Module):
         values = self.v_proj(values)
 
         # Reshape and transpose
-        queries = queries.reshape(
-            batch_size, q_seq_length, self.num_heads, self.head_dim
-        ).transpose(0, 2, 1, 3)
-        keys = keys.reshape(
-            batch_size, kv_seq_length, self.num_heads, self.head_dim
-        ).transpose(0, 2, 1, 3)
-        values = values.reshape(
-            batch_size, kv_seq_length, self.num_heads, self.head_dim
-        ).transpose(0, 2, 1, 3)
+        queries = queries.reshape(batch_size, q_seq_length, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        keys = keys.reshape(batch_size, kv_seq_length, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
+        values = values.reshape(batch_size, kv_seq_length, self.num_heads, self.head_dim).transpose(0, 2, 1, 3)
 
         # Attention
         attn_weights = jnp.matmul(queries, keys.transpose(0, 1, 3, 2)) * self.scale
-        attn_weights = nnx.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(
-            queries.dtype
-        )
+        attn_weights = nnx.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(queries.dtype)
 
         attn_output = jnp.matmul(attn_weights, values)
-        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(
-            batch_size, q_seq_length, self.embed_dim
-        )
+        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(batch_size, q_seq_length, self.embed_dim)
 
         return attn_output
 
@@ -888,13 +805,9 @@ class VJEPA2PoolerSelfAttentionLayer(nnx.Module):
 
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.layer_norm1 = nnx.LayerNorm(
-            config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs
-        )
+        self.layer_norm1 = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.self_attn = VJEPA2PoolerSelfAttention(config, rngs=rngs)
-        self.layer_norm2 = nnx.LayerNorm(
-            config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs
-        )
+        self.layer_norm2 = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.mlp = VJEPA2MLP(
             config,
             hidden_size=config.hidden_size,
@@ -921,13 +834,9 @@ class VJEPA2PoolerCrossAttentionLayer(nnx.Module):
 
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.layer_norm1 = nnx.LayerNorm(
-            config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs
-        )
+        self.layer_norm1 = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.cross_attn = VJEPA2PoolerCrossAttention(config, rngs=rngs)
-        self.layer_norm2 = nnx.LayerNorm(
-            config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs
-        )
+        self.layer_norm2 = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.mlp = VJEPA2MLP(
             config,
             hidden_size=config.hidden_size,
@@ -938,9 +847,7 @@ class VJEPA2PoolerCrossAttentionLayer(nnx.Module):
     def __call__(self, queries: Array, hidden_state: Array) -> Array:
         residual = queries
         hidden_state_normed = self.layer_norm1(hidden_state)
-        hidden_state = self.cross_attn(
-            queries, hidden_state_normed, hidden_state_normed
-        )
+        hidden_state = self.cross_attn(queries, hidden_state_normed, hidden_state_normed)
         hidden_state = residual + hidden_state
 
         residual = hidden_state
@@ -961,10 +868,7 @@ class VJEPA2AttentivePooler(nnx.Module):
         self.cross_attention_layer = VJEPA2PoolerCrossAttentionLayer(config, rngs=rngs)
 
         self.self_attention_layers = nnx.List(
-            [
-                VJEPA2PoolerSelfAttentionLayer(config, rngs=rngs)
-                for _ in range(config.num_pooler_layers)
-            ]
+            [VJEPA2PoolerSelfAttentionLayer(config, rngs=rngs) for _ in range(config.num_pooler_layers)]
         )
 
     def __call__(self, hidden_state: Array) -> Array:
@@ -1025,9 +929,7 @@ class VJEPA2Model(nnx.Module):
 
         # Create default masks if not provided
         if context_mask is None and target_mask is None:
-            default_mask = jnp.broadcast_to(
-                jnp.arange(num_patches)[None, :], (batch_size, num_patches)
-            )
+            default_mask = jnp.broadcast_to(jnp.arange(num_patches)[None, :], (batch_size, num_patches))
             context_mask = [default_mask]
             target_mask = [default_mask]
 
@@ -1044,9 +946,7 @@ class VJEPA2Model(nnx.Module):
                 target_hidden_state=target_hidden_state,
             )
 
-        masked_hidden_state = (
-            apply_masks(sequence_output, context_mask) if context_mask else None
-        )
+        masked_hidden_state = apply_masks(sequence_output, context_mask) if context_mask else None
 
         return VJEPA2ModelOutput(
             last_hidden_state=sequence_output,
@@ -1086,6 +986,4 @@ class VJEPA2ForVideoClassification(nnx.Module):
         pooler_output = self.pooler(last_hidden_state)
         logits = self.classifier(pooler_output)
 
-        return VJEPA2ClassificationOutput(
-            logits=logits, last_hidden_state=last_hidden_state
-        )
+        return VJEPA2ClassificationOutput(logits=logits, last_hidden_state=last_hidden_state)
