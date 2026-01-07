@@ -27,15 +27,15 @@ SKIP_INTERMEDIATE_TESTS: bool = True
 jax.config.update("jax_default_matmul_precision", "highest")
 
 
-# def check_hf_token():
-#     try:
-#         access_token = os.environ["HF_TOKEN"]
-#         AutoProcessor.from_pretrained("google/gemma-3-4b-it", token=access_token, use_fast=False)
-#     except Exception as e:
-#         print("Failed to access HF_TOKEN or download Processor:")
-#         print(e)
-#         return True
-#     return False
+def check_hf_token():
+    try:
+        access_token = os.environ["HF_TOKEN"]
+        AutoProcessor.from_pretrained("google/gemma-3-4b-it", token=access_token, use_fast=False)
+    except Exception as e:
+        print("Failed to access HF_TOKEN or download Processor:")
+        print(e)
+        return True
+    return False
 
 
 # @unittest.skipIf(check_hf_token(), "Skipping TestModuleForwardPasses due to HF_TOKEN failure.")
