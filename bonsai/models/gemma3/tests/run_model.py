@@ -76,7 +76,6 @@ def run_model():
 
     # Make inputs
     n_text, n_img, n_tti = make_input(processor)
-
     gen_steps = 256
     batch_size, num_tokens = n_text.shape
     cache = modeling.init_cache(bonsai_config, batch_size, num_tokens, gen_steps, jnp.float32)
@@ -84,15 +83,25 @@ def run_model():
     source_key = jax.random.key(0)
     sampler = jax.jit(Sampler(temperature=1.0, top_p=0.8, top_k=10))
 
-    # TODO: Separate decode and prefill
-
     all_tokens = [n_text]
     pbar = tqdm.trange(gen_steps, desc="Generating output")
-    for _ in pbar:
-        batch_size, num_tokens = n_text.shape
-        segment_ids = jnp.ones((batch_size, num_tokens))
-        out, cache = modeling.forward(bonsai_model, cache, n_text, n_img, segment_ids, n_tti)
 
+    # Prefill
+    segment_ids = jnp.ones((batch_size, num_tokens))
+    out, cache = modeling.forward(bonsai_model, cache, n_text, n_img, segment_ids, n_tti)
+
+    source_key, key = jax.random.split(source_key)
+    n_text = sampler(out, key=key)
+    pbar.update(1)
+    all_tokens.append(n_text)
+
+    # Decode
+    n_tti = jnp.zeros((batch_size, 1), dtype=jnp.int32)
+    n_img, num_tokens = None, 1
+    segment_ids = jnp.ones((batch_size, num_tokens))
+
+    for _ in pbar:
+        out, cache = modeling.forward(bonsai_model, cache, n_text, n_img, segment_ids, n_tti)
         source_key, key = jax.random.split(source_key)
         n_text = sampler(out, key=key)
         if jnp.all(n_text == eot_token_id):
@@ -100,8 +109,6 @@ def run_model():
             print("Hit end of turn.")
             break
         all_tokens.append(n_text)
-        n_tti = jnp.zeros((batch_size, 1), dtype=jnp.int32)
-        n_img = None
 
     full_tokens = torch.tensor(jnp.concat(all_tokens, axis=1))
     out_tokens = processor.decode(full_tokens[0], skip_special_tokens=True)

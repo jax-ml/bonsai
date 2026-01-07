@@ -21,7 +21,7 @@ from transformers.models.gemma3.modeling_gemma3 import token_type_ids_mask_funct
 from bonsai.models.gemma3 import modeling, params
 
 # used for skipping smaller tests
-SKIP_INTERMEDIATE_TESTS: bool = True
+SKIP_INTERMEDIATE_TESTS: bool = False
 
 # used to set highest precision on matrix multiplication for testing
 jax.config.update("jax_default_matmul_precision", "highest")
@@ -38,7 +38,7 @@ def check_hf_token():
     return False
 
 
-# @unittest.skipIf(check_hf_token(), "Skipping TestModuleForwardPasses due to HF_TOKEN failure.")
+@unittest.skipIf(check_hf_token(), "Skipping TestModuleForwardPasses due to HF_TOKEN failure.")
 class TestModuleForwardPasses(absltest.TestCase):
     # Using this for faster testing. This way we can avoid reloading the model.
     # Make sure not to modify the Gemma3 model in inconsistent ways between tests.
@@ -47,11 +47,10 @@ class TestModuleForwardPasses(absltest.TestCase):
         super().setUpClass()
         cls.model_name: str = "google/gemma-3-4b-it"
         cls.torch_device = "cpu"
-        # access_token = os.environ["HF_TOKEN"]
+        access_token = os.environ["HF_TOKEN"]
 
         # attempt model download
-        # cls.processor = AutoProcessor.from_pretrained(cls.model_name, token=access_token, use_fast=False)
-        cls.processor = AutoProcessor.from_pretrained(cls.model_name, use_fast=False)
+        cls.processor = AutoProcessor.from_pretrained(cls.model_name, token=access_token, use_fast=False)
         cls.torch_model = (
             Gemma3ForConditionalGeneration.from_pretrained(cls.model_name, dtype="auto")
             .to(device=cls.torch_device, dtype=torch.float32)
@@ -62,8 +61,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         cls.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(cls.mesh)
         cls.bonsai_config = modeling.ModelConfig.gemma3_4b_it(norm_dtype=jnp.float32)
-        # model_ckpt_path = snapshot_download(cls.model_name, token=access_token)
-        model_ckpt_path = snapshot_download(cls.model_name)
+        model_ckpt_path = snapshot_download(cls.model_name, token=access_token)
         cls.bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, cls.bonsai_config, mesh=cls.mesh)
 
     def _upgrade_dtypes(self):

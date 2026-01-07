@@ -15,15 +15,14 @@ from bonsai.models.gemma3 import modeling
 from bonsai.models.gemma3.tests.test_outputs_gemma3 import check_hf_token
 
 
-# @unittest.skipIf(check_hf_token(), "Skipping TestSharding due to HF_TOKEN failure.")
+@unittest.skipIf(check_hf_token(), "Skipping TestSharding due to HF_TOKEN failure.")
 class TestSharding(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.model_name: str = "google/gemma-3-4b-it"
-        # access_token = os.environ["HF_TOKEN"]
-        # cls.processor = AutoProcessor.from_pretrained(cls.model_name, token=access_token, use_fast=False)
-        cls.processor = AutoProcessor.from_pretrained(cls.model_name, use_fast=False)
+        access_token = os.environ["HF_TOKEN"]
+        cls.processor = AutoProcessor.from_pretrained(cls.model_name, token=access_token, use_fast=False)
         cls.torch_device = "cpu"
 
         fsdp, tp = modeling.ShardMode.FSDP.value, modeling.ShardMode.TP.value
