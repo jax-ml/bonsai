@@ -68,21 +68,23 @@ def run_model():
     mesh = jax.make_mesh(((1, 1)), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
     jax.set_mesh(mesh)
 
-    model_ckpt_path = snapshot_download(model_name)
+    model_ckpt_path = snapshot_download(model_name, token=access_token)
 
-    bonsai_config = modeling.ModelConfig.gemma3_4b_it()
+    bonsai_config = modeling.ModelConfig.gemma3_4b_it(norm_dtype=jnp.float32)
     bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, bonsai_config, mesh=mesh)
     eot_token_id = processor.tokenizer.convert_tokens_to_ids("<end_of_turn>")
 
     # Make inputs
     n_text, n_img, n_tti = make_input(processor)
 
-    gen_steps = 500
+    gen_steps = 256
     batch_size, num_tokens = n_text.shape
     cache = modeling.init_cache(bonsai_config, batch_size, num_tokens, gen_steps, jnp.float32)
 
     source_key = jax.random.key(0)
     sampler = jax.jit(Sampler(temperature=1.0, top_p=0.8, top_k=10))
+
+    # TODO: Separate decode and prefill
 
     all_tokens = [n_text]
     pbar = tqdm.trange(gen_steps, desc="Generating output")

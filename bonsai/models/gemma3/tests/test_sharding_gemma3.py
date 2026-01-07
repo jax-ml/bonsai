@@ -15,7 +15,7 @@ from bonsai.models.gemma3 import modeling
 from bonsai.models.gemma3.tests.test_outputs_gemma3 import check_hf_token
 
 
-@unittest.skipIf(check_hf_token(), "Skipping TestSharding due to HF_TOKEN failure.")
+# @unittest.skipIf(check_hf_token(), "Skipping TestSharding due to HF_TOKEN failure.")
 class TestSharding(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -30,7 +30,7 @@ class TestSharding(absltest.TestCase):
         cls.mesh = jax.make_mesh(((1, 1)), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(cls.mesh)
 
-        cls.bonsai_config = modeling.ModelConfig.gemma3_4b_it(True, True)
+        cls.bonsai_config = modeling.ModelConfig.gemma3_4b_it(True, True, norm_dtype=jnp.float32)
         cls.bonsai_model = modeling.Gemma3Model(cls.bonsai_config, rngs=nnx.Rngs(0))
 
     def _make_torch_input(self):

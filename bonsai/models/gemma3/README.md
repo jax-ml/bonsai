@@ -1,4 +1,4 @@
-# Qwen3 in JAX
+# Gemma3 in JAX
 
 This directory contains a pure JAX implementation of the [Gemma3 model](https://deepmind.google/models/gemma/gemma-3/), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API. 
 
