@@ -21,8 +21,9 @@ class TestSharding(absltest.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         cls.model_name: str = "google/gemma-3-4b-it"
-        access_token = os.environ["HF_TOKEN"]
-        cls.processor = AutoProcessor.from_pretrained(cls.model_name, token=access_token, use_fast=False)
+        # access_token = os.environ["HF_TOKEN"]
+        # cls.processor = AutoProcessor.from_pretrained(cls.model_name, token=access_token, use_fast=False)
+        cls.processor = AutoProcessor.from_pretrained(cls.model_name, use_fast=False)
         cls.torch_device = "cpu"
 
         fsdp, tp = modeling.ShardMode.FSDP.value, modeling.ShardMode.TP.value
