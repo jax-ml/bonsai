@@ -15,7 +15,7 @@
 import dataclasses
 import math
 from functools import partial
-from typing import Tuple, TypeAlias
+from typing import TypeAlias
 
 import jax
 from flax import nnx

@@ -12,12 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 
 import jax
 from absl.testing import absltest
 
-from bonsai.utils.samplers import GreedySampler, Sampler, SamplerType
+from bonsai.utils.samplers import GreedySampler, Sampler
 
 
 class TestSamplers(absltest.TestCase):

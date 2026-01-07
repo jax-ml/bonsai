@@ -12,20 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-import time
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from flax import nnx
 from huggingface_hub import snapshot_download
 from jax import P
-from jax.sharding import AxisType
 from transformers import AutoTokenizer
 
 from bonsai.models.qwen3 import modeling, params
-from bonsai.utils import GreedySampler, Sampler
+from bonsai.utils import Sampler
 
 
 def tokenize(tokenizer, input: list[str], shd: P | None = None):
