@@ -13,12 +13,10 @@
 # limitations under the License.
 
 import dataclasses
-from functools import partial
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from flax.linen.pooling import max_pool
 
 
 @dataclasses.dataclass(frozen=True)

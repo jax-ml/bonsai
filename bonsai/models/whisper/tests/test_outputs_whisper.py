@@ -11,8 +11,7 @@ import torch
 from absl.testing import absltest
 from flax import nnx
 from huggingface_hub import snapshot_download
-from jax.typing import DTypeLike
-from transformers import AutoModel, AutoProcessor, AutoTokenizer, WhisperModel
+from transformers import AutoModel, AutoProcessor
 
 from bonsai.models.whisper import modeling, params
 

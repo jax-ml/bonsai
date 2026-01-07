@@ -87,7 +87,7 @@ for image, label in ds.take(10):
 # Stack the images into a single batch
 image_batch = jnp.stack(images_list, axis=0)
 
-print(f"✅ Loaded a batch of 10 images with shape: {image_batch.shape}")
+print(f"Loaded a batch of 10 images with shape: {image_batch.shape}")
 ```
 
 ## **3.Define Model**
