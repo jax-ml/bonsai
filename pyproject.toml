@@ -112,3 +112,4 @@ indent-style = "space"
 
 [tool.jupytext]
 formats = "ipynb,md:myst"
+cell_metadata_filter = "-all"
