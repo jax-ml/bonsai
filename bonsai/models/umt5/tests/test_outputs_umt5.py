@@ -24,7 +24,7 @@ from transformers import AutoTokenizer
 from transformers import UMT5EncoderModel as TorchUMT5EncoderModel
 from transformers import UMT5Model as TorchUMT5Model
 
-from bonsai.models.umt5.modeling import UMT5Config, UMT5EncoderModel, UMT5Model
+from bonsai.models.umt5.modeling import UMT5EncoderModel, UMT5Model
 from bonsai.models.umt5.params import create_model, load_model_config
 
 

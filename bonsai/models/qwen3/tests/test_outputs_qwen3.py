@@ -6,7 +6,6 @@ from absl.testing import absltest
 from flax import nnx
 from huggingface_hub import snapshot_download
 from jax.sharding import AxisType
-from jax.sharding import PartitionSpec as P
 from jax.typing import DTypeLike
 from transformers import AutoTokenizer
 from transformers.cache_utils import DynamicCache

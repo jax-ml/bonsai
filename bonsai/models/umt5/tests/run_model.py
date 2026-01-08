@@ -14,7 +14,6 @@
 
 """Demo script to run UMT5 model inference."""
 
-import jax
 import jax.numpy as jnp
 from flax import nnx
 from huggingface_hub import snapshot_download
