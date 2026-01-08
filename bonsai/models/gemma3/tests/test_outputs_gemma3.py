@@ -410,7 +410,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         torch.testing.assert_close(torch.tensor(jc), tc)
 
     @unittest.skipIf(SKIP_INTERMEDIATE_TESTS, "Done")
-    def test_text_decoder_layer(self):
+    def test_text_decoder_layers(self):
         first_t_inputs = self._make_torch_input()
         start_t_inputs = self._process_torch_inputs(**first_t_inputs)
 

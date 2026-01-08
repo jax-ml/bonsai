@@ -465,8 +465,9 @@ class SiglipVisionTransformer(nnx.Module):
 # Language components
 
 
+# TODO: Update to use a more efficient cache for local attention.
 class LayerCache(nnx.Module):
-    def __init__(self, cfg: TextConfig, batch_size: int, cache_size: int, dtype: jnp.dtype):
+    def __init__(self, cfg: TextConfig, layer_idx: int, batch_size: int, cache_size: int, dtype: jnp.dtype):
         cache_shape = (batch_size, cache_size, cfg.num_key_value_heads, cfg.head_dim)
         kv_shd = cfg.shd_cfg.cache
         self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype, out_sharding=kv_shd))
@@ -485,7 +486,7 @@ def init_cache(
 ) -> Cache:
     cache_size = 2 ** math.ceil(math.log2(max(token_len + generate_steps, 1)))  # Pad for a sharding-friendly size.
     return [
-        LayerCache(cfg.text_config, batch_size, cache_size, dtype) for _ in range(cfg.text_config.num_hidden_layers)
+        LayerCache(cfg.text_config, i, batch_size, cache_size, dtype) for i in range(cfg.text_config.num_hidden_layers)
     ]
 
 
@@ -747,7 +748,7 @@ class Gemma3MultiModalProjector(nnx.Module):
         return x.astype(vision_outputs.dtype)
 
 
-def make_causal_mask(layer_cache: LayerCache, token_type_ids: Array, *, out_sharding):
+def make_causal_mask(layer_cache: LayerCache, token_type_ids: Array, *, out_sharding: PartitionSpec):
     b, t = token_type_ids.shape
     c = layer_cache.size
     seq_arange = jnp.arange(t)
@@ -760,7 +761,7 @@ def make_causal_mask(layer_cache: LayerCache, token_type_ids: Array, *, out_shar
     return causal_mask
 
 
-def make_window_mask(layer_cache, token_type_ids, slide_size: int, *, out_sharding):
+def make_window_mask(layer_cache: LayerCache, token_type_ids: Array, slide_size: int, *, out_sharding: PartitionSpec):
     causal_mask = make_causal_mask(layer_cache, token_type_ids, out_sharding=out_sharding)
     *_, t, c = causal_mask.shape
     seq_arange = jnp.arange(t)
