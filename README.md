@@ -31,6 +31,7 @@ These are listed based on status and then alphabetically.
 | [ResNet50](bonsai/models/resnet50)            | Image classification | ✅     |         |
 | [VGG](bonsai/models/vgg19)                    | Image classification | ✅     |         |
 | [Dinov3](bonsai/models/dinov3)                | Vision FM            | ⚙️     |         |
+| [Gemma3](bonsai/models/gemma3)                | VLM                  | ⚙️     | Local attention cache and todos in file        |
 | [Mamba2](bonsai/models/mamba2)                | Language SSM         | ⚙️     | Caching and sharding        |
 | [umT5](bonsai/models/umt5)                    | LLM                  | ⚙️     | Caching and sharding        |
 | [ViT](bonsai/models/vit)                      | Image classification | ⚙️     | Sharding        |
@@ -39,7 +40,6 @@ These are listed based on status and then alphabetically.
 | [UNet](bonsai/models/unet/)                   | Image                | 🟡     | Need a reference implementation and numerical testing        |
 | [VAE](bonsai/models/vae/)                     | Generative model     | 🟡     | Need a reference implementation and numerical testing         |
 | [Whisper](bonsai/models/whisper/)             | Speech recognition   | 🟡     | Need more numerical testing and not all call methods implemented        |
-| Gemma3                                        |                      | ⏳     |         |
 | CLIP                                          |                      | ⏳     |         |
 
 
