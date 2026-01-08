@@ -5,9 +5,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
-import transformers
 from absl.testing import absltest
-from flax import nnx
 from huggingface_hub import snapshot_download
 from jax import P
 from jax.sharding import AxisType
