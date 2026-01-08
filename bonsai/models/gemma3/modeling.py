@@ -233,9 +233,7 @@ class ModelConfig:
         )
 
 
-# General Components
-
-
+# --- General Components --- #
 # TODO: Replace with nnx.Linear once explicit sharding is supported.
 class ShardedLinear(nnx.Module):
     def __init__(
@@ -298,9 +296,7 @@ def sharded_attention(q, k, v, mask, scale=None, *, attn_logit_sharding: Partiti
     return attn_out
 
 
-# Vision Components
-
-
+# --- Vision Components --- #
 # TODO: update to include interpolate_pos_encoding
 class SiglipVisionEmbeddings(nnx.Module):
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs):
@@ -462,9 +458,7 @@ class SiglipVisionTransformer(nnx.Module):
         return x
 
 
-# Language components
-
-
+# --- Language Components --- #
 # TODO: Update to use a more efficient cache for local attention.
 class LayerCache(nnx.Module):
     def __init__(self, cfg: TextConfig, layer_idx: int, batch_size: int, cache_size: int, dtype: jnp.dtype):
