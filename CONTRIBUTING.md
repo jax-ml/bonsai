@@ -41,7 +41,7 @@ Follow these steps to contribute code:
    ```bash
    git clone https://github.com/YOUR_USERNAME/bonsai
    cd bonsai
-   pip install -e .  # Installs all testing requirements.
+   pip install -e ".[dev]"
    ```
 
 4. Add the Bonsai repo as an upstream remote, so you can use it to sync your

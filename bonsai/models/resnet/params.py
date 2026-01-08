@@ -15,7 +15,6 @@
 import logging
 import re
 from enum import Enum
-from typing import Callable
 
 import jax
 import jax.numpy as jnp
