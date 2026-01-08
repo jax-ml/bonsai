@@ -20,7 +20,5 @@ python3 -m bonsai.models.gemma3.tests.run_model
 
 ### Remaining Tasks
 
-1. Implement with batching. Need this for FSDP. 
-2. Optimize based on the profiling. 
-3. Clean up code (variable names, etc.). Simplify unused configs (marked these with TODO) or use them.
-4. Update to include other model sizes and optimize parameter loading. 
+1. Update to include kv cache memory reduction benefits from local attention. Currently, decode generation is not performance optimized.
+2. Update to optimize parameter loading for larger models.
