@@ -23,29 +23,104 @@ from bonsai.models.vae import modeling, params
 
 
 class TestModuleForwardPasses(parameterized.TestCase):
-    def _get_models_and_input_size():
-        weight = "stabilityai/sd-vae-ft-mse"
-        model_ckpt_path = snapshot_download(weight)
-        config = modeling.ModelConfig.stable_diffusion_v1_5()
-        nnx_model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path, cfg=config)
-        dif_model = AutoencoderKL.from_pretrained(weight)
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.torch_device = "cpu"
+        cls.img_size = 256
 
-        return nnx_model, dif_model
+        model_name = "stabilityai/sd-vae-ft-mse"
+        model_ckpt_path = snapshot_download(model_name)
+        torch_cfg = modeling.ModelConfig.stable_diffusion_v1_5()
+        cls.jax_model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path, cfg=torch_cfg)
+        cls.dif_model = AutoencoderKL.from_pretrained(model_name)
+
+    def test_encoder(self):
+        batch = 1
+        tx = torch.rand((batch, 3, self.img_size, self.img_size), dtype=torch.float32)
+        jx = jnp.permute_dims(tx.detach().cpu().numpy(), (0, 2, 3, 1))
+
+        tm = self.dif_model.encoder.to(self.torch_device).eval()
+        jm = self.jax_model.encoder
+
+        with torch.no_grad():
+            ty = tm(tx)
+        jy = jm(jx)
+
+        np.testing.assert_allclose(jy, ty.permute(0, 2, 3, 1).cpu().detach().numpy(), atol=5e-3)
+
+    def test_quant_conv(self):
+        batch = 1
+        tx = torch.rand((batch, 8, 32, 32), dtype=torch.float32)
+        jx = jnp.permute_dims(tx.detach().cpu().numpy(), (0, 2, 3, 1))
+
+        tm = self.dif_model.quant_conv.to(self.torch_device).eval()
+        jm = self.jax_model.quant_conv
+
+        with torch.no_grad():
+            ty = tm(tx)
+        jy = jm(jx)
+
+        np.testing.assert_allclose(jy, ty.permute(0, 2, 3, 1).cpu().detach().numpy(), atol=5e-3)
+
+    def test_post_quant_conv(self):
+        batch = 1
+        tx = torch.rand((batch, 8, 32, 32), dtype=torch.float32)
+        jx = jnp.permute_dims(tx.detach().cpu().numpy(), (0, 2, 3, 1))
+
+        t_mean, _ = torch.chunk(tx, chunks=2, dim=1)
+        j_mean, _ = jnp.split(jx, 2, axis=-1)
+
+        tm = self.dif_model.post_quant_conv.to(self.torch_device).eval()
+        jm = self.jax_model.post_quant_conv
+
+        with torch.no_grad():
+            ty = tm(t_mean)
+        jy = jm(j_mean)
+
+        np.testing.assert_allclose(jy, ty.permute(0, 2, 3, 1).cpu().detach().numpy(), atol=8e-3)
+
+    def test_decoder(self):
+        batch = 1
+        tx = torch.rand((batch, 4, 32, 32), dtype=torch.float32)
+        jx = jnp.permute_dims(tx.detach().cpu().numpy(), (0, 2, 3, 1))
+
+        tm = self.dif_model.decoder.to(self.torch_device).eval()
+        jm = self.jax_model.decoder
+
+        with torch.no_grad():
+            ty = tm(tx)
+        jy = jm(jx)
+
+        np.testing.assert_allclose(jy, ty.permute(0, 2, 3, 1).cpu().detach().numpy(), atol=5e-3)
 
     def test_full(self):
-        nnx_model, dif_model = TestModuleForwardPasses._get_models_and_input_size()
-        device = "cpu"
-        dif_model.to(device).eval()
-
-        batch = 32
-        img_size = 256
-
-        tx = torch.rand((batch, 3, img_size, img_size), dtype=torch.float32)
+        batch = 1
+        tx = torch.rand((batch, 3, self.img_size, self.img_size), dtype=torch.float32)
         jx = jnp.permute_dims(tx.detach().cpu().numpy(), (0, 2, 3, 1))
-        jy = nnx_model(jx)
+
+        tm = self.dif_model.to(self.torch_device).eval()
+        jm = self.jax_model
+
         with torch.no_grad():
-            ty = dif_model(tx).sample
-        np.testing.assert_allclose(jy, ty.permute(0, 2, 3, 1).cpu().detach().numpy(), atol=9e-1)
+            ty = tm(tx).sample
+        jy = jm(jx)
+
+        np.testing.assert_allclose(jy, ty.permute(0, 2, 3, 1).cpu().detach().numpy(), atol=5e-3)
+
+    def test_full_batched(self):
+        batch = 32
+        tx = torch.rand((batch, 3, self.img_size, self.img_size), dtype=torch.float32)
+        jx = jnp.permute_dims(tx.detach().cpu().numpy(), (0, 2, 3, 1))
+
+        tm = self.dif_model.to(self.torch_device).eval()
+        jm = self.jax_model
+
+        with torch.no_grad():
+            ty = tm(tx).sample
+        jy = jm(jx)
+
+        np.testing.assert_allclose(jy, ty.permute(0, 2, 3, 1).cpu().detach().numpy(), atol=5e-3)
 
 
 if __name__ == "__main__":
