@@ -21,7 +21,7 @@ This directory contains a pure JAX implementation of the [VJEPA-2 foundation wor
 
 ### Running this model
 
-Run Qwen3 in action, implemented in [300 lines of code](bonsai/models/qwen3/modeling.py) in JAX.
+Run VJEPA-2 in action, implemented in [500 lines of code](bonsai/models/vjepa2/modeling.py) in JAX.
 
 ```sh
 python3 -m bonsai.models.vjepa2.tests.run_model
