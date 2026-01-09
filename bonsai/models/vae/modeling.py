@@ -1,9 +1,26 @@
-from typing import Optional
+import dataclasses
+
+from typing import Optional, Sequence
 
 import jax
 import jax.image
 import jax.numpy as jnp
 from flax import nnx
+
+
+@dataclasses.dataclass(frozen=True)
+class ModelConfig:
+    block_out_channels: Sequence[int] = (128, 256, 512, 512)
+    latent_channels: int = 4
+    norm_num_groups: int = 32
+
+    @classmethod
+    def stable_diffusion_v1_5(cls):
+        return cls(
+            block_out_channels=[128, 256, 512, 512],
+            latent_channels=4,
+            norm_num_groups=32,
+        )
 
 
 class ResnetBlock(nnx.Module):
@@ -186,9 +203,7 @@ class UNetMidBlock2D(nnx.Module):
 
 
 class Encoder(nnx.Module):
-    def __init__(self, block_out_channels, rngs: nnx.Rngs):
-        groups = 32
-
+    def __init__(self, block_out_channels, latent_channels, groups, rngs: nnx.Rngs):
         self.conv_in = nnx.Conv(
             in_features=3,
             out_features=block_out_channels[0],
@@ -218,15 +233,14 @@ class Encoder(nnx.Module):
             in_channels = out_channels
 
         self.mid_block = UNetMidBlock2D(channels=in_channels, groups=groups, num_res_blocks=2, rngs=rngs)
+
         self.conv_norm_out = nnx.GroupNorm(
             num_groups=groups, num_features=block_out_channels[-1], epsilon=1e-6, rngs=rngs
         )
 
-        conv_out_channels = 2 * 4
-
         self.conv_out = nnx.Conv(
             in_features=block_out_channels[-1],
-            out_features=conv_out_channels,
+            out_features=2 * latent_channels,
             kernel_size=(3, 3),
             strides=(1, 1),
             padding="SAME",
@@ -325,9 +339,7 @@ class UpDecoderBlock2D(nnx.Module):
 
 
 class Decoder(nnx.Module):
-    def __init__(self, latent_channels, block_out_channels, rngs: nnx.Rngs):
-        groups = 32
-
+    def __init__(self, block_out_channels, latent_channels, groups, rngs: nnx.Rngs):
         self.conv_in = nnx.Conv(
             in_features=latent_channels,
             out_features=block_out_channels[-1],
@@ -379,28 +391,28 @@ class Decoder(nnx.Module):
 
 
 class VAE(nnx.Module):
-    def __init__(self, rngs: nnx.Rngs):
-        block_out_channels = [128, 256, 512, 512]
-        latent_channels = 4
+    def __init__(self, cfg: ModelConfig, rngs: nnx.Rngs):
+        self.encoder = Encoder(cfg.block_out_channels, cfg.latent_channels, cfg.norm_num_groups, rngs)
 
-        self.encoder = Encoder(block_out_channels, rngs)
         self.quant_conv = nnx.Conv(
-            in_features=2 * latent_channels,
-            out_features=2 * latent_channels,
+            in_features=2 * cfg.latent_channels,
+            out_features=2 * cfg.latent_channels,
             kernel_size=(1, 1),
             strides=(1, 1),
             padding="VALID",
             rngs=rngs,
         )
+
         self.post_quant_conv = nnx.Conv(
-            in_features=latent_channels,
-            out_features=latent_channels,
+            in_features=cfg.latent_channels,
+            out_features=cfg.latent_channels,
             kernel_size=(1, 1),
             strides=(1, 1),
             padding="VALID",
             rngs=rngs,
         )
-        self.decoder = Decoder(latent_channels=latent_channels, block_out_channels=block_out_channels, rngs=rngs)
+
+        self.decoder = Decoder(cfg.block_out_channels, cfg.latent_channels, cfg.norm_num_groups, rngs)
 
     def __call__(self, x):
         x = self.encoder(x)

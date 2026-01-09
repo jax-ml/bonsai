@@ -19,14 +19,15 @@ from absl.testing import absltest, parameterized
 from diffusers.models import AutoencoderKL
 from huggingface_hub import snapshot_download
 
-from bonsai.models.vae import params
+from bonsai.models.vae import modeling, params
 
 
 class TestModuleForwardPasses(parameterized.TestCase):
     def _get_models_and_input_size():
         weight = "stabilityai/sd-vae-ft-mse"
         model_ckpt_path = snapshot_download(weight)
-        nnx_model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path)
+        config = modeling.ModelConfig.stable_diffusion_v1_5()
+        nnx_model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path, cfg=config)
         dif_model = AutoencoderKL.from_pretrained(weight)
 
         return nnx_model, dif_model

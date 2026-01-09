@@ -24,7 +24,8 @@ from bonsai.models.vae import modeling, params
 def run_model():
     # 1. Download safetensors file
     model_ckpt_path = snapshot_download("stabilityai/sd-vae-ft-mse")
-    model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path)
+    config = modeling.ModelConfig.stable_diffusion_v1_5()
+    model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path, cfg=config)
 
     # 2. Prepare dummy input
     batch_size = 1

@@ -7,7 +7,7 @@ jupytext:
     jupytext_version: 1.18.1
 ---
 
-<a href="https://colab.research.google.com/github/eari100/bonsai/blob/vae-weights-and-tests/bonsai/models/vae/tests/VAE_image_reconstruction_example.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
+<a href="https://colab.research.google.com/github/jax-ml/bonsai/blob/main/bonsai/models/vae/tests/VAE_image_reconstruction_example.ipynb" target="_parent"><img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/></a>
 
 +++
 
@@ -20,7 +20,7 @@ This notebook demonstrates image reconstruction using the [Bonsai library](https
 ## **Set-up**
 
 ```{code-cell}
-!pip install -q git+https://github.com/eari100/bonsai@vae-weights-and-tests
+!pip install -q git+https://github.com/jax-ml/bonsai@main
 !pip install -q pillow matplotlib requests
 !pip install -q scikit-image
 ```
@@ -87,17 +87,18 @@ download_coco_test_set()
 ```{code-cell}
 from huggingface_hub import snapshot_download
 
-from bonsai.models.vae import params
+from bonsai.models.vae import modeling, params
 
 
 def load_vae_model():
     model_name = "stabilityai/sd-vae-ft-mse"
+    config = modeling.ModelConfig.stable_diffusion_v1_5()
 
     print(f"Downloading {model_name}...")
     model_ckpt_path = snapshot_download(model_name)
     print("Download complete!")
 
-    model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path)
+    model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path, cfg=config)
 
     print("VAE model loaded_successfully!")
 
@@ -118,7 +119,7 @@ def preprocess(image):
     return jnp.array(image[None, ...])
 ```
 
-## **Image Postproessing**
+## **Image Postprocessing**
 
 ```{code-cell}
 def postprocess(tensor):
