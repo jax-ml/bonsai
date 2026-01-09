@@ -244,7 +244,7 @@ class TestPretrainedFoundationModel(absltest.TestCase):
 
     def _prepare_inputs(self, seed=42):
         np.random.seed(seed)
-        # Use 16 frames for testing (not frames_per_clip=64)
+
         video = np.random.randn(1, 16, 3, 256, 256).astype(np.float32)
 
         pixel_values_videos = torch.tensor(video)
