@@ -53,117 +53,117 @@ def _get_vision_key_mapping():
     return {
         # Patch embedding
         r"^model\.visual\.patch_embed\.proj\.weight$": (
-            "visual.patch_embed.proj_weight",
+            "model.visual.patch_embed.proj_weight",
             Transform.DEFAULT,  # Already in correct shape for our implementation
         ),
         r"^model\.visual\.patch_embed\.proj\.bias$": (
-            "visual.patch_embed.proj_bias",
+            "model.visual.patch_embed.proj_bias",
             Transform.BIAS,
         ),
         # Position embedding
         r"^model\.visual\.pos_embed\.weight$": (
-            "visual.pos_embed.embedding",
+            "model.visual.pos_embed.embedding",
             Transform.EMBED,
         ),
         # Vision blocks
         r"^model\.visual\.blocks\.(\d+)\.norm1\.weight$": (
-            r"visual.blocks.\1.norm1.scale",
+            r"model.visual.blocks.\1.norm1.scale",
             Transform.DEFAULT,
         ),
         r"^model\.visual\.blocks\.(\d+)\.norm1\.bias$": (
-            r"visual.blocks.\1.norm1.bias",
+            r"model.visual.blocks.\1.norm1.bias",
             Transform.BIAS,
         ),
         r"^model\.visual\.blocks\.(\d+)\.norm2\.weight$": (
-            r"visual.blocks.\1.norm2.scale",
+            r"model.visual.blocks.\1.norm2.scale",
             Transform.DEFAULT,
         ),
         r"^model\.visual\.blocks\.(\d+)\.norm2\.bias$": (
-            r"visual.blocks.\1.norm2.bias",
+            r"model.visual.blocks.\1.norm2.bias",
             Transform.BIAS,
         ),
         # Vision attention - fused QKV
         r"^model\.visual\.blocks\.(\d+)\.attn\.qkv\.weight$": (
-            r"visual.blocks.\1.attn.qkv.kernel",
+            r"model.visual.blocks.\1.attn.qkv.kernel",
             Transform.LINEAR,
         ),
         r"^model\.visual\.blocks\.(\d+)\.attn\.qkv\.bias$": (
-            r"visual.blocks.\1.attn.qkv.bias",
+            r"model.visual.blocks.\1.attn.qkv.bias",
             Transform.BIAS,
         ),
         r"^model\.visual\.blocks\.(\d+)\.attn\.proj\.weight$": (
-            r"visual.blocks.\1.attn.proj.kernel",
+            r"model.visual.blocks.\1.attn.proj.kernel",
             Transform.LINEAR,
         ),
         r"^model\.visual\.blocks\.(\d+)\.attn\.proj\.bias$": (
-            r"visual.blocks.\1.attn.proj.bias",
+            r"model.visual.blocks.\1.attn.proj.bias",
             Transform.BIAS,
         ),
         # Vision MLP
         r"^model\.visual\.blocks\.(\d+)\.mlp\.linear_fc1\.weight$": (
-            r"visual.blocks.\1.mlp.linear_fc1.kernel",
+            r"model.visual.blocks.\1.mlp.linear_fc1.kernel",
             Transform.LINEAR,
         ),
         r"^model\.visual\.blocks\.(\d+)\.mlp\.linear_fc1\.bias$": (
-            r"visual.blocks.\1.mlp.linear_fc1.bias",
+            r"model.visual.blocks.\1.mlp.linear_fc1.bias",
             Transform.BIAS,
         ),
         r"^model\.visual\.blocks\.(\d+)\.mlp\.linear_fc2\.weight$": (
-            r"visual.blocks.\1.mlp.linear_fc2.kernel",
+            r"model.visual.blocks.\1.mlp.linear_fc2.kernel",
             Transform.LINEAR,
         ),
         r"^model\.visual\.blocks\.(\d+)\.mlp\.linear_fc2\.bias$": (
-            r"visual.blocks.\1.mlp.linear_fc2.bias",
+            r"model.visual.blocks.\1.mlp.linear_fc2.bias",
             Transform.BIAS,
         ),
         # Merger
         r"^model\.visual\.merger\.norm\.weight$": (
-            "visual.merger.norm.scale",
+            "model.visual.merger.norm.scale",
             Transform.DEFAULT,
         ),
         r"^model\.visual\.merger\.norm\.bias$": (
-            "visual.merger.norm.bias",
+            "model.visual.merger.norm.bias",
             Transform.BIAS,
         ),
         r"^model\.visual\.merger\.linear_fc1\.weight$": (
-            "visual.merger.linear_fc1.kernel",
+            "model.visual.merger.linear_fc1.kernel",
             Transform.LINEAR,
         ),
         r"^model\.visual\.merger\.linear_fc1\.bias$": (
-            "visual.merger.linear_fc1.bias",
+            "model.visual.merger.linear_fc1.bias",
             Transform.BIAS,
         ),
         r"^model\.visual\.merger\.linear_fc2\.weight$": (
-            "visual.merger.linear_fc2.kernel",
+            "model.visual.merger.linear_fc2.kernel",
             Transform.LINEAR,
         ),
         r"^model\.visual\.merger\.linear_fc2\.bias$": (
-            "visual.merger.linear_fc2.bias",
+            "model.visual.merger.linear_fc2.bias",
             Transform.BIAS,
         ),
         # Deepstack mergers
         r"^model\.visual\.deepstack_merger_list\.(\d+)\.norm\.weight$": (
-            r"visual.deepstack_merger_list.\1.norm.scale",
+            r"model.visual.deepstack_merger_list.\1.norm.scale",
             Transform.DEFAULT,
         ),
         r"^model\.visual\.deepstack_merger_list\.(\d+)\.norm\.bias$": (
-            r"visual.deepstack_merger_list.\1.norm.bias",
+            r"model.visual.deepstack_merger_list.\1.norm.bias",
             Transform.BIAS,
         ),
         r"^model\.visual\.deepstack_merger_list\.(\d+)\.linear_fc1\.weight$": (
-            r"visual.deepstack_merger_list.\1.linear_fc1.kernel",
+            r"model.visual.deepstack_merger_list.\1.linear_fc1.kernel",
             Transform.LINEAR,
         ),
         r"^model\.visual\.deepstack_merger_list\.(\d+)\.linear_fc1\.bias$": (
-            r"visual.deepstack_merger_list.\1.linear_fc1.bias",
+            r"model.visual.deepstack_merger_list.\1.linear_fc1.bias",
             Transform.BIAS,
         ),
         r"^model\.visual\.deepstack_merger_list\.(\d+)\.linear_fc2\.weight$": (
-            r"visual.deepstack_merger_list.\1.linear_fc2.kernel",
+            r"model.visual.deepstack_merger_list.\1.linear_fc2.kernel",
             Transform.LINEAR,
         ),
         r"^model\.visual\.deepstack_merger_list\.(\d+)\.linear_fc2\.bias$": (
-            r"visual.deepstack_merger_list.\1.linear_fc2.bias",
+            r"model.visual.deepstack_merger_list.\1.linear_fc2.bias",
             Transform.BIAS,
         ),
     }
@@ -172,68 +172,69 @@ def _get_vision_key_mapping():
 def _get_text_key_mapping():
     """Mapping for text decoder weights."""
     return {
-        # Token embedding
-        r"^model\.language_model\.model\.embed_tokens\.weight$": (
-            "language_model.embed_tokens.embedding",
+        # Token embedding (note: PyTorch key is model.language_model.embed_tokens)
+        r"^model\.language_model\.embed_tokens\.weight$": (
+            "model.language_model.embed_tokens.embedding",
             Transform.EMBED,
         ),
         # Decoder layers - attention
         r"^model\.language_model\.layers\.(\d+)\.self_attn\.q_proj\.weight$": (
-            r"language_model.layers.\1.self_attn.q_proj.kernel",
+            r"model.language_model.layers.\1.self_attn.q_proj.kernel",
             Transform.LINEAR,
         ),
         r"^model\.language_model\.layers\.(\d+)\.self_attn\.k_proj\.weight$": (
-            r"language_model.layers.\1.self_attn.k_proj.kernel",
+            r"model.language_model.layers.\1.self_attn.k_proj.kernel",
             Transform.LINEAR,
         ),
         r"^model\.language_model\.layers\.(\d+)\.self_attn\.v_proj\.weight$": (
-            r"language_model.layers.\1.self_attn.v_proj.kernel",
+            r"model.language_model.layers.\1.self_attn.v_proj.kernel",
             Transform.LINEAR,
         ),
         r"^model\.language_model\.layers\.(\d+)\.self_attn\.o_proj\.weight$": (
-            r"language_model.layers.\1.self_attn.o_proj.kernel",
+            r"model.language_model.layers.\1.self_attn.o_proj.kernel",
             Transform.LINEAR,
         ),
         # Q/K norms
         r"^model\.language_model\.layers\.(\d+)\.self_attn\.q_norm\.weight$": (
-            r"language_model.layers.\1.self_attn.q_norm.weight",
+            r"model.language_model.layers.\1.self_attn.q_norm.weight",
             Transform.DEFAULT,
         ),
         r"^model\.language_model\.layers\.(\d+)\.self_attn\.k_norm\.weight$": (
-            r"language_model.layers.\1.self_attn.k_norm.weight",
+            r"model.language_model.layers.\1.self_attn.k_norm.weight",
             Transform.DEFAULT,
         ),
         # Decoder layers - MLP
         r"^model\.language_model\.layers\.(\d+)\.mlp\.gate_proj\.weight$": (
-            r"language_model.layers.\1.mlp.gate_proj.kernel",
+            r"model.language_model.layers.\1.mlp.gate_proj.kernel",
             Transform.LINEAR,
         ),
         r"^model\.language_model\.layers\.(\d+)\.mlp\.up_proj\.weight$": (
-            r"language_model.layers.\1.mlp.up_proj.kernel",
+            r"model.language_model.layers.\1.mlp.up_proj.kernel",
             Transform.LINEAR,
         ),
         r"^model\.language_model\.layers\.(\d+)\.mlp\.down_proj\.weight$": (
-            r"language_model.layers.\1.mlp.down_proj.kernel",
+            r"model.language_model.layers.\1.mlp.down_proj.kernel",
             Transform.LINEAR,
         ),
         # Decoder layers - norms
         r"^model\.language_model\.layers\.(\d+)\.input_layernorm\.weight$": (
-            r"language_model.layers.\1.input_layernorm.weight",
+            r"model.language_model.layers.\1.input_layernorm.weight",
             Transform.DEFAULT,
         ),
         r"^model\.language_model\.layers\.(\d+)\.post_attention_layernorm\.weight$": (
-            r"language_model.layers.\1.post_attention_layernorm.weight",
+            r"model.language_model.layers.\1.post_attention_layernorm.weight",
             Transform.DEFAULT,
         ),
         # Final norm
         r"^model\.language_model\.norm\.weight$": (
-            "language_model.norm.weight",
+            "model.language_model.norm.weight",
             Transform.DEFAULT,
         ),
-        # LM head
+        # For tied embeddings models, lm_head.weight is saved but embed_tokens is not
+        # Map lm_head.weight to embed_tokens.embedding (they share the same weight)
         r"^lm_head\.weight$": (
-            "lm_head.kernel",
-            Transform.LINEAR,
+            "model.language_model.embed_tokens.embedding",
+            Transform.EMBED,
         ),
     }
 
@@ -318,6 +319,7 @@ def create_model_from_safe_tensors(
     file_dir: str,
     config: model_lib.Qwen3VLConfig,
     mesh: jax.sharding.Mesh | None = None,
+    model_filename: str | None = None,
 ) -> model_lib.Qwen3VLForConditionalGeneration:
     """Load pretrained weights from safetensors and create model.
 
@@ -325,6 +327,7 @@ def create_model_from_safe_tensors(
         file_dir: Path to directory containing .safetensors files.
         config: Model configuration.
         mesh: Optional JAX mesh for sharding.
+        model_filename: Optional specific filename to load (e.g., "model.safetensors").
 
     Returns:
         Qwen3VLForConditionalGeneration model with loaded weights.
@@ -332,7 +335,13 @@ def create_model_from_safe_tensors(
     Raises:
         ValueError: If no safetensors files found or weight conversion fails.
     """
-    files = list(Path(file_dir).expanduser().glob("*.safetensors"))
+    path = Path(file_dir).expanduser()
+    if model_filename:
+        files = [path / model_filename]
+        if not files[0].exists():
+            raise ValueError(f"Specified file not found: {files[0]}")
+    else:
+        files = list(path.glob("*.safetensors"))
     if not files:
         raise ValueError(f"No safetensors files found in {file_dir}")
 
