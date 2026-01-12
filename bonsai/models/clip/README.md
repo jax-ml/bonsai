@@ -1,28 +1,33 @@
-# ITA-CLIP — CLIP-style model (JAX / Flax)
+## CLIP in JAX
 
-This directory contains a compact CLIP-like implementation (ITA-CLIP) in JAX/Flax,
-intended for zero-shot image classification, prompt-guided heatmaps, and image-text embedding experiments.
+This directory contains a pure JAX implementation of the **CLIP (Contrastive Language–Image Pretraining)** model, implemented using **Flax**.
 
-## Paper (reference)
+The model consists of:
+- A Vision Transformer (ViT-style) image encoder
+- A Transformer-based text encoder
+- A shared embedding space trained with a contrastive objective
 
-- Radford et al., *Learning Transferable Visual Models From Natural Language Supervision* (OpenAI CLIP)  
-  Local copy used during development: `/mnt/data/2103.00020v1.pdf`
+This implementation focuses on correctness, modularity, and testability, and is designed to integrate cleanly with the rest of the Bonsai model zoo.
 
 ---
 
 ## Tested on
 
-| Model Name | Config | CPU | GPU (single) | GPU (multi) | TPU |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| ITA-CLIP (TinyViT + TinyText) | ✅ Compact research config | ✅ Runs (CPU) | ❔ Needs check (CUDA JAX) | ❔ Needs check | ❔ Needs check |
+| Model Name | Config | CPU | GPU A100 (1x) | GPU H100 (1x) | GPU A100 (8x) | GPU H100 (8x) | TPU v2 (8x) | TPU v5e (1x) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| CLIP (ViT + Text Transformer) | ✅ Supported | ✅ Runs | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |
 
-> Notes: This implementation uses a compact TinyViT and small text-transformer to make local testing and CI-friendly smoke tests possible. For large-scale ViT-B/32 or ViT-L/14 variants, add config presets and provide pretrained weights.
+> **Note**  
+> This model is tested and supported on **Python 3.11**.  
+> Python 3.13 is currently **not supported** due to upstream JAX/Flax incompatibilities.
 
 ---
 
-### Running this model (quick smoke test)
+## Running this model
 
-Run a forward pass / smoke test:
+### Forward pass test (recommended)
 
-```bash
-python3 -m bonsai.models.clip.tests.run_model
+You can verify that the model runs correctly by executing the pytest forward test:
+
+```sh
+python -m pytest bonsai/models/clip/tests/test_model.py -vv
