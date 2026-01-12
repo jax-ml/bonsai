@@ -68,7 +68,7 @@ class TextTransformer(nn.Module):
         )
         x = x + pos
         
-        causal_mask = nn.attention.make_causal_mask(tokens)
+        causal_mask = nn.attention.make_causal_mask(jnp.ones_like(tokens))
         for i in range(self.cfg.text_layers):
             h = nn.LayerNorm(name=f"ln1_{i}")(x)
             h = nn.SelfAttention(
