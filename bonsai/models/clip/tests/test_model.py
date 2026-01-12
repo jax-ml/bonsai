@@ -4,7 +4,6 @@ import jax.numpy as jnp
 from bonsai.models.clip.modeling import CLIP
 from bonsai.models.clip.params import CLIPConfig
 
-
 def test_clip_forward():
     cfg = CLIPConfig()
     model = CLIP(cfg)
