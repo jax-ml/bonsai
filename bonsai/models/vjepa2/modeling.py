@@ -106,7 +106,6 @@ ACT2FN = {"gelu": gelu_exact, "silu": nnx.silu, "relu": nnx.relu}
 class VJEPA2PatchEmbeddings3D(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, hidden_size: int, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.hidden_size = hidden_size
         kernel = (config.tubelet_size, config.patch_size, config.patch_size)
         self.proj = nnx.Conv(
@@ -165,7 +164,6 @@ def rotate_queries_or_keys(x: Array, pos: Array, dim: int) -> Array:
 class VJEPA2RopeAttention(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, hidden_size: int, num_attention_heads: int, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
 
@@ -316,7 +314,6 @@ class VJEPA2Layer(nnx.Module):
 class VJEPA2Encoder(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.embeddings = VJEPA2Embeddings(config, hidden_size=config.hidden_size, rngs=rngs)
         self.layer = nnx.List(
             [
@@ -391,7 +388,6 @@ class VJEPA2PredictorEmbeddings(nnx.Module):
 class VJEPA2Predictor(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.embeddings = VJEPA2PredictorEmbeddings(config, rngs=rngs)
         self.layer = nnx.List(
             [
@@ -443,7 +439,6 @@ class VJEPA2Predictor(nnx.Module):
 class VJEPA2PoolerSelfAttention(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
@@ -477,7 +472,6 @@ class VJEPA2PoolerSelfAttention(nnx.Module):
 class VJEPA2PoolerCrossAttention(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
