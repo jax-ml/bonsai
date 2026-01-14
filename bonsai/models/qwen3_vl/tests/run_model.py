@@ -14,17 +14,14 @@ Usage:
 """
 
 import argparse
-import sys
-from pathlib import Path
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 from flax import nnx
 
-# Add parent to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-import modeling
+from bonsai.models.qwen3_vl import modeling
+from bonsai.models.qwen3_vl import params
 
 
 def convert_pt_to_jax(pt_tensor):
@@ -34,9 +31,9 @@ def convert_pt_to_jax(pt_tensor):
 
 def count_params(model):
     """Count total parameters in model."""
-    params = nnx.state(model, nnx.Param)
+    model_params = nnx.state(model, nnx.Param)
     total = 0
-    for leaf in jax.tree.leaves(params):
+    for leaf in jax.tree.leaves(model_params):
         if hasattr(leaf, "shape"):
             total += np.prod(leaf.shape)
     return int(total)
@@ -106,12 +103,6 @@ def run_pretrained_mode(model_path: str):
     print("Qwen3-VL JAX Demo - Pretrained Mode")
     print("=" * 60)
     print(f"Model path: {model_path}")
-
-    try:
-        import params
-    except ImportError:
-        print("Error: params module not found")
-        return
 
     # Load model
     print("\n1. Loading pretrained model...")
