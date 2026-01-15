@@ -24,35 +24,12 @@ from transformers import AutoTokenizer, AutoModel, AutoConfig
 from bonsai.models.llada import modeling, params
 from flax import nnx
 from typing import Any
+import tempfile
+from safetensors.torch import save_file
+import os
 
 # used to set highest precision on matrix multiplication for testing
 jax.config.update("jax_default_matmul_precision", "highest")
-
-
-def transfer_params(baseline_model: torch.nn.Module, bonsai_model, mesh: jax.sharding.Mesh | None = None):
-    tensor_dict = {k: jnp.array(v.detach().cpu().numpy()) for k, v in baseline_model.state_dict().items()}
-
-    graph_def, abs_state = nnx.split(bonsai_model)
-    jax_state = abs_state.to_pure_dict()
-    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
-
-    mapping = params._get_key_and_transform_mapping()
-    for st_key, tensor in tensor_dict.items():
-        jax_key, transform = params._st_key_to_jax_key(mapping, st_key)
-        if jax_key is None:
-            continue
-        keys = [params._stoi(k) for k in jax_key.split(r"\.")]
-        try:
-            params._assign_weights(keys, tensor, jax_state, st_key, transform.value, sharding)
-        except KeyError as e:
-            print(f"Key error: {keys} at {e}")
-        except ValueError as e:
-            print(e)
-        except Exception as e:
-            print(keys)
-            raise e
-
-    return nnx.merge(graph_def, jax_state)
 
 
 def create_llada_for_testing(use_shd: bool) -> tuple[Any, torch.nn.Module, modeling.ModelConfig, modeling.LLaDAModel]:
@@ -85,7 +62,12 @@ def create_llada_for_testing(use_shd: bool) -> tuple[Any, torch.nn.Module, model
         shd_cfg=modeling.ShardingConfig.default(use_shd, use_shd),
     )
     bonsai_model = modeling.LLaDAModel(bonsai_config, rngs=nnx.Rngs(0))
-    bonsai_model = transfer_params(baseline_model, bonsai_model, None)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        filename = os.path.join(temp_dir, "ref.safetensors")
+        save_file(baseline_model.state_dict(), filename)
+        bonsai_model = params.create_llada_from_pretrained(temp_dir, bonsai_config)
+
     return baseline_config, baseline_model, bonsai_config, bonsai_model
 
 

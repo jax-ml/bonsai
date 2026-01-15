@@ -131,13 +131,13 @@ class ShardedEmbedding(nnx.Embed):
         # Modified from Flax NNX
         if not jnp.issubdtype(inputs.dtype, jnp.integer):
             raise ValueError("Input type must be an integer or unsigned integer.")
-        (embedding,) = self.promote_dtype((self.embedding.value,), dtype=self.dtype, inexact=False)
+        (embedding,) = self.promote_dtype((self.embedding.get_value(),), dtype=self.dtype, inexact=False)
         if self.num_embeddings == 1:
             return jnp.broadcast_to(embedding, (*inputs.shape, self.features))
         return embedding.at[inputs].get(out_sharding=out_sharding)
 
     def attend(self, query: Array, *, out_sharding) -> Array:
-        query, embedding = self.promote_dtype((query, self.embedding.value), dtype=self.dtype)
+        query, embedding = self.promote_dtype((query, self.embedding.get_value()), dtype=self.dtype)
         return jnp.dot(query, embedding.T, out_sharding=out_sharding)
 
 
@@ -178,7 +178,7 @@ class RMSNorm(nnx.Module):
         dtype = x.dtype
         xf32 = x.astype(jnp.float32)
         out = xf32 * jax.lax.rsqrt(jnp.square(xf32).mean(-1, keepdims=True) + self.eps)
-        out = out * self.weight.value.astype(jnp.float32)
+        out = out * self.weight.get_value().astype(jnp.float32)
         return out.astype(dtype)
 
 
@@ -357,8 +357,11 @@ def generate(
     confidence_eos_eot_inf: bool = False,
     key: Array = jax.random.key(0),
 ):
+    fsdp_enabled = model.config.shd_cfg.activation[0] is not None
     # Write mask_id into the generation part of the array
     x = jnp.concatenate([prompt, jnp.full((prompt.shape[0], gen_length), mask_id, dtype=jnp.int32)], axis=1)
+    if fsdp_enabled:
+        x = jax.device_put(x, P(ShardMode.FSDP.value))
 
     if attention_mask is not None:
         attention_mask = jnp.concat(
@@ -411,6 +414,8 @@ def generate(
             # Compute remasking confidence for next step of diffusion
             if remasking == "low_confidence":
                 p = jax.nn.softmax(logits, axis=-1)
+                if fsdp_enabled:
+                    p = jax.sharding.reshard(p, out_shardings=P(ShardMode.FSDP.value))
                 x0_p = jnp.take_along_axis(p, x0[..., None], axis=-1).squeeze(-1)
             elif remasking == "random":
                 key, subkey = jax.random.split(key)
@@ -425,11 +430,15 @@ def generate(
             mask_index = x == mask_id
             x0 = jnp.where(mask_index, x0, x)
             confidence = jnp.where(mask_index, x0_p, -jnp.inf)
+            if fsdp_enabled:
+                confidence = jax.sharding.reshard(confidence, P())
 
             # Compute array ranks for topk mask
             ranks = jnp.argsort(jnp.argsort(confidence, axis=-1), axis=-1)
             rank_threshold = (confidence.shape[-1] - num_transfer_tokens[:, i])[:, None]
             topk_mask = ranks >= rank_threshold
+            if fsdp_enabled:
+                topk_mask = jax.sharding.reshard(topk_mask, P(ShardMode.FSDP.value))
 
             # Assign topk from x0 to x
             x = jnp.where(topk_mask, x0, x)
