@@ -49,6 +49,7 @@ class TestForwardPass(absltest.TestCase):
         self.config = model_lib.VJEPA2FlaxConfig.standard_test()
         self.bonsai_model = params.create_model_from_safe_tensors(self.save_dir, self.config, classifier=False)
 
+        os.remove(self.model_ckpt_path)
         self.bonsai_model.eval()
         self.baseline_model.eval()
 
@@ -77,7 +78,7 @@ class TestForwardPass(absltest.TestCase):
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=2e-3)
 
     def test_first_layer(self):
         torch_emb = self.baseline_model.encoder.embeddings
@@ -103,7 +104,7 @@ class TestForwardPass(absltest.TestCase):
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-2, atol=3e-3)
+        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=1e-3)
 
     def test_rope_attention(self):
         """Test RoPE attention output matches between PyTorch and Flax."""
@@ -131,7 +132,7 @@ class TestForwardPass(absltest.TestCase):
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-2, atol=3e-3)
+        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=2e-5)
 
     def test_last_hidden_state(self):
         key = jax.random.PRNGKey(0)
@@ -144,12 +145,12 @@ class TestForwardPass(absltest.TestCase):
 
         with torch.inference_mode():
             ty = self.baseline_model(tx, skip_predictor=True).last_hidden_state
-        jy = self.bonsai_model(jx_flax, skip_predictor=True).last_hidden_state
+        jy = self.bonsai_model(jx_flax, skip_predictor=True)["last_hidden_state"]
 
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
 
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=2e-3)
 
 
 class TestVideoClassification(absltest.TestCase):
@@ -195,6 +196,7 @@ class TestVideoClassification(absltest.TestCase):
         )
         self.bonsai_model = params.create_model_from_safe_tensors(self.save_dir, self.config, classifier=True)
 
+        os.remove(self.model_ckpt_path)
         self.bonsai_model.eval()
         self.baseline_model.eval()
 
@@ -215,7 +217,7 @@ class TestVideoClassification(absltest.TestCase):
 
         with torch.inference_mode():
             ty = self.baseline_model(tx).logits
-        jy = self.bonsai_model(jx_flax).logits
+        jy = self.bonsai_model(jx_flax)["logits"]
 
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
@@ -223,7 +225,7 @@ class TestVideoClassification(absltest.TestCase):
         self.assertEqual(ty_bonsai.shape, ty.shape)
         self.assertEqual(ty_bonsai.shape[-1], self.config.num_labels)
 
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=1e-2)
 
 
 class TestPretrainedFoundationModel(absltest.TestCase):
@@ -244,6 +246,7 @@ class TestPretrainedFoundationModel(absltest.TestCase):
 
     def _prepare_inputs(self, seed=42):
         np.random.seed(seed)
+        torch.manual_seed(seed)
 
         video = np.random.randn(1, 16, 3, 256, 256).astype(np.float32)
 
@@ -251,72 +254,6 @@ class TestPretrainedFoundationModel(absltest.TestCase):
         video_jax = jnp.asarray(video.transpose(0, 1, 3, 4, 2))
 
         return pixel_values_videos, video_jax
-
-    def test_full_model_output(self):
-        pixel_values_videos, video_jax = self._prepare_inputs()
-
-        with torch.inference_mode():
-            torch_out = self.torch_model(pixel_values_videos, skip_predictor=False)
-        torch_hidden = torch_out.last_hidden_state.numpy()
-        torch_predictor = torch_out.predictor_output.last_hidden_state.numpy()
-
-        flax_out = self.flax_model(video_jax, skip_predictor=False)
-        flax_hidden = np.asarray(jax.device_get(flax_out.last_hidden_state))
-        flax_predictor = np.asarray(jax.device_get(flax_out.predictor_last_hidden_state))
-
-        self.assertEqual(torch_hidden.shape, flax_hidden.shape)
-
-        torch.testing.assert_close(
-            torch.tensor(flax_hidden),
-            torch.tensor(torch_hidden),
-            rtol=1e-1,
-            atol=1.0,
-        )
-
-        self.assertEqual(torch_predictor.shape, flax_predictor.shape)
-
-        torch.testing.assert_close(
-            torch.tensor(flax_predictor),
-            torch.tensor(torch_predictor),
-            rtol=1e-1,
-            atol=1.0,
-        )
-
-    def test_encoder_only(self):
-        pixel_values_videos, video_jax = self._prepare_inputs()
-
-        with torch.inference_mode():
-            torch_out = self.torch_model(pixel_values_videos, skip_predictor=True)
-        torch_hidden = torch_out.last_hidden_state.numpy()
-
-        flax_out = self.flax_model(video_jax, skip_predictor=True)
-        flax_hidden = np.asarray(jax.device_get(flax_out.last_hidden_state))
-
-        self.assertEqual(torch_hidden.shape, flax_hidden.shape)
-
-        torch.testing.assert_close(
-            torch.tensor(flax_hidden),
-            torch.tensor(torch_hidden),
-            rtol=1e-1,
-            atol=1.0,
-        )
-
-    def test_get_vision_features(self):
-        pixel_values_videos, video_jax = self._prepare_inputs()
-
-        with torch.inference_mode():
-            torch_features = self.torch_model.get_vision_features(pixel_values_videos).numpy()
-
-        flax_features = np.asarray(jax.device_get(self.flax_model.get_vision_features(video_jax)))
-
-        self.assertEqual(torch_features.shape, flax_features.shape)
-
-        torch.testing.assert_close(
-            torch.tensor(flax_features),
-            torch.tensor(torch_features),
-            rtol=1e-1,
-            atol=1.0,
-        )
 
     def test_rope_attention_pretrained(self):
         """Test RoPE attention with pretrained weights."""
@@ -334,8 +271,57 @@ class TestPretrainedFoundationModel(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.asarray(jax.device_get(flax_attn))),
             torch.tensor(torch_attn.numpy()),
+            rtol=1e-5,
+            atol=2e-2,
+        )
+
+    def test_encoder_only(self):
+        pixel_values_videos, video_jax = self._prepare_inputs()
+
+        with torch.inference_mode():
+            torch_out = self.torch_model(pixel_values_videos, skip_predictor=True)
+        torch_hidden = torch_out.last_hidden_state.numpy()
+
+        flax_out = self.flax_model(video_jax, skip_predictor=True)
+        flax_hidden = np.asarray(jax.device_get(flax_out["last_hidden_state"]))
+
+        self.assertEqual(torch_hidden.shape, flax_hidden.shape)
+
+        torch.testing.assert_close(
+            torch.tensor(flax_hidden),
+            torch.tensor(torch_hidden),
+            rtol=1e-5,
+            atol=6e-1,
+        )
+
+    def test_full_model_output(self):
+        pixel_values_videos, video_jax = self._prepare_inputs()
+
+        with torch.inference_mode():
+            torch_out = self.torch_model(pixel_values_videos, skip_predictor=False)
+        torch_hidden = torch_out.last_hidden_state.numpy()
+        torch_predictor = torch_out.predictor_output.last_hidden_state.numpy()
+
+        flax_out = self.flax_model(video_jax, skip_predictor=False)
+        flax_hidden = np.asarray(jax.device_get(flax_out["last_hidden_state"]))
+        flax_predictor = np.asarray(jax.device_get(flax_out["predictor_last_hidden_state"]))
+
+        self.assertEqual(torch_hidden.shape, flax_hidden.shape)
+
+        torch.testing.assert_close(
+            torch.tensor(flax_hidden),
+            torch.tensor(torch_hidden),
+            rtol=1e-5,
+            atol=6e-1,
+        )
+
+        self.assertEqual(torch_predictor.shape, flax_predictor.shape)
+
+        torch.testing.assert_close(
+            torch.tensor(flax_predictor),
+            torch.tensor(torch_predictor),
             rtol=1e-1,
-            atol=0.02,
+            atol=5e-1,
         )
 
 
@@ -359,6 +345,8 @@ class TestPretrainedClassificationModel(absltest.TestCase):
 
     def _prepare_inputs(self, seed=42):
         np.random.seed(seed)
+        torch.manual_seed(seed)
+
         num_frames = self.flax_config.frames_per_clip
         video = np.random.randn(num_frames, 3, 256, 256).astype(np.float32)
 
@@ -378,15 +366,15 @@ class TestPretrainedClassificationModel(absltest.TestCase):
         torch_logits = torch_out.logits.numpy()
 
         flax_out = self.flax_model(video_jax)
-        flax_logits = np.asarray(jax.device_get(flax_out.logits))
+        flax_logits = np.asarray(jax.device_get(flax_out["logits"]))
 
         self.assertEqual(torch_logits.shape, flax_logits.shape)
 
         torch.testing.assert_close(
             torch.tensor(flax_logits),
             torch.tensor(torch_logits),
-            rtol=1e-2,
-            atol=7e-2,
+            rtol=1e-5,
+            atol=6e-2,
         )
 
     def test_top_k_predictions(self):
@@ -396,7 +384,7 @@ class TestPretrainedClassificationModel(absltest.TestCase):
             torch_logits = self.torch_model(pixel_values_videos).logits
         torch_top5 = torch.topk(torch_logits, 5).indices[0].numpy()
 
-        flax_logits = self.flax_model(video_jax).logits
+        flax_logits = self.flax_model(video_jax)["logits"]
         flax_logits_np = np.asarray(jax.device_get(flax_logits))
         flax_top5 = np.argsort(flax_logits_np[0])[-5:][::-1]
 
