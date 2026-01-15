@@ -6,20 +6,6 @@ from flax import nnx
 from jax import Array
 
 
-@dataclasses.dataclass
-class VJEPA2ModelOutput:
-    last_hidden_state: Array
-    masked_hidden_state: Array | None = None
-    predictor_last_hidden_state: Array | None = None
-    predictor_target_hidden_state: Array | None = None
-
-
-@dataclasses.dataclass
-class VJEPA2ClassificationOutput:
-    logits: Array
-    last_hidden_state: Array
-
-
 @dataclasses.dataclass(frozen=True)
 class VJEPA2FlaxConfig:
     model_type: str = "vjepa2"
@@ -106,7 +92,6 @@ ACT2FN = {"gelu": gelu_exact, "silu": nnx.silu, "relu": nnx.relu}
 class VJEPA2PatchEmbeddings3D(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, hidden_size: int, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.hidden_size = hidden_size
         kernel = (config.tubelet_size, config.patch_size, config.patch_size)
         self.proj = nnx.Conv(
@@ -165,7 +150,6 @@ def rotate_queries_or_keys(x: Array, pos: Array, dim: int) -> Array:
 class VJEPA2RopeAttention(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, hidden_size: int, num_attention_heads: int, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
 
@@ -184,10 +168,10 @@ class VJEPA2RopeAttention(nnx.Module):
         self.grid_depth = config.frames_per_clip // config.tubelet_size
 
         # RoPE dimension splits (divide head_dim into 3 parts for d, h, w)
-        rope_dim = int(2 * ((self.attention_head_size // 3) // 2))
-        self.d_dim = rope_dim
-        self.h_dim = rope_dim
-        self.w_dim = rope_dim
+        self.rope_dim = int(2 * ((self.attention_head_size // 3) // 2))
+        self.d_dim = self.rope_dim
+        self.h_dim = self.rope_dim
+        self.w_dim = self.rope_dim
 
         self.scaling = self.attention_head_size**-0.5
 
@@ -316,7 +300,6 @@ class VJEPA2Layer(nnx.Module):
 class VJEPA2Encoder(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.embeddings = VJEPA2Embeddings(config, hidden_size=config.hidden_size, rngs=rngs)
         self.layer = nnx.List(
             [
@@ -391,7 +374,6 @@ class VJEPA2PredictorEmbeddings(nnx.Module):
 class VJEPA2Predictor(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.embeddings = VJEPA2PredictorEmbeddings(config, rngs=rngs)
         self.layer = nnx.List(
             [
@@ -443,7 +425,6 @@ class VJEPA2Predictor(nnx.Module):
 class VJEPA2PoolerSelfAttention(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
@@ -477,7 +458,6 @@ class VJEPA2PoolerSelfAttention(nnx.Module):
 class VJEPA2PoolerCrossAttention(nnx.Module):
     def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
         super().__init__()
-        self.config = config
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
         self.head_dim = self.embed_dim // self.num_heads
@@ -586,7 +566,7 @@ class VJEPA2Model(nnx.Module):
         context_mask: list | None = None,
         target_mask: list | None = None,
         skip_predictor: bool = False,
-    ) -> VJEPA2ModelOutput:
+    ) -> dict:
         sequence_output = self.encoder(pixel_values_videos)
 
         batch_size = pixel_values_videos.shape[0]
@@ -606,17 +586,16 @@ class VJEPA2Model(nnx.Module):
             predictor_target_hidden_state = apply_masks(sequence_output, target_mask)
 
         masked_hidden_state = apply_masks(sequence_output, context_mask) if context_mask else None
-
-        return VJEPA2ModelOutput(
-            last_hidden_state=sequence_output,
-            masked_hidden_state=masked_hidden_state,
-            predictor_last_hidden_state=predictor_last_hidden_state,
-            predictor_target_hidden_state=predictor_target_hidden_state,
-        )
+        return {
+            "last_hidden_state": sequence_output,
+            "masked_hidden_state": masked_hidden_state,
+            "predictor_last_hidden_state": predictor_last_hidden_state,
+            "predictor_target_hidden_state": predictor_target_hidden_state,
+        }
 
     def get_vision_features(self, pixel_values_videos: Array) -> Array:
         outputs = self(pixel_values_videos, skip_predictor=True)
-        return outputs.last_hidden_state
+        return outputs["last_hidden_state"]
 
 
 class VJEPA2ForVideoClassification(nnx.Module):
@@ -628,9 +607,9 @@ class VJEPA2ForVideoClassification(nnx.Module):
         self.pooler = VJEPA2AttentivePooler(config, rngs=rngs)
         self.classifier = nnx.Linear(config.hidden_size, config.num_labels, rngs=rngs)
 
-    def __call__(self, pixel_values_videos: Array) -> VJEPA2ClassificationOutput:
+    def __call__(self, pixel_values_videos: Array) -> dict[str, Array]:
         outputs = self.vjepa2(pixel_values_videos, skip_predictor=True)
-        last_hidden_state = outputs.last_hidden_state
+        last_hidden_state = outputs["last_hidden_state"]
         pooler_output = self.pooler(last_hidden_state)
         logits = self.classifier(pooler_output)
-        return VJEPA2ClassificationOutput(logits=logits, last_hidden_state=last_hidden_state)
+        return {"logits": logits, "last_hidden_state": last_hidden_state}

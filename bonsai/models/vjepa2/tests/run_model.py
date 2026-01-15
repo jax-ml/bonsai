@@ -9,6 +9,12 @@ from bonsai.models.vjepa2.modeling import VJEPA2FlaxConfig
 from bonsai.models.vjepa2.params import create_model_from_safe_tensors
 
 
+@jax.jit
+def forward(model, inputs):
+    inputs = inputs.transpose(0, 1, 3, 4, 2)  # (B, T, C, H, W) -> (B, T, H, W, C)
+    return model(inputs)
+
+
 def main():
     # Load model and video preprocessor (SSv2 - 174 action classes)
     hf_repo = "facebook/vjepa2-vitl-fpc16-256-ssv2"
@@ -37,13 +43,10 @@ def main():
     inputs = processor(video, return_tensors="pt")
     pixel_values_videos = inputs.pixel_values_videos
 
-    # Convert to JAX format: (B, T, C, H, W) -> (B, T, H, W, C)
-    video_jax = jnp.asarray(pixel_values_videos.numpy())
-    video_jax = video_jax.transpose(0, 1, 3, 4, 2)
-
     # Run inference
-    outputs = model(video_jax)
-    logits = np.asarray(jax.device_get(outputs.logits))
+    video_jax = jnp.asarray(pixel_values_videos.numpy())
+    outputs = forward(model, video_jax)
+    logits = np.asarray(jax.device_get(outputs["logits"]))
 
     # Get top 5 predictions with label names
     print("\nTop 5 predicted class names:")

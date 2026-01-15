@@ -22,288 +22,129 @@ def _get_key_and_transform_mapping(classifier: bool):
         DEFAULT = (None, None, False)
 
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule, reshape_first))
+    key_mapping = {
+        # Encoder Embeddings
+        r"encoder\.embeddings\.patch_embeddings\.proj\.weight": (
+            r"encoder.embeddings.patch_embeddings.proj.kernel",
+            Transform.CONV3D,
+        ),
+        r"encoder\.embeddings\.patch_embeddings\.proj\.bias": (
+            r"encoder.embeddings.patch_embeddings.proj.bias",
+            Transform.BIAS,
+        ),
+        # Encoder Attention
+        r"encoder\.layer\.([0-9]+)\.attention\.query\.weight$": (
+            r"encoder.layer.\1.attention.query.kernel",
+            Transform.LINEAR,
+        ),
+        r"encoder\.layer\.([0-9]+)\.attention\.key\.weight$": (
+            r"encoder.layer.\1.attention.key.kernel",
+            Transform.LINEAR,
+        ),
+        r"encoder\.layer\.([0-9]+)\.attention\.value\.weight$": (
+            r"encoder.layer.\1.attention.value.kernel",
+            Transform.LINEAR,
+        ),
+        r"encoder\.layer\.([0-9]+)\.attention\.query\.bias$": (
+            r"encoder.layer.\1.attention.query.bias",
+            Transform.BIAS,
+        ),
+        r"encoder\.layer\.([0-9]+)\.attention\.key\.bias$": (
+            r"encoder.layer.\1.attention.key.bias",
+            Transform.BIAS,
+        ),
+        r"encoder\.layer\.([0-9]+)\.attention\.value\.bias$": (
+            r"encoder.layer.\1.attention.value.bias",
+            Transform.BIAS,
+        ),
+        # Encoder Attention Output Projection
+        r"encoder\.layer\.([0-9]+)\.attention\.proj\.weight$": (
+            r"encoder.layer.\1.attention.proj.kernel",
+            Transform.LINEAR,
+        ),
+        r"encoder\.layer\.([0-9]+)\.attention\.proj\.bias$": (
+            r"encoder.layer.\1.attention.proj.bias",
+            Transform.BIAS,
+        ),
+        # Encoder Norms
+        r"encoder\.layer\.([0-9]+)\.norm1\.weight$": (r"encoder.layer.\1.norm1.scale", Transform.DEFAULT),
+        r"encoder\.layer\.([0-9]+)\.norm1\.bias$": (r"encoder.layer.\1.norm1.bias", Transform.BIAS),
+        r"encoder\.layer\.([0-9]+)\.norm2\.weight$": (r"encoder.layer.\1.norm2.scale", Transform.DEFAULT),
+        r"encoder\.layer\.([0-9]+)\.norm2\.bias$": (r"encoder.layer.\1.norm2.bias", Transform.BIAS),
+        # Encoder Final LayerNorm
+        r"encoder\.layernorm\.weight$": (r"encoder.layernorm.scale", Transform.DEFAULT),
+        r"encoder\.layernorm\.bias$": (r"encoder.layernorm.bias", Transform.BIAS),
+        # Encoder MLP
+        r"encoder\.layer\.([0-9]+)\.mlp\.fc1\.weight$": (r"encoder.layer.\1.mlp.fc1.kernel", Transform.LINEAR),
+        r"encoder\.layer\.([0-9]+)\.mlp\.fc1\.bias$": (r"encoder.layer.\1.mlp.fc1.bias", Transform.BIAS),
+        r"encoder\.layer\.([0-9]+)\.mlp\.fc2\.weight$": (r"encoder.layer.\1.mlp.fc2.kernel", Transform.LINEAR),
+        r"encoder\.layer\.([0-9]+)\.mlp\.fc2\.bias$": (r"encoder.layer.\1.mlp.fc2.bias", Transform.BIAS),
+        # Predictor embeddings
+        r"predictor\.embeddings\.mask_tokens$": (r"predictor.embeddings.mask_tokens", Transform.DEFAULT),
+        r"predictor\.embeddings\.predictor_embeddings\.weight$": (
+            r"predictor.embeddings.predictor_embeddings.kernel",
+            Transform.LINEAR,
+        ),
+        r"predictor\.embeddings\.predictor_embeddings\.bias$": (
+            r"predictor.embeddings.predictor_embeddings.bias",
+            Transform.BIAS,
+        ),
+        # Predictor Attention
+        r"predictor\.layer\.([0-9]+)\.attention\.query\.weight$": (
+            r"predictor.layer.\1.attention.query.kernel",
+            Transform.LINEAR,
+        ),
+        r"predictor\.layer\.([0-9]+)\.attention\.key\.weight$": (
+            r"predictor.layer.\1.attention.key.kernel",
+            Transform.LINEAR,
+        ),
+        r"predictor\.layer\.([0-9]+)\.attention\.value\.weight$": (
+            r"predictor.layer.\1.attention.value.kernel",
+            Transform.LINEAR,
+        ),
+        r"predictor\.layer\.([0-9]+)\.attention\.query\.bias$": (
+            r"predictor.layer.\1.attention.query.bias",
+            Transform.BIAS,
+        ),
+        r"predictor\.layer\.([0-9]+)\.attention\.key\.bias$": (
+            r"predictor.layer.\1.attention.key.bias",
+            Transform.BIAS,
+        ),
+        r"predictor\.layer\.([0-9]+)\.attention\.value\.bias$": (
+            r"predictor.layer.\1.attention.value.bias",
+            Transform.BIAS,
+        ),
+        # Predictor Attention Output Projection
+        r"predictor\.layer\.([0-9]+)\.attention\.proj\.weight$": (
+            r"predictor.layer.\1.attention.proj.kernel",
+            Transform.LINEAR,
+        ),
+        r"predictor\.layer\.([0-9]+)\.attention\.proj\.bias$": (
+            r"predictor.layer.\1.attention.proj.bias",
+            Transform.BIAS,
+        ),
+        # Predictor norms
+        r"predictor\.layer\.([0-9]+)\.norm1\.weight$": (r"predictor.layer.\1.norm1.scale", Transform.DEFAULT),
+        r"predictor\.layer\.([0-9]+)\.norm1\.bias$": (r"predictor.layer.\1.norm1.bias", Transform.BIAS),
+        r"predictor\.layer\.([0-9]+)\.norm2\.weight$": (r"predictor.layer.\1.norm2.scale", Transform.DEFAULT),
+        r"predictor\.layer\.([0-9]+)\.norm2\.bias$": (r"predictor.layer.\1.norm2.bias", Transform.BIAS),
+        # Predictor Final LayerNorm
+        r"predictor\.layernorm\.weight$": (r"predictor.layernorm.scale", Transform.DEFAULT),
+        r"predictor\.layernorm\.bias$": (r"predictor.layernorm.bias", Transform.BIAS),
+        # Predictor mlp
+        r"predictor\.layer\.([0-9]+)\.mlp\.fc1\.weight$": (r"predictor.layer.\1.mlp.fc1.kernel", Transform.LINEAR),
+        r"predictor\.layer\.([0-9]+)\.mlp\.fc1\.bias$": (r"predictor.layer.\1.mlp.fc1.bias", Transform.BIAS),
+        r"predictor\.layer\.([0-9]+)\.mlp\.fc2\.weight$": (r"predictor.layer.\1.mlp.fc2.kernel", Transform.LINEAR),
+        r"predictor\.layer\.([0-9]+)\.mlp\.fc2\.bias$": (r"predictor.layer.\1.mlp.fc2.bias", Transform.BIAS),
+        # Predictor projection
+        r"predictor\.proj\.weight$": (r"predictor.proj.kernel", Transform.LINEAR),
+        r"predictor\.proj\.bias$": (r"predictor.proj.bias", Transform.BIAS),
+    }
     if not classifier:
-        return {
-            # Encoder Embeddings
-            r"encoder\.embeddings\.patch_embeddings\.proj\.weight": (
-                "encoder.embeddings.patch_embeddings.proj.kernel",
-                Transform.CONV3D,
-            ),
-            r"encoder\.embeddings\.patch_embeddings\.proj\.bias": (
-                "encoder.embeddings.patch_embeddings.proj.bias",
-                Transform.BIAS,
-            ),
-            # Encoder Attention
-            r"encoder\.layer\.([0-9]+)\.attention\.query\.weight$": (
-                r"encoder.layer.\1.attention.query.kernel",
-                Transform.LINEAR,
-            ),
-            r"encoder\.layer\.([0-9]+)\.attention\.key\.weight$": (
-                r"encoder.layer.\1.attention.key.kernel",
-                Transform.LINEAR,
-            ),
-            r"encoder\.layer\.([0-9]+)\.attention\.value\.weight$": (
-                r"encoder.layer.\1.attention.value.kernel",
-                Transform.LINEAR,
-            ),
-            r"encoder\.layer\.([0-9]+)\.attention\.query\.bias$": (
-                r"encoder.layer.\1.attention.query.bias",
-                Transform.BIAS,
-            ),
-            r"encoder\.layer\.([0-9]+)\.attention\.key\.bias$": (
-                r"encoder.layer.\1.attention.key.bias",
-                Transform.BIAS,
-            ),
-            r"encoder\.layer\.([0-9]+)\.attention\.value\.bias$": (
-                r"encoder.layer.\1.attention.value.bias",
-                Transform.BIAS,
-            ),
-            # Encoder Attention Output Projection
-            r"encoder\.layer\.([0-9]+)\.attention\.proj\.weight$": (
-                r"encoder.layer.\1.attention.proj.kernel",
-                Transform.LINEAR,
-            ),
-            r"encoder\.layer\.([0-9]+)\.attention\.proj\.bias$": (
-                r"encoder.layer.\1.attention.proj.bias",
-                Transform.BIAS,
-            ),
-            # Encoder Norms
-            r"encoder\.layer\.([0-9]+)\.norm1\.weight$": (r"encoder.layer.\1.norm1.scale", Transform.DEFAULT),
-            r"encoder\.layer\.([0-9]+)\.norm1\.bias$": (r"encoder.layer.\1.norm1.bias", Transform.BIAS),
-            r"encoder\.layer\.([0-9]+)\.norm2\.weight$": (r"encoder.layer.\1.norm2.scale", Transform.DEFAULT),
-            r"encoder\.layer\.([0-9]+)\.norm2\.bias$": (r"encoder.layer.\1.norm2.bias", Transform.BIAS),
-            # Encoder Final LayerNorm
-            r"encoder\.layernorm\.weight$": (r"encoder.layernorm.scale", Transform.DEFAULT),
-            r"encoder\.layernorm\.bias$": (r"encoder.layernorm.bias", Transform.BIAS),
-            # Encoder MLP
-            r"encoder\.layer\.([0-9]+)\.mlp\.fc1\.weight$": (r"encoder.layer.\1.mlp.fc1.kernel", Transform.LINEAR),
-            r"encoder\.layer\.([0-9]+)\.mlp\.fc1\.bias$": (r"encoder.layer.\1.mlp.fc1.bias", Transform.BIAS),
-            r"encoder\.layer\.([0-9]+)\.mlp\.fc2\.weight$": (r"encoder.layer.\1.mlp.fc2.kernel", Transform.LINEAR),
-            r"encoder\.layer\.([0-9]+)\.mlp\.fc2\.bias$": (r"encoder.layer.\1.mlp.fc2.bias", Transform.BIAS),
-            # Predictor embeddings
-            r"predictor\.embeddings\.mask_tokens$": (r"predictor.embeddings.mask_tokens", Transform.DEFAULT),
-            r"predictor\.embeddings\.predictor_embeddings\.weight$": (
-                r"predictor.embeddings.predictor_embeddings.kernel",
-                Transform.LINEAR,
-            ),
-            r"predictor\.embeddings\.predictor_embeddings\.bias$": (
-                r"predictor.embeddings.predictor_embeddings.bias",
-                Transform.BIAS,
-            ),
-            # Predictor Attention
-            r"predictor\.layer\.([0-9]+)\.attention\.query\.weight$": (
-                r"predictor.layer.\1.attention.query.kernel",
-                Transform.LINEAR,
-            ),
-            r"predictor\.layer\.([0-9]+)\.attention\.key\.weight$": (
-                r"predictor.layer.\1.attention.key.kernel",
-                Transform.LINEAR,
-            ),
-            r"predictor\.layer\.([0-9]+)\.attention\.value\.weight$": (
-                r"predictor.layer.\1.attention.value.kernel",
-                Transform.LINEAR,
-            ),
-            r"predictor\.layer\.([0-9]+)\.attention\.query\.bias$": (
-                r"predictor.layer.\1.attention.query.bias",
-                Transform.BIAS,
-            ),
-            r"predictor\.layer\.([0-9]+)\.attention\.key\.bias$": (
-                r"predictor.layer.\1.attention.key.bias",
-                Transform.BIAS,
-            ),
-            r"predictor\.layer\.([0-9]+)\.attention\.value\.bias$": (
-                r"predictor.layer.\1.attention.value.bias",
-                Transform.BIAS,
-            ),
-            # Predictor Attention Output Projection
-            r"predictor\.layer\.([0-9]+)\.attention\.proj\.weight$": (
-                r"predictor.layer.\1.attention.proj.kernel",
-                Transform.LINEAR,
-            ),
-            r"predictor\.layer\.([0-9]+)\.attention\.proj\.bias$": (
-                r"predictor.layer.\1.attention.proj.bias",
-                Transform.BIAS,
-            ),
-            # Predictor norms
-            r"predictor\.layer\.([0-9]+)\.norm1\.weight$": (r"predictor.layer.\1.norm1.scale", Transform.DEFAULT),
-            r"predictor\.layer\.([0-9]+)\.norm1\.bias$": (r"predictor.layer.\1.norm1.bias", Transform.BIAS),
-            r"predictor\.layer\.([0-9]+)\.norm2\.weight$": (r"predictor.layer.\1.norm2.scale", Transform.DEFAULT),
-            r"predictor\.layer\.([0-9]+)\.norm2\.bias$": (r"predictor.layer.\1.norm2.bias", Transform.BIAS),
-            # Predictor Final LayerNorm
-            r"predictor\.layernorm\.weight$": (r"predictor.layernorm.scale", Transform.DEFAULT),
-            r"predictor\.layernorm\.bias$": (r"predictor.layernorm.bias", Transform.BIAS),
-            # Predictor mlp
-            r"predictor\.layer\.([0-9]+)\.mlp\.fc1\.weight$": (r"predictor.layer.\1.mlp.fc1.kernel", Transform.LINEAR),
-            r"predictor\.layer\.([0-9]+)\.mlp\.fc1\.bias$": (r"predictor.layer.\1.mlp.fc1.bias", Transform.BIAS),
-            r"predictor\.layer\.([0-9]+)\.mlp\.fc2\.weight$": (r"predictor.layer.\1.mlp.fc2.kernel", Transform.LINEAR),
-            r"predictor\.layer\.([0-9]+)\.mlp\.fc2\.bias$": (r"predictor.layer.\1.mlp.fc2.bias", Transform.BIAS),
-            # Predictor projection
-            r"predictor\.proj\.weight$": (r"predictor.proj.kernel", Transform.LINEAR),
-            r"predictor\.proj\.bias$": (r"predictor.proj.bias", Transform.BIAS),
-        }
+        return key_mapping
     else:
-        return {
-            # Encoder Embeddings
-            r"vjepa2\.encoder\.embeddings\.patch_embeddings\.proj\.weight": (
-                r"vjepa2.encoder.embeddings.patch_embeddings.proj.kernel",
-                Transform.CONV3D,
-            ),
-            r"vjepa2\.encoder\.embeddings\.patch_embeddings\.proj\.bias": (
-                r"vjepa2.encoder.embeddings.patch_embeddings.proj.bias",
-                Transform.BIAS,
-            ),
-            # Encoder Attention
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.attention\.query\.weight$": (
-                r"vjepa2.encoder.layer.\1.attention.query.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.attention\.key\.weight$": (
-                r"vjepa2.encoder.layer.\1.attention.key.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.attention\.value\.weight$": (
-                r"vjepa2.encoder.layer.\1.attention.value.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.attention\.query\.bias$": (
-                r"vjepa2.encoder.layer.\1.attention.query.bias",
-                Transform.BIAS,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.attention\.key\.bias$": (
-                r"vjepa2.encoder.layer.\1.attention.key.bias",
-                Transform.BIAS,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.attention\.value\.bias$": (
-                r"vjepa2.encoder.layer.\1.attention.value.bias",
-                Transform.BIAS,
-            ),
-            # Encoder Attention Output Projection
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.attention\.proj\.weight$": (
-                r"vjepa2.encoder.layer.\1.attention.proj.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.attention\.proj\.bias$": (
-                r"vjepa2.encoder.layer.\1.attention.proj.bias",
-                Transform.BIAS,
-            ),
-            # Encoder Norms
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.norm1\.weight$": (
-                r"vjepa2.encoder.layer.\1.norm1.scale",
-                Transform.DEFAULT,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.norm1\.bias$": (r"vjepa2.encoder.layer.\1.norm1.bias", Transform.BIAS),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.norm2\.weight$": (
-                r"vjepa2.encoder.layer.\1.norm2.scale",
-                Transform.DEFAULT,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.norm2\.bias$": (r"vjepa2.encoder.layer.\1.norm2.bias", Transform.BIAS),
-            # Encoder Final LayerNorm
-            r"vjepa2\.encoder\.layernorm\.weight$": (r"vjepa2.encoder.layernorm.scale", Transform.DEFAULT),
-            r"vjepa2\.encoder\.layernorm\.bias$": (r"vjepa2.encoder.layernorm.bias", Transform.BIAS),
-            # Encoder MLP
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.mlp\.fc1\.weight$": (
-                r"vjepa2.encoder.layer.\1.mlp.fc1.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.mlp\.fc1\.bias$": (
-                r"vjepa2.encoder.layer.\1.mlp.fc1.bias",
-                Transform.BIAS,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.mlp\.fc2\.weight$": (
-                r"vjepa2.encoder.layer.\1.mlp.fc2.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.encoder\.layer\.([0-9]+)\.mlp\.fc2\.bias$": (
-                r"vjepa2.encoder.layer.\1.mlp.fc2.bias",
-                Transform.BIAS,
-            ),
-            # Predictor embeddings
-            r"vjepa2\.predictor\.embeddings\.mask_tokens$": (
-                r"vjepa2.predictor.embeddings.mask_tokens",
-                Transform.DEFAULT,
-            ),
-            r"vjepa2\.predictor\.embeddings\.predictor_embeddings\.weight$": (
-                r"vjepa2.predictor.embeddings.predictor_embeddings.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.predictor\.embeddings\.predictor_embeddings\.bias$": (
-                r"vjepa2.predictor.embeddings.predictor_embeddings.bias",
-                Transform.BIAS,
-            ),
-            # Predictor Attention
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.attention\.query\.weight$": (
-                r"vjepa2.predictor.layer.\1.attention.query.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.attention\.key\.weight$": (
-                r"vjepa2.predictor.layer.\1.attention.key.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.attention\.value\.weight$": (
-                r"vjepa2.predictor.layer.\1.attention.value.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.attention\.query\.bias$": (
-                r"vjepa2.predictor.layer.\1.attention.query.bias",
-                Transform.BIAS,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.attention\.key\.bias$": (
-                r"vjepa2.predictor.layer.\1.attention.key.bias",
-                Transform.BIAS,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.attention\.value\.bias$": (
-                r"vjepa2.predictor.layer.\1.attention.value.bias",
-                Transform.BIAS,
-            ),
-            # Predictor Attention Output Projection
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.attention\.proj\.weight$": (
-                r"vjepa2.predictor.layer.\1.attention.proj.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.attention\.proj\.bias$": (
-                r"vjepa2.predictor.layer.\1.attention.proj.bias",
-                Transform.BIAS,
-            ),
-            # Predictor norms
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.norm1\.weight$": (
-                r"vjepa2.predictor.layer.\1.norm1.scale",
-                Transform.DEFAULT,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.norm1\.bias$": (
-                r"vjepa2.predictor.layer.\1.norm1.bias",
-                Transform.BIAS,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.norm2\.weight$": (
-                r"vjepa2.predictor.layer.\1.norm2.scale",
-                Transform.DEFAULT,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.norm2\.bias$": (
-                r"vjepa2.predictor.layer.\1.norm2.bias",
-                Transform.BIAS,
-            ),
-            # Predictor Final LayerNorm
-            r"vjepa2\.predictor\.layernorm\.weight$": (r"vjepa2.predictor.layernorm.scale", Transform.DEFAULT),
-            r"vjepa2\.predictor\.layernorm\.bias$": (r"vjepa2.predictor.layernorm.bias", Transform.BIAS),
-            # Predictor mlp
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.mlp\.fc1\.weight$": (
-                r"vjepa2.predictor.layer.\1.mlp.fc1.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.mlp\.fc1\.bias$": (
-                r"vjepa2.predictor.layer.\1.mlp.fc1.bias",
-                Transform.BIAS,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.mlp\.fc2\.weight$": (
-                r"vjepa2.predictor.layer.\1.mlp.fc2.kernel",
-                Transform.LINEAR,
-            ),
-            r"vjepa2\.predictor\.layer\.([0-9]+)\.mlp\.fc2\.bias$": (
-                r"vjepa2.predictor.layer.\1.mlp.fc2.bias",
-                Transform.BIAS,
-            ),
-            # Predictor projection
-            r"vjepa2\.predictor\.proj\.weight$": (r"vjepa2.predictor.proj.kernel", Transform.LINEAR),
-            r"vjepa2\.predictor\.proj\.bias$": (r"vjepa2.predictor.proj.bias", Transform.BIAS),
+        key_mapping = {r"vjepa2\." + k: (r"vjepa2." + v[0], v[1]) for k, v in key_mapping.items()}
+        classifier_keys = {
             # Pooler query tokens
             r"pooler\.query_tokens$": (r"pooler.query_tokens", Transform.DEFAULT),
             # Pooler Cross Attention
@@ -437,6 +278,8 @@ def _get_key_and_transform_mapping(classifier: bool):
             r"classifier.weight": (r"classifier.kernel", Transform.LINEAR),
             r"classifier.bias": (r"classifier.bias", Transform.BIAS),
         }
+        key_mapping.update(classifier_keys)
+        return key_mapping
 
 
 def _torch_key_to_jax_key(mapping, source_key):
