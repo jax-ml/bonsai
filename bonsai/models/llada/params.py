@@ -97,7 +97,7 @@ def _stoi(s):
 
 def create_llada_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, mesh: jax.sharding.Mesh | None = None):
     """
-    Load safetensor weights from a file, then convert & merge into a flax.nnx ViT model.
+    Load safetensor weights from a file, then convert & merge into a flax.nnx model.
 
     Returns:
       A flax.nnx.Model instance with loaded parameters.
