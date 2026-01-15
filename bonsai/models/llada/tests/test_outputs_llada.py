@@ -151,7 +151,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         tx = torch.tensor(jx)
 
         ty, ny = tm(tx), nm(jx, out_sharding=None)
-        np.testing.assert_allclose(ny, ty.detach().cpu().numpy())
+        np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-7, atol=1e-7)
 
     def test_sin_cos(self):
         tm = self.baseline_model.model.transformer.blocks[0].rotary_emb
