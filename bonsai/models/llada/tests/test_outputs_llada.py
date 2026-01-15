@@ -187,8 +187,8 @@ class TestModuleForwardPasses(absltest.TestCase):
         sin, cos = modeling._generate_pos_embeddings(position_ids, head_dim, rope_theta)
 
         ty = tm(tx, attention_bias=None, layer_past=None, use_cache=False)[0]
-        ny = nm(jx, sin, cos, None)
-        np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=5e-7, atol=5e-7)
+        ny = nm(jx, sin, cos, None, jax.random.key(0))
+        np.testing.assert_allclose(ny[0], ty.detach().cpu().numpy(), rtol=5e-7, atol=5e-7)
 
     def test_full(self):
         tm = self.baseline_model
@@ -198,8 +198,8 @@ class TestModuleForwardPasses(absltest.TestCase):
         n_inputs = {k: jnp.array(v.detach().cpu().numpy()) for k, v in t_inputs.items()}
         n_inputs["attention_mask"] = n_inputs["attention_mask"] > -1
 
-        ty, ny = tm(**t_inputs).logits, nm(**n_inputs)
-        np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-6, atol=1e-6)
+        ty, ny = tm(**t_inputs).logits, nm(**n_inputs, key=jax.random.key(0))
+        np.testing.assert_allclose(ny[0], ty.detach().cpu().numpy(), rtol=1e-6, atol=1e-6)
 
 
 class TestGenerationSmall(absltest.TestCase):

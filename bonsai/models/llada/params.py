@@ -17,9 +17,11 @@ import re
 from enum import Enum
 
 import jax
+import jax.numpy as jnp
 import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
+import gc
 
 from bonsai.models.llada import modeling as model_lib
 
@@ -93,7 +95,6 @@ def _stoi(s):
         return s
 
 
-# TODO: Update to optimize parameter loading for larger models
 def create_llada_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, mesh: jax.sharding.Mesh | None = None):
     """
     Load safetensor weights from a file, then convert & merge into a flax.nnx ViT model.
@@ -105,29 +106,28 @@ def create_llada_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, m
     if not files:
         raise ValueError(f"No safetensors found in {file_dir}")
 
-    tensor_dict = {}
-    for f in files:
-        tensor_dict |= safetensors.load_file(f)
-
     llada = model_lib.LLaDAModel(cfg, rngs=nnx.Rngs(0))
     graph_def, abs_state = nnx.split(llada)
     jax_state = abs_state.to_pure_dict()
     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
     mapping = _get_key_and_transform_mapping()
-    for st_key, tensor in tensor_dict.items():
-        jax_key, transform = _st_key_to_jax_key(mapping, st_key)
-        if jax_key is None:
-            continue
-        keys = [_stoi(k) for k in jax_key.split(r"\.")]
-        try:
-            _assign_weights(keys, tensor, jax_state, st_key, transform.value, sharding)
-        except KeyError as e:
-            print(f"Key error: {keys} at {e}")
-        except ValueError as e:
-            print(e)
-        except Exception as e:
-            print(keys)
-            raise e
+    conversion_errors = []
+    for f in files:
+        with safetensors.safe_open(f, framework="numpy") as sf:
+            for torch_key in sf.keys():
+                tensor = jnp.array(sf.get_tensor(torch_key))
+                jax_key, transform = _st_key_to_jax_key(mapping, torch_key)
+                if jax_key is None:
+                    continue
+                keys = [_stoi(k) for k in jax_key.split(r"\.")]
+                try:
+                    _assign_weights(keys, tensor, jax_state, torch_key, transform.value, sharding)
+                except Exception as e:
+                    full_jax_key = ".".join([str(k) for k in keys])
+                    conversion_errors.append(
+                        f"Failed to assign '{torch_key}' to '{full_jax_key}': {type(e).__name__}: {e}"
+                    )
+        gc.collect()
 
     return nnx.merge(graph_def, jax_state)

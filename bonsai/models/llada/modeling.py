@@ -88,6 +88,9 @@ class ModelConfig:
     shd_cfg: ShardingConfig
     block_group_size: int = 1
     rms_norm_eps: float = 1e-5
+    attn_drop: float = 0.0
+    emb_drop: float = 0.0
+    resid_drop: float = 0.0
 
     def llada_8b_it(use_fsdp: bool, use_tp: bool, dtype: DTypeLike = jnp.bfloat16):
         return ModelConfig(
@@ -108,6 +111,7 @@ class ModelConfig:
         )
 
 
+# TODO: Replace with nnx.Linear once explicit sharding is supported.
 class ShardedLinear(nnx.Module):
     def __init__(
         self, in_dim: int, out_dim: int, *, use_bias: bool = True, kernel_sharding, bias_sharding, dtype=None, rngs
@@ -182,7 +186,18 @@ class RMSNorm(nnx.Module):
         return out.astype(dtype)
 
 
-def sharded_attention(q, k, v, mask, scale=None, *, attn_logit_sharding: PartitionSpec, out_sharding: PartitionSpec):
+def sharded_attention(
+    q,
+    k,
+    v,
+    mask,
+    scale=None,
+    *,
+    attn_logit_sharding: PartitionSpec,
+    out_sharding: PartitionSpec,
+    rate: float | None,
+    key: Array,
+):
     logits = jnp.einsum("BTNH,BSNH->BNTS", q, k, out_sharding=attn_logit_sharding)
     scale_val = (1.0 / jnp.sqrt(k.shape[-1])) if scale is None else scale
     logits *= jnp.array(scale_val, dtype=logits.dtype)
@@ -193,7 +208,11 @@ def sharded_attention(q, k, v, mask, scale=None, *, attn_logit_sharding: Partiti
 
     padded_logits = padded_logits.astype(jnp.float32)
     probs = jax.nn.softmax(padded_logits, axis=-1).astype(k.dtype)
-    # TODO: Add dropout here when training supported
+
+    if rate is not None and rate > 0.0:
+        keep_prob = 1.0 - rate
+        mask = jax.random.bernoulli(key, p=keep_prob, shape=probs.shape)
+        probs = jax.lax.select(mask, probs / keep_prob, jnp.zeros_like(probs))
 
     attn_out = jnp.einsum("BNTS,BSNH->BTNH", probs, v, out_sharding=out_sharding)
     return attn_out
@@ -206,7 +225,8 @@ class LLaDALlamaBlock(nnx.Module):
         self.attn_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps, dtype=jnp.float32, shd=shd.norm, rngs=rngs)
         self.ff_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps, dtype=jnp.float32, shd=shd.norm, rngs=rngs)
 
-        self.dropout = lambda x: x  # TODO: Use dropout here when training supported
+        self.dropout = nnx.Dropout(cfg.resid_drop)
+        self.attn_drop = cfg.attn_drop
 
         # Attention
         self.head_dim = cfg.d_model // cfg.n_heads
@@ -250,7 +270,7 @@ class LLaDALlamaBlock(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, x: Array, sin: Array, cos: Array, attention_bias: Array | None = None) -> Array:
+    def __call__(self, x: Array, sin: Array, cos: Array, attention_bias: Array | None, key: Array) -> Array:
         x_normed = self.attn_norm(x)
         new_shape = (*x.shape[:-1], -1, self.head_dim)
         shd = self.config.shd_cfg.activation
@@ -262,10 +282,21 @@ class LLaDALlamaBlock(nnx.Module):
         k = apply_rope(k, sin, cos)
 
         intermediate_shd = self.config.shd_cfg.attn_qk_activation
-        attn = sharded_attention(q, k, v, attention_bias, attn_logit_sharding=intermediate_shd, out_sharding=shd)
+        key, subkey = jax.random.split(key)
+        attn = sharded_attention(
+            q,
+            k,
+            v,
+            attention_bias,
+            attn_logit_sharding=intermediate_shd,
+            out_sharding=shd,
+            rate=self.attn_drop,
+            key=subkey,
+        )
         attn = self.attn_out(attn.reshape(x.shape), out_sharding=shd)
 
-        x = x + self.dropout(attn).reshape(x.shape)
+        key, subkey = jax.random.split(key)
+        x = x + self.dropout(attn, rngs=subkey).reshape(x.shape)
 
         res = x
         x = self.ff_norm(x)
@@ -273,10 +304,11 @@ class LLaDALlamaBlock(nnx.Module):
         x = jax.nn.silu(x_ff)
         x = x * x_up
         x = self.ff_out(x, out_sharding=shd)
-        x = self.dropout(x)
+        key, subkey = jax.random.split(key)
+        x = self.dropout(x, rngs=subkey)
         x = res + x
 
-        return x
+        return x, key
 
 
 class LLaDAModel(nnx.Module):
@@ -286,8 +318,7 @@ class LLaDAModel(nnx.Module):
         ei = partial(default_embed_init, out_sharding=cfg.shd_cfg.emb_kernel)
         self.wte = ShardedEmbedding(cfg.embedding_size, cfg.d_model, embedding_init=ei, rngs=rngs)
 
-        # TODO: Use dropout here when training supported
-        self.emb_drop = lambda x: x
+        self.emb_drop = nnx.Dropout(self.config.emb_drop)
         self.ln_f = RMSNorm(cfg.d_model, eps=cfg.rms_norm_eps, dtype=cfg.dtype, shd=shd.norm, rngs=rngs)
         self.blocks = nnx.List([LLaDALlamaBlock(cfg, rngs=rngs) for _ in range(cfg.n_layers)])
 
@@ -304,7 +335,7 @@ class LLaDAModel(nnx.Module):
         self.head_dim = self.blocks[0].head_dim
         self.rope_theta = cfg.rope_theta
 
-    def __call__(self, input_ids: Array, attention_mask: Array) -> Array:
+    def __call__(self, input_ids: Array, attention_mask: Array, key: Array) -> Array:
         shd = self.config.shd_cfg.activation
         left_pads = count_left_pads(attention_mask)
         start_ind = left_pads.reshape((-1, 1))
@@ -315,12 +346,15 @@ class LLaDAModel(nnx.Module):
             attention_mask = attention_mask[:, None, None, :]
 
         x = self.wte(input_ids, out_sharding=shd)
-        x = self.emb_drop(x)
+
+        key, subkey = jax.random.split(key)
+        x = self.emb_drop(x, rngs=subkey)
+
         for b in self.blocks:
-            x = b(x, sin, cos, attention_mask)
+            x, key = b(x, sin, cos, attention_mask, key)
         x = self.ln_f(x)
         x = self.ff_out(x, out_sharding=shd)
-        return x
+        return x, key
 
 
 def add_gumbel_noise(logits, temperature, key):
@@ -337,11 +371,10 @@ def get_num_transfer_tokens(batch_size: int, block_length: int, steps_per_block:
     return np.full((batch_size, steps_per_block), base_steps_per_iter) + (np.arange(steps_per_block) < additional_steps)
 
 
-def forward(model, x, attn_mask):
-    return model(input_ids=x, attention_mask=attn_mask)
+def forward(model, x, attn_mask, key):
+    return model(input_ids=x, attention_mask=attn_mask, key=key)
 
 
-# TODO: Add docstring
 def generate(
     model: LLaDAModel,
     prompt: Array,
@@ -357,7 +390,32 @@ def generate(
     confidence_eos_eot_inf: bool = False,
     key: Array = jax.random.key(0),
 ):
-    fsdp_enabled = model.config.shd_cfg.activation[0] is not None
+    """
+    Generates text multiple tokens at a time in blocks.
+
+    model (LLaDAModel): The LLaDA model.
+    prompt (Array): Tokenized prompt of shape (B, L) with left padding.
+    attention_mask (Array | None): Attention mask of shape (B, L). Defaults to None.
+        This is used to signal padding tokens.
+    steps (int): Total number of model evaluations. Defaults to 128.
+    gen_length (int): Desired number of tokens to generate.  Defaults to 128.
+    block_length (int): Length of blocks used for generation.  Defaults to 128.
+    temperature (float): Parameter controling randomness when using low_confidence remasking.  Defaults to 0.0.
+    cfg_scale (float): Classifier-free guidance parameter. Defaults to 0.0.
+        If 0.0 then just does a model evaluation.
+        If > 0.0, then it uses classifier-free guidance.
+    remasking (str): Remasking strategy. Defaults to "low_confidence".
+        Can pick from "low_confidence" and "random".
+    mask_id (int): Mask token id. Defaults to 126336.
+    logits_eos_inf (bool): Boolean for preventing eos tokens. Defaults to False.
+        If True, prevents eos tokens from being generated.
+    confidence_eos_eot_inf (bool): Boolean for preventing eos and eot tokens. Defaults to False.
+        If True, prevents eos and eot tokens from being generated.
+    key
+    """
+    shd = model.config.shd_cfg.activation
+    fsdp_enabled, tp_enabled = shd[0] is not None, shd[2] is not None
+
     # Write mask_id into the generation part of the array
     x = jnp.concatenate([prompt, jnp.full((prompt.shape[0], gen_length), mask_id, dtype=jnp.int32)], axis=1)
     if fsdp_enabled:
@@ -395,7 +453,7 @@ def generate(
                 logits, un_logits = jnp.split(logits, 2, axis=0)
                 logits: Array = un_logits + (cfg_scale + 1) * (logits - un_logits)
             else:
-                logits = forward(model, x, attention_mask)
+                logits, key = forward(model, x, attention_mask, key)
 
             if logits_eos_inf:
                 # Update eos logits to -inf so they are impossible
@@ -414,8 +472,8 @@ def generate(
             # Compute remasking confidence for next step of diffusion
             if remasking == "low_confidence":
                 p = jax.nn.softmax(logits, axis=-1)
-                if fsdp_enabled:
-                    p = jax.sharding.reshard(p, out_shardings=P(ShardMode.FSDP.value))
+                if tp_enabled:
+                    p = jax.sharding.reshard(p, out_shardings=P(ShardMode.FSDP.value if fsdp_enabled else None))
                 x0_p = jnp.take_along_axis(p, x0[..., None], axis=-1).squeeze(-1)
             elif remasking == "random":
                 key, subkey = jax.random.split(key)
