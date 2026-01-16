@@ -256,7 +256,7 @@ def train_step(state: TrainState, other_vars: nnx.State, batch: tuple[jax.Array,
     return state, loss
 
 
-print("🚀 Starting training from checkpoint...")
+print("Starting training from checkpoint...")
 train_loader, vis_loader = load_dataset()
 num_epochs = 100
 state = train_state
