@@ -8,7 +8,7 @@ from etils import epath
 from flax import nnx
 
 from bonsai.models.vjepa2.modeling import (
-    VJEPA2FlaxConfig,
+    VJEPA2Config,
     VJEPA2ForVideoClassification,
     VJEPA2Model,
 )
@@ -327,7 +327,7 @@ def _stoi(s):
 
 
 def create_model_from_safe_tensors(
-    file_dir: str, cfg: VJEPA2FlaxConfig, mesh: jax.sharding.Mesh | None = None, classifier: bool = False
+    file_dir: str, cfg: VJEPA2Config, mesh: jax.sharding.Mesh | None = None, classifier: bool = False
 ) -> VJEPA2Model | VJEPA2ForVideoClassification:
     """Load tensors from the safetensors file and create a Dinov3 model (memory-optimized)."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
