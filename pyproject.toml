@@ -30,7 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 tf = ["h5py", "keras_hub", "tensorflow"]
-vision = ["timm", "pillow>=11.3.0"]
+vision = ["timm", "pillow>=11.3.0", "opencv-python-headless"]
 audio = ["librosa"]
 
 dev = [
