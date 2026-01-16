@@ -5,13 +5,8 @@ import cv2
 from huggingface_hub import snapshot_download, hf_hub_download
 from transformers import AutoConfig, AutoVideoProcessor
 
-from bonsai.models.vjepa2.modeling import VJEPA2FlaxConfig
+from bonsai.models.vjepa2.modeling import VJEPA2Config, forward
 from bonsai.models.vjepa2.params import create_model_from_safe_tensors
-
-
-@jax.jit
-def forward(model, inputs):
-    return model(inputs)
 
 
 def load_video_frames_cv2(video_path, indices):
@@ -48,7 +43,7 @@ def main():
     hf_config = AutoConfig.from_pretrained(hf_repo)
     processor = AutoVideoProcessor.from_pretrained(hf_repo)
 
-    config = VJEPA2FlaxConfig.vitl_fpc16_256()
+    config = VJEPA2Config.vitl_fpc16_256()
     model = create_model_from_safe_tensors(model_dir, cfg=config, classifier=True)
     model.eval()
 
