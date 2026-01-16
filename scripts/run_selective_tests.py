@@ -56,6 +56,9 @@ def main():
 
     for f in changed_files:
         path = Path(f)
+        if not path.exists():  # Skip deleted/renamed paths
+            continue
+
         parts = path.parts
 
         # Handle bonsai/models/<model_name>
