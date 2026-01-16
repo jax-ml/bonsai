@@ -32,10 +32,10 @@ These are listed based on status and then alphabetically.
 | [VGG](bonsai/models/vgg19)                    | Image classification | ✅     |         |
 | [Dinov3](bonsai/models/dinov3)                | Vision FM            | ⚙️     |         |
 | [Gemma3](bonsai/models/gemma3)                | VLM                  | ⚙️     | Local attention cache and todos in file        |
+| [LLaDA](bonsai/models/llada/)                 | Diffusion LLM        | ⚙️     | Efficient model loading, dropout, hidden activations        |
 | [Mamba2](bonsai/models/mamba2)                | Language SSM         | ⚙️     | Caching and sharding        |
 | [umT5](bonsai/models/umt5)                    | LLM                  | ⚙️     | Caching and sharding        |
 | [ViT](bonsai/models/vit)                      | Image classification | ⚙️     | Sharding        |
-| [LLaDa](bonsai/models/llada_8b/)              | Diffusion LLM        | 🟡     | Need more numerical testing        |
 | [Sam2](bonsai/models/sam2/)                   | Image segmentation   | 🟡     | Need more numerical testing        |
 | [UNet](bonsai/models/unet/)                   | Image                | 🟡     | Need a reference implementation and numerical testing        |
 | [VAE](bonsai/models/vae/)                     | Generative model     | 🟡     | Need a reference implementation and numerical testing         |
