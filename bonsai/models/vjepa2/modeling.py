@@ -7,7 +7,7 @@ from jax import Array
 
 
 @dataclasses.dataclass(frozen=True)
-class VJEPA2FlaxConfig:
+class VJEPA2Config:
     model_type: str = "vjepa2"
     patch_size: int = 16
     tubelet_size: int = 2
@@ -90,7 +90,7 @@ ACT2FN = {"gelu": gelu_exact, "silu": nnx.silu, "relu": nnx.relu}
 
 
 class VJEPA2PatchEmbeddings3D(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, hidden_size: int, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, hidden_size: int, rngs: nnx.Rngs):
         super().__init__()
         self.hidden_size = hidden_size
         kernel = (config.tubelet_size, config.patch_size, config.patch_size)
@@ -106,7 +106,7 @@ class VJEPA2PatchEmbeddings3D(nnx.Module):
 
 
 class VJEPA2Embeddings(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, hidden_size: int, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, hidden_size: int, rngs: nnx.Rngs):
         super().__init__()
         self.config = config
         self.hidden_size = hidden_size
@@ -148,7 +148,7 @@ def rotate_queries_or_keys(x: Array, pos: Array, dim: int) -> Array:
 
 
 class VJEPA2RopeAttention(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, hidden_size: int, num_attention_heads: int, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, hidden_size: int, num_attention_heads: int, rngs: nnx.Rngs):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_attention_heads = num_attention_heads
@@ -257,7 +257,7 @@ class VJEPA2RopeAttention(nnx.Module):
 
 
 class VJEPA2MLP(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, hidden_size: int, mlp_ratio: float, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, hidden_size: int, mlp_ratio: float, rngs: nnx.Rngs):
         super().__init__()
         hidden_features = int(hidden_size * mlp_ratio)
         self.fc1 = nnx.Linear(hidden_size, hidden_features, rngs=rngs)
@@ -273,7 +273,7 @@ class VJEPA2MLP(nnx.Module):
 
 class VJEPA2Layer(nnx.Module):
     def __init__(
-        self, config: VJEPA2FlaxConfig, hidden_size: int, num_attention_heads: int, mlp_ratio: float, rngs: nnx.Rngs
+        self, config: VJEPA2Config, hidden_size: int, num_attention_heads: int, mlp_ratio: float, rngs: nnx.Rngs
     ):
         super().__init__()
         self.norm1 = nnx.LayerNorm(hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
@@ -298,7 +298,7 @@ class VJEPA2Layer(nnx.Module):
 
 
 class VJEPA2Encoder(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.embeddings = VJEPA2Embeddings(config, hidden_size=config.hidden_size, rngs=rngs)
         self.layer = nnx.List(
@@ -335,7 +335,7 @@ def apply_masks(tensor: Array, masks: list) -> Array:
 
 
 class VJEPA2PredictorEmbeddings(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.config = config
         self.predictor_embeddings = nnx.Linear(config.hidden_size, config.pred_hidden_size, rngs=rngs)
@@ -372,7 +372,7 @@ class VJEPA2PredictorEmbeddings(nnx.Module):
 
 
 class VJEPA2Predictor(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.embeddings = VJEPA2PredictorEmbeddings(config, rngs=rngs)
         self.layer = nnx.List(
@@ -423,7 +423,7 @@ class VJEPA2Predictor(nnx.Module):
 
 
 class VJEPA2PoolerSelfAttention(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
@@ -456,7 +456,7 @@ class VJEPA2PoolerSelfAttention(nnx.Module):
 
 
 class VJEPA2PoolerCrossAttention(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
@@ -489,7 +489,7 @@ class VJEPA2PoolerCrossAttention(nnx.Module):
 
 
 class VJEPA2PoolerSelfAttentionLayer(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.layer_norm1 = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.self_attn = VJEPA2PoolerSelfAttention(config, rngs=rngs)
@@ -511,7 +511,7 @@ class VJEPA2PoolerSelfAttentionLayer(nnx.Module):
 
 
 class VJEPA2PoolerCrossAttentionLayer(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.layer_norm1 = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
         self.cross_attn = VJEPA2PoolerCrossAttention(config, rngs=rngs)
@@ -533,7 +533,7 @@ class VJEPA2PoolerCrossAttentionLayer(nnx.Module):
 
 
 class VJEPA2AttentivePooler(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.query_tokens = nnx.Param(jnp.zeros((1, 1, config.hidden_size)))
         self.cross_attention_layer = VJEPA2PoolerCrossAttentionLayer(config, rngs=rngs)
@@ -554,7 +554,7 @@ class VJEPA2AttentivePooler(nnx.Module):
 
 
 class VJEPA2Model(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.config = config
         self.encoder = VJEPA2Encoder(config, rngs=rngs)
@@ -599,7 +599,7 @@ class VJEPA2Model(nnx.Module):
 
 
 class VJEPA2ForVideoClassification(nnx.Module):
-    def __init__(self, config: VJEPA2FlaxConfig, rngs: nnx.Rngs):
+    def __init__(self, config: VJEPA2Config, rngs: nnx.Rngs):
         super().__init__()
         self.config = config
         self.num_labels = config.num_labels
@@ -613,3 +613,8 @@ class VJEPA2ForVideoClassification(nnx.Module):
         pooler_output = self.pooler(last_hidden_state)
         logits = self.classifier(pooler_output)
         return {"logits": logits, "last_hidden_state": last_hidden_state}
+
+
+@jax.jit
+def forward(model, inputs):
+    return model(inputs)
