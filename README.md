@@ -28,7 +28,7 @@ These are listed based on status and then alphabetically.
 | [Densenet](bonsai/models/densenet121/)        | Image classification | ✅     |         |
 | [EfficientNet](bonsai/models/efficientnet/)   | Image classification | ✅     |         |
 | [Qwen 3](bonsai/models/qwen3)                 | LLM                  | ✅     |         |
-| [ResNet50](bonsai/models/resnet50)            | Image classification | ✅     |         |
+| [ResNet50](bonsai/models/resnet)              | Image classification | ✅     |         |
 | [VGG](bonsai/models/vgg19)                    | Image classification | ✅     |         |
 | [Dinov3](bonsai/models/dinov3)                | Vision FM            | ⚙️     |         |
 | [Gemma3](bonsai/models/gemma3)                | VLM                  | ⚙️     | Local attention cache and todos in file        |
