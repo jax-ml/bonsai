@@ -1,170 +1,289 @@
-"""Run Qwen3-VL model with proper input handling.
+"""Run Qwen3-VL JAX model with fast text generation using KV-cache.
 
 This script demonstrates:
-1. Loading a pretrained Qwen3-VL model (or using test config)
-2. Converting PyTorch/HuggingFace processor outputs to JAX
-3. Running inference with text and image inputs
+1. Loading a pretrained Qwen3-VL model
+2. Fast generation with JIT-compiled forward and KV-cache
+3. Text-only and Image+Text inputs
 
 Usage:
-    # Test mode (no pretrained weights needed):
-    python run_model.py --test
-
-    # With pretrained weights:
-    python run_model.py --model_path /path/to/Qwen3-VL-2B-Instruct
+    python run_model.py
 """
 
-import argparse
+import time
 
-import jax
 import jax.numpy as jnp
 import numpy as np
-from flax import nnx
+from huggingface_hub import snapshot_download
+from transformers import AutoProcessor
 
 from bonsai.models.qwen3_vl import modeling
 from bonsai.models.qwen3_vl import params
 
 
-def convert_pt_to_jax(pt_tensor):
-    """Convert PyTorch tensor to JAX array."""
-    return jnp.array(pt_tensor.numpy())
+MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+EOS_TOKEN_ID = 151643
 
 
-def count_params(model):
-    """Count total parameters in model."""
-    model_params = nnx.state(model, nnx.Param)
-    total = 0
-    for leaf in jax.tree.leaves(model_params):
-        if hasattr(leaf, "shape"):
-            total += np.prod(leaf.shape)
-    return int(total)
+def generate(model, cache, input_ids, max_new_tokens: int = 50):
+    """Fast greedy generation with JIT-compiled forward and KV-cache."""
+    batch_size, seq_len = input_ids.shape
+    generated_tokens = []
+
+    # Prefill
+    start = time.time()
+    logits, cache = modeling.forward(model, cache, input_ids)
+    logits.block_until_ready()
+    prefill_time = time.time() - start
+    print(f"   Prefill: {prefill_time:.2f}s ({seq_len} tokens)")
+
+    next_token = jnp.argmax(logits, axis=-1, keepdims=True)
+    generated_tokens.append(next_token)
+
+    # Decode loop
+    start = time.time()
+    for step in range(max_new_tokens - 1):
+        logits, cache = modeling.forward(model, cache, next_token)
+        next_token = jnp.argmax(logits, axis=-1, keepdims=True)
+        generated_tokens.append(next_token)
+
+        # Stop on EOS
+        if int(next_token[0, 0]) == EOS_TOKEN_ID:
+            break
+
+    decode_time = time.time() - start
+    tokens_generated = len(generated_tokens)
+    if decode_time > 0:
+        print(f"   Decode: {decode_time:.2f}s ({tokens_generated} tokens, {tokens_generated / decode_time:.1f} tok/s)")
+    else:
+        print(f"   Decode: {decode_time:.2f}s ({tokens_generated} tokens)")
+
+    return jnp.concatenate([input_ids] + generated_tokens, axis=1)
 
 
-def run_test_mode():
-    """Run with test config (no pretrained weights needed)."""
+def generate_with_vision(
+    model, cache, input_ids, pixel_values, image_grid_thw, token_type_ids, max_new_tokens: int = 50
+):
+    """Generation with vision inputs."""
+    batch_size, seq_len = input_ids.shape
+    generated_tokens = []
+
+    # Prefill with vision
+    start = time.time()
+    logits, cache = modeling.forward_vision(model, cache, input_ids, pixel_values, image_grid_thw, token_type_ids)
+    logits.block_until_ready()
+    prefill_time = time.time() - start
+    print(f"   Prefill (with vision): {prefill_time:.2f}s ({seq_len} tokens)")
+
+    next_token = jnp.argmax(logits, axis=-1, keepdims=True)
+    generated_tokens.append(next_token)
+
+    # Decode loop (text-only after prefill)
+    start = time.time()
+    for step in range(max_new_tokens - 1):
+        logits, cache = modeling.forward(model, cache, next_token)
+        next_token = jnp.argmax(logits, axis=-1, keepdims=True)
+        generated_tokens.append(next_token)
+
+        if int(next_token[0, 0]) == EOS_TOKEN_ID:
+            break
+
+    decode_time = time.time() - start
+    tokens_generated = len(generated_tokens)
+    if decode_time > 0:
+        print(f"   Decode: {decode_time:.2f}s ({tokens_generated} tokens, {tokens_generated / decode_time:.1f} tok/s)")
+
+    return jnp.concatenate([input_ids] + generated_tokens, axis=1)
+
+
+def main():
     print("=" * 60)
-    print("Qwen3-VL JAX Demo - Test Mode")
+    print("Qwen3-VL JAX Fast Generation Demo")
     print("=" * 60)
 
-    # Create model with test config
-    print("\n1. Creating model with test config...")
-    config = modeling.Qwen3VLConfig.standard_test()
-    print(f"   Vision: {config.vision_config.depth} layers, {config.vision_config.hidden_size} hidden")
-    print(f"   Text: {config.text_config.num_hidden_layers} layers, {config.text_config.hidden_size} hidden")
+    # Download model
+    print("\n1. Downloading model...")
+    model_path = snapshot_download(MODEL_ID)
 
-    rng = nnx.Rngs(0)
-    model = modeling.Qwen3VLForConditionalGeneration(config, rngs=rng)
-    print(f"   Total parameters: {count_params(model):,}")
+    # Load Flax model
+    print("\n2. Loading Flax model...")
+    start = time.time()
+    flax_config = params.get_pretrained_config("2b")
+    flax_model = params.create_model_from_safe_tensors(model_path, flax_config)
+    print(f"   Model loaded in {time.time() - start:.2f}s")
 
-    # Test text-only forward pass
-    print("\n2. Testing text-only forward pass...")
-    batch_size = 2
-    seq_len = 10
-    input_ids = jax.random.randint(jax.random.key(0), (batch_size, seq_len), 0, config.text_config.vocab_size)
+    # Load processor
+    processor = AutoProcessor.from_pretrained(model_path)
 
-    logits = model(input_ids)
-    print(f"   Input shape: {input_ids.shape}")
-    print(f"   Output logits shape: {logits.shape}")
-    print(f"   Expected: ({batch_size}, {seq_len}, {config.text_config.vocab_size})")
-    assert logits.shape == (batch_size, seq_len, config.text_config.vocab_size)
-
-    # Test KV-cache
-    print("\n3. Testing KV-cache...")
-    cache = modeling.init_cache(config, batch_size=1, token_len=5, generate_steps=10)
-    print(f"   Cache layers: {len(cache)}")
-    print(f"   K-cache shape: {cache[0].k_cache.value.shape}")
-
-    # Simulate generation
-    print("\n4. Simulating single-token generation...")
-    single_token = jax.random.randint(jax.random.key(1), (1, 1), 0, config.text_config.vocab_size)
-
-    # Note: For proper generation, we'd need to handle position_ids correctly
-    # This is a simplified demo
-    logits = model(single_token)
-    print(f"   Single token logits shape: {logits.shape}")
-
-    # Test causal mask
-    print("\n5. Testing causal mask...")
-    mask = modeling.make_causal_mask(seq_len=4, cache_len=8, cur_pos=0)
-    print(f"   Mask shape: {mask.shape}")
-
+    # =========================================================================
+    # Example 1: Text-only generation
+    # =========================================================================
     print("\n" + "=" * 60)
-    print("All tests passed!")
+    print("Example 1: Text-only Generation")
     print("=" * 60)
 
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "What is the capital of France? Answer in one word."}],
+        }
+    ]
 
-def run_pretrained_mode(model_path: str):
-    """Run with pretrained weights.
+    inputs = processor.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_dict=True,
+        return_tensors="pt",
+    )
 
-    Requires:
-    - transformers with Qwen3-VL support
-    - Model weights at model_path
-    """
+    input_ids = jnp.array(inputs["input_ids"].numpy())
+    batch_size, seq_len = input_ids.shape
+    print(f"\n3. Input: {seq_len} tokens")
+
+    # Warm up JIT
+    print("\n4. Warming up JIT (first run is slow)...")
+    warm_input = jnp.zeros((1, 1), dtype=jnp.int32)
+    warm_cache = modeling.init_cache(flax_config, 1, 1, 10)
+    _ = modeling.forward(flax_model, warm_cache, warm_input)
+    print("   JIT warm-up complete")
+
+    # Generate
+    print("\n5. Generating...")
+    cache = modeling.init_cache(flax_config, batch_size, seq_len, generate_steps=100)
+    generated_ids = generate(flax_model, cache, input_ids, max_new_tokens=30)
+
+    # Decode
+    generated_ids_trimmed = generated_ids[:, seq_len:]
+    output_text = processor.batch_decode(
+        np.asarray(generated_ids_trimmed),
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False,
+    )
+
+    print("\n" + "-" * 40)
+    print("Q: What is the capital of France?")
+    print(f"A: {output_text[0]}")
+    print("-" * 40)
+
+    # =========================================================================
+    # Example 2: Second text generation (JIT is warm)
+    # =========================================================================
+    print("\n" + "=" * 60)
+    print("Example 2: Second Generation (JIT warm)")
     print("=" * 60)
-    print("Qwen3-VL JAX Demo - Pretrained Mode")
+
+    messages2 = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "How to cook lasagna? Answer in 20 words."}],
+        }
+    ]
+
+    inputs2 = processor.apply_chat_template(
+        messages2,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_dict=True,
+        return_tensors="pt",
+    )
+
+    input_ids2 = jnp.array(inputs2["input_ids"].numpy())
+    seq_len2 = input_ids2.shape[1]
+    print(f"\nInput: {seq_len2} tokens")
+
+    cache2 = modeling.init_cache(flax_config, 1, seq_len2, generate_steps=100)
+    generated_ids2 = generate(flax_model, cache2, input_ids2, max_new_tokens=20)
+
+    generated_ids_trimmed2 = generated_ids2[:, seq_len2:]
+    output_text2 = processor.batch_decode(
+        np.asarray(generated_ids_trimmed2),
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=False,
+    )
+
+    print("\n" + "-" * 40)
+    print("Q: How to cook lasagna?")
+    print(f"A: {output_text2[0]}")
+    print("-" * 40)
+
+    # =========================================================================
+    # Example 3: Image + Text generation
+    # =========================================================================
+    print("\n" + "=" * 60)
+    print("Example 3: Image + Text Generation")
     print("=" * 60)
-    print(f"Model path: {model_path}")
 
-    # Load model
-    print("\n1. Loading pretrained model...")
-    config = params.get_pretrained_config("2b")  # Adjust based on model
-    model = params.create_model_from_safe_tensors(model_path, config)
-    print("   Model loaded successfully!")
-    print(f"   Total parameters: {count_params(model):,}")
+    messages_vision = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/image_processor_example.png",
+                },
+                {"type": "text", "text": "What is in this image? Answer briefly."},
+            ],
+        }
+    ]
 
-    # Try to load HuggingFace processor for input preparation
-    try:
-        from transformers import AutoProcessor
+    print("\n3. Processing image input...")
+    inputs_vision = processor.apply_chat_template(
+        messages_vision,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_dict=True,
+        return_tensors="pt",
+    )
 
-        processor = AutoProcessor.from_pretrained(model_path)
-        print("   Processor loaded!")
+    input_ids_vision = jnp.array(inputs_vision["input_ids"].numpy())
+    seq_len_vision = input_ids_vision.shape[1]
+    print(f"   Input IDs: {seq_len_vision} tokens")
 
-        # Example text input
-        print("\n2. Processing text input...")
-        messages = [{"role": "user", "content": "Hello, what is 2+2?"}]
-        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = processor(text=text, return_tensors="pt")
+    # Check for vision inputs
+    if "pixel_values" in inputs_vision:
+        pixel_values = jnp.array(inputs_vision["pixel_values"].numpy())
+        image_grid_thw = jnp.array(inputs_vision["image_grid_thw"].numpy())
 
-        input_ids = convert_pt_to_jax(inputs["input_ids"])
-        print(f"   Input IDs shape: {input_ids.shape}")
+        # Create token_type_ids (1 for image tokens, 0 for text)
+        # Image token ID is 151655
+        token_type_ids = (input_ids_vision == flax_config.image_token_id).astype(jnp.int32)
 
-        # Forward pass
-        print("\n3. Running forward pass...")
-        logits = model(input_ids)
-        print(f"   Output logits shape: {logits.shape}")
+        print(f"   Pixel values: {pixel_values.shape}")
+        print(f"   Image grid THW: {image_grid_thw}")
+        print(f"   Image tokens in sequence: {int(token_type_ids.sum())}")
 
-        # Get next token prediction
-        next_token_id = int(jnp.argmax(logits[0, -1]))
-        next_token = processor.decode([next_token_id])
-        print(f"   Next token prediction: '{next_token}'")
+        # Initialize cache
+        cache_vision = modeling.init_cache(flax_config, 1, seq_len_vision, generate_steps=100)
 
-    except ImportError as e:
-        print(f"\n   Note: transformers not available ({e})")
-        print("   Running basic test without processor...")
+        print("\n4. Generating with vision...")
+        generated_ids_vision = generate_with_vision(
+            flax_model,
+            cache_vision,
+            input_ids_vision,
+            pixel_values,
+            image_grid_thw,
+            token_type_ids,
+            max_new_tokens=50,
+        )
 
-        # Basic test without processor
-        input_ids = jax.random.randint(jax.random.key(0), (1, 10), 0, config.text_config.vocab_size)
-        logits = model(input_ids)
-        print(f"   Logits shape: {logits.shape}")
+        # Decode
+        generated_ids_trimmed_vision = generated_ids_vision[:, seq_len_vision:]
+        output_text_vision = processor.batch_decode(
+            np.asarray(generated_ids_trimmed_vision),
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+
+        print("\n" + "-" * 40)
+        print("Q: What is in this image?")
+        print(f"A: {output_text_vision[0]}")
+        print("-" * 40)
+    else:
+        print("   No pixel_values in inputs - vision processing may have failed.")
 
     print("\n" + "=" * 60)
     print("Demo complete!")
     print("=" * 60)
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Run Qwen3-VL JAX model")
-    parser.add_argument("--test", action="store_true", help="Run in test mode (no pretrained weights)")
-    parser.add_argument("--model_path", type=str, help="Path to pretrained model")
-    args = parser.parse_args()
-
-    if args.test:
-        run_test_mode()
-    elif args.model_path:
-        run_pretrained_mode(args.model_path)
-    else:
-        print("Usage: python run_model.py --test OR python run_model.py --model_path /path/to/model")
-        print("\nRunning in test mode by default...")
-        run_test_mode()
 
 
 if __name__ == "__main__":

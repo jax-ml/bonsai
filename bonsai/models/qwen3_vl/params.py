@@ -51,13 +51,14 @@ class Transform(Enum):
 def _get_vision_key_mapping():
     """Mapping for vision encoder weights."""
     return {
-        # Patch embedding
+        # Patch embedding - nnx.Conv uses (D, H, W, in_channels, out_channels) kernel
+        # PyTorch Conv3d: (out_channels, in_channels, D, H, W)
         r"^model\.visual\.patch_embed\.proj\.weight$": (
-            "model.visual.patch_embed.proj_weight",
-            Transform.DEFAULT,  # Already in correct shape for our implementation
+            "model.visual.patch_embed.proj.kernel",
+            Transform.CONV3D,  # (O, C, D, H, W) -> (D, H, W, C, O)
         ),
         r"^model\.visual\.patch_embed\.proj\.bias$": (
-            "model.visual.patch_embed.proj_bias",
+            "model.visual.patch_embed.proj.bias",
             Transform.BIAS,
         ),
         # Position embedding
