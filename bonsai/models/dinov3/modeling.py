@@ -1,15 +1,10 @@
 import dataclasses
 from typing import Tuple
 
+import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
-
-
-@dataclasses.dataclass
-class Dinov3ViTModelOutput:
-    last_hidden_state: Array
-    pooler_output: Array
 
 
 @dataclasses.dataclass(frozen=True)
@@ -320,7 +315,7 @@ class Dinov3ViTModel(nnx.Module):
         self.layer = nnx.List([Dinov3ViTLayer(config, rngs=rngs) for _ in range(config.num_hidden_layers)])
         self.norm = nnx.LayerNorm(config.hidden_size, epsilon=config.layer_norm_eps, rngs=rngs)
 
-    def __call__(self, pixel_values: Array) -> Dinov3ViTModelOutput:
+    def __call__(self, pixel_values: Array):
         hidden_states = self.embeddings(pixel_values)
         position_embeddings = self.rope_embeddings(pixel_values)
 
@@ -330,4 +325,9 @@ class Dinov3ViTModel(nnx.Module):
         sequence_output = self.norm(hidden_states)
         pooled_output = sequence_output[:, 0, :]
 
-        return Dinov3ViTModelOutput(**{"last_hidden_state": sequence_output, "pooler_output": pooled_output})
+        return {"last_hidden_state": sequence_output, "pooler_output": pooled_output}
+
+
+@jax.jit()
+def forward(model: Dinov3ViTModel, inputs: Array):
+    return model(inputs)
