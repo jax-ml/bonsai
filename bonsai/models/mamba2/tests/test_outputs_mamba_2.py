@@ -166,7 +166,8 @@ class TestMamba2Model(absltest.TestCase):
 
         self.assertEqual(outputs["last_hidden_state"].shape, (batch_size, seq_len, self.cfg.hidden_size))
         self.assertIsNone(outputs["hidden_states"])
-        self.assertIsNone(outputs["last_ssm_states"])
+        self.assertIsNotNone(outputs["cache"])
+        self.assertIsInstance(outputs["cache"], modeling.Mamba2Cache)
 
     def test_output_hidden_states(self):
         """Test output_hidden_states flag."""
@@ -216,6 +217,7 @@ class TestMamba2ForCausalLM(absltest.TestCase):
 
         self.assertEqual(outputs["logits"].shape, (batch_size, seq_len, self.cfg.vocab_size))
         self.assertIsNone(outputs["loss"])
+        self.assertIsNotNone(outputs["cache"])
 
     def test_loss_computation(self):
         """Test loss computation with labels."""
@@ -407,6 +409,103 @@ class TestGoldenParity(absltest.TestCase):
         rtol = 1e-5 if bonsai_logits.dtype == np.float32 else 1e-3
         atol = 2e-1
         np.testing.assert_allclose(bonsai_logits, golden_logits, rtol=rtol, atol=atol)
+
+
+class TestMamba2Cache(absltest.TestCase):
+    """Tests for Mamba2Cache state caching."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = modeling.Mamba2Config.tiny()
+        self.model = modeling.Mamba2ForCausalLM(self.cfg, rngs=nnx.Rngs(42))
+
+    def test_cache_shapes(self):
+        """Test cache state shapes are correct."""
+        batch_size, seq_len = 2, 32
+        input_ids = jnp.ones((batch_size, seq_len), dtype=jnp.int32)
+        outputs = self.model(input_ids=input_ids)
+        cache = outputs["cache"]
+
+        # Check cache structure
+        self.assertIsInstance(cache, modeling.Mamba2Cache)
+        self.assertLen(cache.ssm_states, self.cfg.num_hidden_layers)
+        self.assertLen(cache.conv_states, self.cfg.num_hidden_layers)
+
+        # Check SSM state shapes
+        for ssm_state in cache.ssm_states:
+            expected_shape = (batch_size, self.cfg.num_heads, self.cfg.head_dim, self.cfg.state_size)
+            self.assertEqual(ssm_state.shape, expected_shape)
+
+        # Check conv state shapes
+        conv_dim = self.cfg.intermediate_size + 2 * self.cfg.state_size
+        cache_len = self.cfg.conv_kernel - 1
+        for conv_state in cache.conv_states:
+            expected_shape = (batch_size, conv_dim, cache_len)
+            self.assertEqual(conv_state.shape, expected_shape)
+
+    def test_cached_matches_full(self):
+        """Test that cached generation produces same results as full forward pass.
+
+        Process [a,b,c] in full sequence vs [a,b] then [c] with cache.
+        Logits for 'c' position must match.
+        """
+        batch_size = 1
+        # Create sequence [1, 2, 3]
+        full_seq = jnp.array([[1, 2, 3]], dtype=jnp.int32)
+        prefix_seq = jnp.array([[1, 2]], dtype=jnp.int32)
+        next_token = jnp.array([[3]], dtype=jnp.int32)
+
+        # Full forward pass
+        full_outputs = self.model(input_ids=full_seq)
+        full_logits = full_outputs["logits"][:, -1, :]  # logits at position of token 3
+
+        # Cached forward pass
+        prefix_outputs = self.model(input_ids=prefix_seq)
+        cache = prefix_outputs["cache"]
+        next_outputs = self.model(input_ids=next_token, cache=cache)
+        cached_logits = next_outputs["logits"][:, -1, :]  # logits at position of token 3
+
+        # Logits should match
+        np.testing.assert_allclose(np.array(full_logits), np.array(cached_logits), rtol=1e-5, atol=1e-6)
+
+    def test_create_empty_cache(self):
+        """Test creating empty cache with correct shapes."""
+        batch_size = 4
+        cache = params.create_empty_cache(self.cfg, batch_size)
+
+        self.assertIsInstance(cache, modeling.Mamba2Cache)
+        self.assertLen(cache.ssm_states, self.cfg.num_hidden_layers)
+        self.assertLen(cache.conv_states, self.cfg.num_hidden_layers)
+
+        # Check all states are zeros with correct shapes
+        for ssm_state in cache.ssm_states:
+            expected_shape = (batch_size, self.cfg.num_heads, self.cfg.head_dim, self.cfg.state_size)
+            self.assertEqual(ssm_state.shape, expected_shape)
+            self.assertTrue(jnp.all(ssm_state == 0))
+
+        conv_dim = self.cfg.intermediate_size + 2 * self.cfg.state_size
+        cache_len = self.cfg.conv_kernel - 1
+        for conv_state in cache.conv_states:
+            expected_shape = (batch_size, conv_dim, cache_len)
+            self.assertEqual(conv_state.shape, expected_shape)
+            self.assertTrue(jnp.all(conv_state == 0))
+
+    def test_cache_updates_on_forward(self):
+        """Test that cache is updated after each forward pass."""
+        input_ids = jnp.array([[1, 2]], dtype=jnp.int32)
+
+        # First forward pass
+        outputs1 = self.model(input_ids=input_ids)
+        cache1 = outputs1["cache"]
+
+        # Second forward pass with cache
+        next_token = jnp.array([[3]], dtype=jnp.int32)
+        outputs2 = self.model(input_ids=next_token, cache=cache1)
+        cache2 = outputs2["cache"]
+
+        # Caches should be different (states updated)
+        for s1, s2 in zip(cache1.ssm_states, cache2.ssm_states):
+            self.assertFalse(jnp.allclose(s1, s2))
 
 
 if __name__ == "__main__":

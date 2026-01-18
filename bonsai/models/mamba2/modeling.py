@@ -79,6 +79,22 @@ class Mamba2Config:
         return cls(vocab_size=1000, hidden_size=64, state_size=16, head_dim=16, chunk_size=32, num_hidden_layers=2)
 
 
+@jax.tree_util.register_pytree_node_class
+@dataclasses.dataclass
+class Mamba2Cache:
+    """Cache for Mamba2 SSM and convolution states."""
+
+    ssm_states: list[jnp.ndarray]  # (batch, heads, head_dim, state_size) per layer
+    conv_states: list[jnp.ndarray]  # (batch, conv_dim, kernel_size - 1) per layer
+
+    def tree_flatten(self):
+        return (self.ssm_states, self.conv_states), None
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        return cls(ssm_states=list(children[0]), conv_states=list(children[1]))
+
+
 # SSD Core Algorithm
 
 
@@ -228,7 +244,14 @@ class RMSNorm(nnx.Module):
 
 
 class DepthwiseConv1d(nnx.Module):
-    """Depthwise causal 1D convolution. Expects (batch, seq_len, channels)."""
+    """Depthwise causal 1D convolution with optional state caching.
+
+    Supports two modes:
+    - Prefill (conv_state=None): Zero-pads left side for causal convolution
+    - Decode (conv_state provided): Uses cached state instead of zero-padding
+
+    Expects input shape: (batch, seq_len, channels)
+    """
 
     def __init__(self, features: int, kernel_size: int, use_bias: bool = True, *, rngs: nnx.Rngs):
         self.features = features
@@ -237,15 +260,48 @@ class DepthwiseConv1d(nnx.Module):
             in_features=features,
             out_features=features,
             kernel_size=(kernel_size,),
-            padding=((kernel_size - 1, 0),),
+            padding=((0, 0),),
             feature_group_count=features,
             use_bias=use_bias,
             rngs=rngs,
         )
 
     @jax.named_scope("depthwise_conv1d")
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
-        return self.conv(x)
+    def __call__(self, x: jnp.ndarray, conv_state: jnp.ndarray | None = None) -> tuple[jnp.ndarray, jnp.ndarray]:
+        """Apply depthwise causal conv1d with optional state caching.
+
+        Args:
+            x: Input tensor (batch, seq_len, features)
+            conv_state: Optional cached state (batch, features, kernel_size - 1)
+                If None, uses zero-padding for causal convolution.
+
+        Returns:
+            output: Convolution output (batch, seq_len, features)
+            new_conv_state: Updated cache state (batch, features, kernel_size - 1)
+        """
+        batch_size, seq_len, channels = x.shape
+        cache_len = self.kernel_size - 1
+
+        if conv_state is None:
+            # Prefill mode: prepend zeros for causal convolution
+            x_padded = jnp.pad(x, ((0, 0), (cache_len, 0), (0, 0)), mode="constant", constant_values=0.0)
+        else:
+            # Decode mode: prepend cached state
+            # conv_state shape: (batch, features, cache_len)
+            # Transpose to (batch, cache_len, features) to match x
+            conv_state_transposed = jnp.transpose(conv_state, (0, 2, 1))
+            x_padded = jnp.concatenate([conv_state_transposed, x], axis=1)
+
+        # Apply convolution
+        output = self.conv(x_padded)
+
+        # Extract new cache state: last cache_len values from x_padded
+        # These will be prepended in the next forward pass
+        new_conv_state = x_padded[:, -cache_len:, :]
+        # Transpose to (batch, features, cache_len)
+        new_conv_state = jnp.transpose(new_conv_state, (0, 2, 1))
+
+        return output, new_conv_state
 
 
 class Mamba2Mixer(nnx.Module):
@@ -292,8 +348,23 @@ class Mamba2Mixer(nnx.Module):
 
     @jax.named_scope("mamba2_mixer")
     def __call__(
-        self, hidden_states: jnp.ndarray, initial_state: jnp.ndarray | None = None, return_final_state: bool = False
-    ) -> tuple[jnp.ndarray, jnp.ndarray | None]:
+        self,
+        hidden_states: jnp.ndarray,
+        conv_state: jnp.ndarray | None = None,
+        ssm_state: jnp.ndarray | None = None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        """Forward pass with optional state caching.
+
+        Args:
+            hidden_states: Input tensor (batch, seq_len, hidden_size)
+            conv_state: Optional conv cache (batch, conv_dim, kernel_size - 1)
+            ssm_state: Optional SSM cache (batch, num_heads, head_dim, state_size)
+
+        Returns:
+            output: Mixer output (batch, seq_len, hidden_size)
+            new_conv_state: Updated conv cache (batch, conv_dim, kernel_size - 1)
+            new_ssm_state: Updated SSM cache (batch, num_heads, head_dim, state_size)
+        """
         B_size, L, _ = hidden_states.shape
 
         # 1) Parallel projection
@@ -311,18 +382,19 @@ class Mamba2Mixer(nnx.Module):
             axis=-1,
         )
 
-        # 2) Depthwise causal convolution
-        xBC = self.act(self.conv1d(xBC))
+        # 2) Depthwise causal convolution with state caching
+        xBC, new_conv_state = self.conv1d(xBC, conv_state=conv_state)
+        xBC = self.act(xBC)
         x, B_t, C_t = jnp.split(xBC, [self.intermediate_size, self.intermediate_size + self.ssm_state_size], axis=-1)
 
-        # 3) SSD forward
-        init_state = initial_state[:, None, ...] if initial_state is not None else None
+        # 3) SSD forward with state caching
+        init_state = ssm_state[:, None, ...] if ssm_state is not None else None
         A = -jnp.exp(self.A_log[:].astype(jnp.float32))
 
         B_exp = jnp.broadcast_to(jnp.expand_dims(B_t, 2), (B_size, L, self.num_heads, self.ssm_state_size))
         C_exp = jnp.broadcast_to(jnp.expand_dims(C_t, 2), (B_size, L, self.num_heads, self.ssm_state_size))
 
-        y, final_state = ssd_forward(
+        y, new_ssm_state = ssd_forward(
             x=x.reshape(B_size, L, -1, self.head_dim),
             dt=dt,
             A=A,
@@ -334,7 +406,7 @@ class Mamba2Mixer(nnx.Module):
             dt_min=self.dt_min,
             dt_max=self.dt_max,
             initial_states=init_state,
-            return_final_states=return_final_state,
+            return_final_states=True,
         )
         y = y.reshape(B_size, L, -1)
 
@@ -344,7 +416,7 @@ class Mamba2Mixer(nnx.Module):
             y = jnp.concatenate([self.act(z0) * x0, y], axis=-1)
 
         # 5) Output projection
-        return self.out_proj(y), final_state
+        return self.out_proj(y), new_conv_state, new_ssm_state
 
 
 class Mamba2Block(nnx.Module):
@@ -357,14 +429,29 @@ class Mamba2Block(nnx.Module):
         self.mixer = Mamba2Mixer(cfg, layer_idx=layer_idx, rngs=rngs)
 
     def __call__(
-        self, hidden_states: jnp.ndarray, initial_state: jnp.ndarray | None = None, return_final_state: bool = False
-    ) -> tuple[jnp.ndarray, jnp.ndarray | None]:
+        self,
+        hidden_states: jnp.ndarray,
+        conv_state: jnp.ndarray | None = None,
+        ssm_state: jnp.ndarray | None = None,
+    ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        """Forward pass with optional state caching.
+
+        Args:
+            hidden_states: Input tensor (batch, seq_len, hidden_size)
+            conv_state: Optional conv cache (batch, conv_dim, kernel_size - 1)
+            ssm_state: Optional SSM cache (batch, num_heads, head_dim, state_size)
+
+        Returns:
+            output: Block output (batch, seq_len, hidden_size)
+            new_conv_state: Updated conv cache (batch, conv_dim, kernel_size - 1)
+            new_ssm_state: Updated SSM cache (batch, num_heads, head_dim, state_size)
+        """
         residual = hidden_states
         hs = self.norm(hidden_states.astype(jnp.float32))
         if self.residual_in_fp32:
             residual = residual.astype(jnp.float32)
-        hs_out, last_state = self.mixer(hs, initial_state=initial_state, return_final_state=return_final_state)
-        return residual + hs_out, last_state
+        hs_out, new_conv_state, new_ssm_state = self.mixer(hs, conv_state=conv_state, ssm_state=ssm_state)
+        return residual + hs_out, new_conv_state, new_ssm_state
 
 
 class Mamba2Model(nnx.Module):
@@ -381,40 +468,64 @@ class Mamba2Model(nnx.Module):
         self,
         input_ids: jnp.ndarray | None = None,
         inputs_embeds: jnp.ndarray | None = None,
-        initial_states: list[jnp.ndarray] | None = None,
+        cache: Mamba2Cache | None = None,
         output_hidden_states: bool = False,
-        output_last_ssm_states: bool = False,
-    ) -> dict[str, jnp.ndarray | list[jnp.ndarray] | None]:
+    ) -> dict[str, jnp.ndarray | Mamba2Cache | list[jnp.ndarray] | None]:
+        """Forward pass with optional state caching.
+
+        Args:
+            input_ids: Input token IDs (batch, seq_len)
+            inputs_embeds: Input embeddings (batch, seq_len, hidden_size)
+            cache: Optional cache containing conv and SSM states for all layers
+            output_hidden_states: Whether to return intermediate hidden states
+
+        Returns:
+            Dictionary containing:
+                - last_hidden_state: Final layer output
+                - cache: Updated cache with new states (always returned)
+                - hidden_states: List of intermediate hidden states (if requested)
+        """
         if (input_ids is None) == (inputs_embeds is None):
             raise ValueError("Specify exactly one of input_ids or inputs_embeds")
 
         hidden_states = self.embedder(input_ids) if inputs_embeds is None else inputs_embeds
 
-        if initial_states is None:
-            initial_states = [None] * self.cfg.num_hidden_layers
-        elif len(initial_states) != self.cfg.num_hidden_layers:
-            raise ValueError("initial_states length must equal num_hidden_layers")
+        # Extract per-layer states from cache or initialize
+        if cache is None:
+            conv_states = [None] * self.cfg.num_hidden_layers
+            ssm_states = [None] * self.cfg.num_hidden_layers
+        else:
+            if len(cache.conv_states) != self.cfg.num_hidden_layers:
+                raise ValueError("cache.conv_states length must equal num_hidden_layers")
+            if len(cache.ssm_states) != self.cfg.num_hidden_layers:
+                raise ValueError("cache.ssm_states length must equal num_hidden_layers")
+            conv_states = cache.conv_states
+            ssm_states = cache.ssm_states
 
         all_hidden_states = [] if output_hidden_states else None
-        all_last_states = [] if output_last_ssm_states else None
+        new_conv_states = []
+        new_ssm_states = []
 
-        for layer, init_state in zip(self.layers, initial_states):
-            hidden_states, last_state = layer(
-                hidden_states, initial_state=init_state, return_final_state=output_last_ssm_states
+        for layer, conv_state, ssm_state in zip(self.layers, conv_states, ssm_states):
+            hidden_states, new_conv_state, new_ssm_state = layer(
+                hidden_states, conv_state=conv_state, ssm_state=ssm_state
             )
+            new_conv_states.append(new_conv_state)
+            new_ssm_states.append(new_ssm_state)
             if output_hidden_states:
                 all_hidden_states.append(hidden_states)
-            if output_last_ssm_states:
-                all_last_states.append(last_state)
 
         hidden_states = self.final_norm(hidden_states)
         if output_hidden_states:
             all_hidden_states.append(hidden_states)
 
+        # Build updated cache
+        updated_cache = Mamba2Cache(ssm_states=new_ssm_states, conv_states=new_conv_states)
+
         return {
             "last_hidden_state": hidden_states,
+            "cache": updated_cache,
             "hidden_states": all_hidden_states,
-            "last_ssm_states": all_last_states,
         }
 
 
@@ -430,8 +541,26 @@ class Mamba2ForCausalLM(nnx.Module):
             self.lm_head = None
 
     @jax.named_scope("mamba2_causal_lm")
-    def __call__(self, input_ids: jnp.ndarray, labels: jnp.ndarray | None = None) -> dict[str, jnp.ndarray | None]:
-        backbone_outputs = self.backbone(input_ids=input_ids)
+    def __call__(
+        self,
+        input_ids: jnp.ndarray,
+        labels: jnp.ndarray | None = None,
+        cache: Mamba2Cache | None = None,
+    ) -> dict[str, jnp.ndarray | Mamba2Cache | None]:
+        """Forward pass with optional state caching.
+
+        Args:
+            input_ids: Input token IDs (batch, seq_len)
+            labels: Optional labels for loss computation (batch, seq_len)
+            cache: Optional cache containing conv and SSM states
+
+        Returns:
+            Dictionary containing:
+                - logits: Model logits (batch, seq_len, vocab_size)
+                - loss: Cross-entropy loss if labels provided
+                - cache: Updated cache with new states
+        """
+        backbone_outputs = self.backbone(input_ids=input_ids, cache=cache)
         hidden_states = backbone_outputs["last_hidden_state"]
 
         if self.cfg.tie_word_embeddings:
@@ -445,7 +574,7 @@ class Mamba2ForCausalLM(nnx.Module):
             shift_labels = labels[:, 1:].reshape(-1)
             loss = optax.softmax_cross_entropy_with_integer_labels(shift_logits, shift_labels).mean()
 
-        return {"logits": logits, "loss": loss}
+        return {"logits": logits, "loss": loss, "cache": backbone_outputs["cache"]}
 
     @classmethod
     def from_pretrained(
@@ -513,6 +642,11 @@ class Mamba2Forecaster(nnx.Module):
 
 
 @jax.jit
-def forward(model: Mamba2ForCausalLM, input_ids: jnp.ndarray, labels: jnp.ndarray | None = None):
-    """JIT-compiled forward pass for Mamba2ForCausalLM."""
-    return model(input_ids, labels)
+def forward(
+    model: Mamba2ForCausalLM,
+    input_ids: jnp.ndarray,
+    labels: jnp.ndarray | None = None,
+    cache: Mamba2Cache | None = None,
+):
+    """JIT-compiled forward pass for Mamba2ForCausalLM with optional caching."""
+    return model(input_ids, labels, cache)
