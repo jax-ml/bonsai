@@ -244,14 +244,7 @@ class RMSNorm(nnx.Module):
 
 
 class DepthwiseConv1d(nnx.Module):
-    """Depthwise causal 1D convolution with optional state caching.
-
-    Supports two modes:
-    - Prefill (conv_state=None): Zero-pads left side for causal convolution
-    - Decode (conv_state provided): Uses cached state instead of zero-padding
-
-    Expects input shape: (batch, seq_len, channels)
-    """
+    """Depthwise causal 1D convolution with state caching. Expects (batch, seq_len, channels)."""
 
     def __init__(self, features: int, kernel_size: int, use_bias: bool = True, *, rngs: nnx.Rngs):
         self.features = features
@@ -268,38 +261,15 @@ class DepthwiseConv1d(nnx.Module):
 
     @jax.named_scope("depthwise_conv1d")
     def __call__(self, x: jnp.ndarray, conv_state: jnp.ndarray | None = None) -> tuple[jnp.ndarray, jnp.ndarray]:
-        """Apply depthwise causal conv1d with optional state caching.
-
-        Args:
-            x: Input tensor (batch, seq_len, features)
-            conv_state: Optional cached state (batch, features, kernel_size - 1)
-                If None, uses zero-padding for causal convolution.
-
-        Returns:
-            output: Convolution output (batch, seq_len, features)
-            new_conv_state: Updated cache state (batch, features, kernel_size - 1)
-        """
-        batch_size, seq_len, channels = x.shape
         cache_len = self.kernel_size - 1
 
         if conv_state is None:
-            # Prefill mode: prepend zeros for causal convolution
             x_padded = jnp.pad(x, ((0, 0), (cache_len, 0), (0, 0)), mode="constant", constant_values=0.0)
         else:
-            # Decode mode: prepend cached state
-            # conv_state shape: (batch, features, cache_len)
-            # Transpose to (batch, cache_len, features) to match x
-            conv_state_transposed = jnp.transpose(conv_state, (0, 2, 1))
-            x_padded = jnp.concatenate([conv_state_transposed, x], axis=1)
+            x_padded = jnp.concatenate([jnp.transpose(conv_state, (0, 2, 1)), x], axis=1)
 
-        # Apply convolution
         output = self.conv(x_padded)
-
-        # Extract new cache state: last cache_len values from x_padded
-        # These will be prepended in the next forward pass
-        new_conv_state = x_padded[:, -cache_len:, :]
-        # Transpose to (batch, features, cache_len)
-        new_conv_state = jnp.transpose(new_conv_state, (0, 2, 1))
+        new_conv_state = jnp.transpose(x_padded[:, -cache_len:, :], (0, 2, 1))
 
         return output, new_conv_state
 
@@ -353,18 +323,6 @@ class Mamba2Mixer(nnx.Module):
         conv_state: jnp.ndarray | None = None,
         ssm_state: jnp.ndarray | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        """Forward pass with optional state caching.
-
-        Args:
-            hidden_states: Input tensor (batch, seq_len, hidden_size)
-            conv_state: Optional conv cache (batch, conv_dim, kernel_size - 1)
-            ssm_state: Optional SSM cache (batch, num_heads, head_dim, state_size)
-
-        Returns:
-            output: Mixer output (batch, seq_len, hidden_size)
-            new_conv_state: Updated conv cache (batch, conv_dim, kernel_size - 1)
-            new_ssm_state: Updated SSM cache (batch, num_heads, head_dim, state_size)
-        """
         B_size, L, _ = hidden_states.shape
 
         # 1) Parallel projection
@@ -434,18 +392,6 @@ class Mamba2Block(nnx.Module):
         conv_state: jnp.ndarray | None = None,
         ssm_state: jnp.ndarray | None = None,
     ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-        """Forward pass with optional state caching.
-
-        Args:
-            hidden_states: Input tensor (batch, seq_len, hidden_size)
-            conv_state: Optional conv cache (batch, conv_dim, kernel_size - 1)
-            ssm_state: Optional SSM cache (batch, num_heads, head_dim, state_size)
-
-        Returns:
-            output: Block output (batch, seq_len, hidden_size)
-            new_conv_state: Updated conv cache (batch, conv_dim, kernel_size - 1)
-            new_ssm_state: Updated SSM cache (batch, num_heads, head_dim, state_size)
-        """
         residual = hidden_states
         hs = self.norm(hidden_states.astype(jnp.float32))
         if self.residual_in_fp32:
@@ -471,20 +417,6 @@ class Mamba2Model(nnx.Module):
         cache: Mamba2Cache | None = None,
         output_hidden_states: bool = False,
     ) -> dict[str, jnp.ndarray | Mamba2Cache | list[jnp.ndarray] | None]:
-        """Forward pass with optional state caching.
-
-        Args:
-            input_ids: Input token IDs (batch, seq_len)
-            inputs_embeds: Input embeddings (batch, seq_len, hidden_size)
-            cache: Optional cache containing conv and SSM states for all layers
-            output_hidden_states: Whether to return intermediate hidden states
-
-        Returns:
-            Dictionary containing:
-                - last_hidden_state: Final layer output
-                - cache: Updated cache with new states (always returned)
-                - hidden_states: List of intermediate hidden states (if requested)
-        """
         if (input_ids is None) == (inputs_embeds is None):
             raise ValueError("Specify exactly one of input_ids or inputs_embeds")
 
@@ -547,19 +479,6 @@ class Mamba2ForCausalLM(nnx.Module):
         labels: jnp.ndarray | None = None,
         cache: Mamba2Cache | None = None,
     ) -> dict[str, jnp.ndarray | Mamba2Cache | None]:
-        """Forward pass with optional state caching.
-
-        Args:
-            input_ids: Input token IDs (batch, seq_len)
-            labels: Optional labels for loss computation (batch, seq_len)
-            cache: Optional cache containing conv and SSM states
-
-        Returns:
-            Dictionary containing:
-                - logits: Model logits (batch, seq_len, vocab_size)
-                - loss: Cross-entropy loss if labels provided
-                - cache: Updated cache with new states
-        """
         backbone_outputs = self.backbone(input_ids=input_ids, cache=cache)
         hidden_states = backbone_outputs["last_hidden_state"]
 
