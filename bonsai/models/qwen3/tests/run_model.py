@@ -12,23 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
-import time
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-from flax import nnx
 from huggingface_hub import snapshot_download
-from jax.sharding import AxisType
-from jax.sharding import PartitionSpec as P
+from jax import P
 from transformers import AutoTokenizer
 
 from bonsai.models.qwen3 import modeling, params
-from bonsai.utils import GreedySampler, Sampler
+from bonsai.utils import Sampler
 
 
-def tokenize(tokenizer, input: list[str]):
+def tokenize(tokenizer, input: list[str], shd: P | None = None):
     pad_idx = tokenizer.pad_token_id
     lines = [
         tokenizer.apply_chat_template(
@@ -38,47 +34,49 @@ def tokenize(tokenizer, input: list[str]):
     ]
     lines = [tokenizer.encode(line) for line in lines]
     max_len = max(len(line) for line in lines)  # Right-align, left-padding to the max token length.
-    return jnp.array([np.pad(l, (max_len - len(l), 0), constant_values=pad_idx) for l in lines])
+    return jnp.array([np.pad(l, (max_len - len(l), 0), constant_values=pad_idx) for l in lines], out_sharding=shd)
 
 
 def run_model():
-    model_ckpt_path = snapshot_download("Qwen/Qwen3-4B")
+    # For sharding, you can use one of the following:
+    model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
+    config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
+    mesh, batch_shd = None, None
 
-    # Sharding is set False by default. Configure to meet device needs.
-    config = modeling.ModelConfig.qwen3_4b(use_sharding=False)
-    mesh = jax.make_mesh((1, 1), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
-    jax.set_mesh(mesh)
+    # Enable sharding below if you have mtuliple devices.
+    # model_ckpt_path = snapshot_download("Qwen/Qwen3-4B")
+    # config = modeling.ModelConfig.qwen3_4b(use_sharding=True)
+    # mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+    # batch_shd = P("fsdp", None)
+    # jax.set_mesh(mesh)
 
     query = [
         "Why is the sky blue instead of any other color like purple?",
         "Who am I?",
-        "Tell me 10 flavors of ice creams.",
     ]
 
     tokenizer = AutoTokenizer.from_pretrained(model_ckpt_path)
-    tokens = tokenize(tokenizer, query)
+    tokens = tokenize(tokenizer, query, batch_shd)
     batch_size, token_len = tokens.shape
 
-    generate_steps = 256
-    cache = modeling.init_cache(config, batch_size, token_len, generate_steps)
-
+    generate_steps = 32
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh)
-    graphdef, state = nnx.split((model, cache))
-    state = jax.tree.leaves(state)  # Better perf from flattened jax state due to no pytree trasversals.
+    cache = model.init_cache(config, batch_size, token_len, generate_steps)
 
     key = jax.random.key(0)
     sampler = Sampler(temperature=1.0, top_p=0.8, top_k=10)
+    jit_sampler = jax.jit(sampler)
 
     # prefill
-    logits, state = modeling.forward(graphdef, state, tokens, tokenizer.pad_token_id)
-    next_tokens = sampler(logits, key=key)
+    logits, cache = modeling.forward(model, cache, tokens, tokenizer.pad_token_id)
+    next_tokens = jit_sampler(logits, key=key)
 
     # decode
     tokens_list = [next_tokens]
     finished = jnp.zeros((batch_size,), dtype=jnp.bool_)
     for i in range(generate_steps):
-        logits, state = modeling.forward(graphdef, state, next_tokens, tokenizer.pad_token_id)
-        next_tokens = sampler(logits, key=key)
+        logits, cache = modeling.forward(model, cache, next_tokens, tokenizer.pad_token_id)
+        next_tokens = jit_sampler(logits, key=key)
         finished = finished | (next_tokens.squeeze(-1) == tokenizer.eos_token_id)
         tokens_list.append(next_tokens)
         if finished.all():

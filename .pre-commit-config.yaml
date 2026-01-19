@@ -17,3 +17,10 @@ repos:
       args: [ --fix ]
     # Run the formatter.
     - id: ruff-format
+
+- repo: https://github.com/mwouts/jupytext
+  rev: v1.18.1
+  hooks:
+  - id: jupytext
+    args: [--sync]
+    files: bonsai/models/

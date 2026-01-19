@@ -9,97 +9,8 @@ import jax.numpy as jnp
 from flax import nnx
 from jaxtyping import Array, DTypeLike
 
-# TODO: Properly use these to match reference implementation.
-SUPPRESS_TOKENS: list[int] = [
-    1,
-    2,
-    7,
-    8,
-    9,
-    10,
-    14,
-    25,
-    26,
-    27,
-    28,
-    29,
-    31,
-    58,
-    59,
-    60,
-    61,
-    62,
-    63,
-    90,
-    91,
-    92,
-    93,
-    359,
-    503,
-    522,
-    542,
-    873,
-    893,
-    902,
-    918,
-    922,
-    931,
-    1350,
-    1853,
-    1982,
-    2460,
-    2627,
-    3246,
-    3253,
-    3268,
-    3536,
-    3846,
-    3961,
-    4183,
-    4667,
-    6585,
-    6647,
-    7273,
-    9061,
-    9383,
-    10428,
-    10929,
-    11938,
-    12033,
-    12331,
-    12562,
-    13793,
-    14157,
-    14635,
-    15265,
-    15618,
-    16553,
-    16604,
-    18362,
-    18956,
-    20075,
-    21675,
-    22520,
-    26130,
-    26161,
-    26435,
-    28279,
-    29464,
-    31650,
-    32302,
-    32470,
-    36865,
-    42863,
-    47425,
-    49870,
-    50254,
-    50258,
-    50358,
-    50359,
-    50360,
-    50361,
-    50362,
-]
+# TODO: Use a proper suppress_token and use to match reference implementation.
+SUPPRESS_TOKENS: list[int] = []
 
 
 # TODO: Double check all the numbers
@@ -257,7 +168,7 @@ class WhisperEncoder(nnx.Module):
         inputs_embeds = jax.nn.gelu(self.conv1(input_features))
         inputs_embeds = jax.nn.gelu(self.conv2(inputs_embeds))
 
-        all_positions = jnp.arange(self.embed_positions.num_embeddings, device=inputs_embeds.device)
+        all_positions = jnp.arange(self.embed_positions.num_embeddings)
         hidden_states = inputs_embeds + self.embed_positions(all_positions)
 
         for encoder_layer in self.layers:

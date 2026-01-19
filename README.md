@@ -24,19 +24,23 @@ These are listed based on status and then alphabetically.
 
 | Model                                         | Type                 | Status | Details |
 |-----------------------------------------------|----------------------|--------|---------|
+| [ConvNeXT](bonsai/models/convnext/)           | Image classification | ✅     |         |
 | [Densenet](bonsai/models/densenet121/)        | Image classification | ✅     |         |
 | [EfficientNet](bonsai/models/efficientnet/)   | Image classification | ✅     |         |
 | [Qwen 3](bonsai/models/qwen3)                 | LLM                  | ✅     |         |
-| [ResNet50](bonsai/models/resnet50)            | Image classification | ✅     |         |
+| [ResNet50](bonsai/models/resnet)              | Image classification | ✅     |         |
 | [VGG](bonsai/models/vgg19)                    | Image classification | ✅     |         |
-| [ViT](bonsai/models/vit)                      | Image classification | ⚙️     | Update to include sharding        |
-| [LLaDa](bonsai/models/llada_8b/)             | Diffusion LLM        | 🟡     | Need more numerical testing        |
+| [Dinov3](bonsai/models/dinov3)                | Vision FM            | ⚙️     |         |
+| [Gemma3](bonsai/models/gemma3)                | VLM                  | ⚙️     | Local attention cache and todos in file        |
+| [Mamba2](bonsai/models/mamba2)                | Language SSM         | ⚙️     | Caching and sharding        |
+| [umT5](bonsai/models/umt5)                    | LLM                  | ⚙️     | Caching and sharding        |
+| [ViT](bonsai/models/vit)                      | Image classification | ⚙️     | Sharding        |
+| [LLaDa](bonsai/models/llada_8b/)              | Diffusion LLM        | 🟡     | Need more numerical testing        |
 | [Sam2](bonsai/models/sam2/)                   | Image segmentation   | 🟡     | Need more numerical testing        |
 | [UNet](bonsai/models/unet/)                   | Image                | 🟡     | Need a reference implementation and numerical testing        |
 | [VAE](bonsai/models/vae/)                     | Generative model     | 🟡     | Need a reference implementation and numerical testing         |
 | [Whisper](bonsai/models/whisper/)             | Speech recognition   | 🟡     | Need more numerical testing and not all call methods implemented        |
-| ConvNeXt                                      | Image classification | ⏳     |         |
-
+| CLIP                                          |                      | ⏳     |         |
 
 
 Got models you'd like to see in JAX? [Add a request](https://github.com/jax-ml/bonsai/issues) or [contribute](CONTRIBUTING.md). Please refer to the open issues and PRs before creating a new one to see if a feature is already being addressed.

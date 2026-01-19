@@ -2,10 +2,11 @@
 
 This directory contains a pure JAX implementation of the [VGG-19](https://huggingface.co/keras/vgg_19_imagenet) model, using the Flax NNX API. 
 
-## Tested on
-| Model Name                                              | Config | CPU | GPU A100 (1x) | GPU H100 (1x) | GPU A100 (8x) | GPU H100 (8x) | TPU v2 (8x) | TPU v5e (1x) |
-|:--------------------------------------------------------| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| [VGG-19](https://huggingface.co/keras/vgg_19_imagenet) | ✅ Supported | ✅ Runs |  ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check   | ❔ Needs check  | ❔ Needs check  |
+## Model Configuration Support Status
+
+| Model Name | Config Support Status |
+| :--- | :--- |
+| [VGG-19](https://huggingface.co/keras/vgg_19_imagenet) | **✅ Supported** |
 
 ### Running this model
 

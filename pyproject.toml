@@ -1,13 +1,13 @@
 [project]
 name = "jax-bonsai"
 dynamic = ["version"]
-authors = [
-  { name = "JAX-bonsai developers", email = "jiyounha@google.com" },
-]
 description = "A collection of lightweight, open-source models built on JAX."
-requires-python = ">=3.11"
 readme = "README.md"
-license = "Apache-2.0"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "JAX-bonsai developers", email = "jax-bonsai@google.com" },
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -17,48 +17,47 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+
 dependencies = [
-  "jax",
-  "jaxlib",
-  "jaxtyping",
-  "flax >= 0.12.0",
-  "jinja2",
-  "huggingface-hub",
-  "transformers",  # for the tokenizer and checkpoint
+  "jax >= 0.8.0, < 0.9.0",
+  "jaxlib >= 0.8.0, < 0.9.0",
+  "flax >= 0.12.0, < 0.13.0",
+  "jaxtyping>=0.2.20",
+  "jinja2>=3.0.0",
+  "huggingface-hub>=0.20.0",
+  "transformers>=4.30.0",
 ]
 
 [project.optional-dependencies]
-densenet121 = ["h5py"]
-efficientnet = ["timm"]
-whisper = ["librosa"]
-qwen3 = []
-resnet50 = []
-sam2 = ["pillow>=11.3.0"]
-vgg19 = ["h5py"]
+tf = ["h5py", "keras_hub", "tensorflow"]
+vision = ["timm", "pillow>=11.3.0", "opencv-python-headless"]
+audio = ["librosa"]
 
 dev = [
   "xprof",
   "pre-commit",
+  "jupytext == 1.18.1",
+  "ruff",
+]
+
+test-env = [
+  "torch",
+  "timm",
+  "h5py",
+  "diffusers[flax]",
 ]
 
 testing = [
   "pytest",
   "pytest-xdist",
-  "torch",
-  "keras_hub",
-  "tensorflow",
-  "timm",
-]
-
-models = [
-  "jax-bonsai[densenet121,efficientnet,whisper,qwen3,resnet50,sam2,vgg19]",
+  "jax-bonsai[test-env]",
 ]
 
 [project.urls]
 Source = "https://github.com/jax-ml/bonsai"
 
 [build-system]
-requires = ["setuptools >= 77.0.3"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -73,21 +72,32 @@ line-length = 120
 extend-include = ["*.ipynb"]
 
 [tool.ruff.lint]
-select = [
-  "E",  # Pycodestyle - Errors
-  "F",  # Pyflakes
-  "I",  # isort - consistent import orders and formatting
-  "W",  # Pycodestyle - Warnings
-  "RUF",  # Ruff-specific rules
-]
 ignore = [
-  "E731",  # lambdas are allowed
-  "E501",  # don't check line lengths
-  "F401",  # allow unused imports
-  "E402",  # allow modules not at top of file
-  "E741",  # allow "l" as a variable name
-  "E703",  # allow semicolons (for jupyter notebooks)
-  "RUF009",  # Do not perform function call in dataclass defaults
+    # Unnecessary collection call
+    "C408",
+    # Unnecessary map usage
+    "C417",
+    # Unnecessary dict comprehension for iterable
+    "C420",
+    # Object names too complex
+    "C901",
+    # Local variable is assigned to but never used
+    "F841",
+    # Class could be dataclass or namedtuple
+    "B903",
+    # Raise with from clause inside except block
+    "B904",
+    # Zip without explicit strict parameter
+    "B905",
+]
+select = [
+    "B9",
+    "C",
+    "F",
+    "W",
+    "YTT",
+    "ASYNC",
+    "E101",
 ]
 
 [tool.ruff.format]
@@ -99,3 +109,7 @@ indent-style = "space"
 testpaths = ["bonsai"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+
+[tool.jupytext]
+formats = "ipynb,md:myst"
+cell_metadata_filter = "-all"

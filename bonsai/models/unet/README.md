@@ -14,15 +14,12 @@ Needs work on:
 3. Clean up `UNet_segmentation_example.ipynb` to demonstrate proper parameter loading.
 
 
+## Model Configuration Support Status
 
-## Tested on:  
-
- 
-
-| Model Name | Config | CPU | GPU A100 (1x) | GPU H100 (1x) | GPU A100 (8x) | GPU H100 (8x) | TPU v2 (8x) | TPU v5e (1x) |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Model** | | | | | | | | |
-| [U-Net](https://arxiv.org/abs/1505.04597) | ✅ Supported | ✅ Runs | ❔ Needs check | ❔ Needs check | ❔ Needs check | ❔ Needs check |❔ Needs check | ❔ Needs check |
+| Model Name | Config Support Status |
+| :--- | :--- |
+| **Model** | |
+| [U-Net](https://arxiv.org/abs/1505.04597) | **✅ Supported** |
 
 
 ### Running this model

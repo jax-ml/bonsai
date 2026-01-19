@@ -5,7 +5,6 @@ import importlib
 import importlib.util
 import os
 import sys
-import tempfile
 
 from bonsai import __description__, __version__
 
