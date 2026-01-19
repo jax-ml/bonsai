@@ -208,7 +208,7 @@ def main():
             "content": [
                 {
                     "type": "image",
-                    "image": "/teamspace/studios/this_studio/opensource/bonsai/bonsai/models/qwen3_vl/tests/image.jpg",  # (256 * 256)
+                    "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/cats.jpeg",
                 },
                 {"type": "text", "text": "What is in this image? Answer in detail"},
             ],

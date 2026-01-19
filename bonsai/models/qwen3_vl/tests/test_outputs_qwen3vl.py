@@ -75,6 +75,8 @@ class TestForwardPass(absltest.TestCase):
             self.save_dir, self.flax_config, model_filename="qwen3vl_test.safetensors"
         )
 
+        if os.path.exists(self.model_ckpt_path):
+            os.remove(self.model_ckpt_path)
         self.pt_model.eval()
         self.batch_size = 1
         self.seq_len = 10
@@ -177,6 +179,9 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         self.flax_model = params.create_model_from_safe_tensors(
             self.save_dir, self.flax_config, model_filename="qwen3vl_vision_test.safetensors"
         )
+
+        if os.path.exists(self.model_ckpt_path):
+            os.remove(self.model_ckpt_path)
         self.pt_model.eval()
 
     def test_vision_mlp(self):
