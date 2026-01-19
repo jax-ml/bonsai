@@ -1,23 +1,3 @@
-# Copyright 2025 The JAX Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""Qwen3-VL model implementation in JAX/Flax NNX.
-
-Port from PyTorch HuggingFace implementation following jax-bonsai style.
-Supports 2B, 4B, and 8B variants with KV-cache for fast AR decoding.
-"""
-
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, TypeAlias
@@ -28,11 +8,6 @@ from flax import nnx
 from jax import Array
 
 _K_MASK = jnp.finfo(jnp.bfloat16).min
-
-
-# =============================================================================
-# Configuration
-# =============================================================================
 
 
 @dataclass(frozen=True)
@@ -186,11 +161,6 @@ class Qwen3VLConfig:
         )
 
 
-# =============================================================================
-# Common Components
-# =============================================================================
-
-
 class RMSNorm(nnx.Module):
     """Root Mean Square Layer Normalization."""
 
@@ -202,13 +172,8 @@ class RMSNorm(nnx.Module):
         dtype = x.dtype
         x_f32 = x.astype(jnp.float32)
         rms = jax.lax.rsqrt(jnp.mean(x_f32**2, axis=-1, keepdims=True) + self.eps)
-        out = (x_f32 * rms) * self.weight.value
+        out = (x_f32 * rms) * self.weight[...]
         return out.astype(dtype)
-
-
-# =============================================================================
-# Vision Encoder Components
-# =============================================================================
 
 
 class Qwen3VLPatchEmbed(nnx.Module):
@@ -499,11 +464,6 @@ class Qwen3VLVisionModel(nnx.Module):
         return hidden_states, deepstack_features
 
 
-# =============================================================================
-# Text Decoder Components
-# =============================================================================
-
-
 class LayerCache(nnx.Module):
     """KV-cache for a single decoder layer."""
 
@@ -604,15 +564,15 @@ class Qwen3VLAttention(nnx.Module):
         k = _apply_rope(k, sin, cos)
 
         # Update cache - cast to cache dtype
-        cache_dtype = cache.k_cache.value.dtype
+        cache_dtype = cache.k_cache[...].dtype
         k_cached = k.astype(cache_dtype)
         v_cached = v.astype(cache_dtype)
-        slice_indices = (0, cache.cur_ind.value, 0, 0)
-        cache.k_cache.value = jax.lax.dynamic_update_slice(cache.k_cache.value, k_cached, slice_indices)
-        cache.v_cache.value = jax.lax.dynamic_update_slice(cache.v_cache.value, v_cached, slice_indices)
+        slice_indices = (0, cache.cur_ind[...], 0, 0)
+        cache.k_cache[...] = jax.lax.dynamic_update_slice(cache.k_cache[...], k_cached, slice_indices)
+        cache.v_cache[...] = jax.lax.dynamic_update_slice(cache.v_cache[...], v_cached, slice_indices)
 
-        k = repeat_kv(cache.k_cache.value, self.n_rep)
-        v = repeat_kv(cache.v_cache.value, self.n_rep)
+        k = repeat_kv(cache.k_cache[...], self.n_rep)
+        v = repeat_kv(cache.v_cache[...], self.n_rep)
 
         q = q.transpose(0, 2, 1, 3)  # (B, heads, T, dim)
         k = k.transpose(0, 2, 1, 3)
@@ -624,7 +584,7 @@ class Qwen3VLAttention(nnx.Module):
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)
         attn_out = jnp.matmul(attn_weights, v).transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
-        cache.cur_ind.value = cache.cur_ind.value + seq_len
+        cache.cur_ind[...] = cache.cur_ind[...] + seq_len
         return self.o_proj(attn_out)
 
 
@@ -659,11 +619,6 @@ class Qwen3VLTextModel(nnx.Module):
         return self.norm(hidden_states)
 
 
-# =============================================================================
-# Full Model
-# =============================================================================
-
-
 def merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array) -> Array:
     """Merge image embeddings into text sequence at masked positions."""
     img_indices = jnp.cumsum(token_mask) - 1
@@ -680,7 +635,7 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
 def make_causal_mask(cache: LayerCache, seq_len: int) -> Array:
     """Create causal attention mask."""
     cache_size = cache.size
-    cur_pos = cache.cur_ind.value
+    cur_pos = cache.cur_ind[...]
     seq_arange = jnp.arange(seq_len)
     cache_arange = jnp.arange(cache_size)
     mask = (seq_arange[:, None] + cur_pos) >= cache_arange[None, :]
@@ -712,7 +667,7 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
         batch, seq_len = input_ids.shape
 
         # Generate position embeddings
-        positions = jnp.arange(seq_len)[None, :] + cache[0].cur_ind.value
+        positions = jnp.arange(seq_len)[None, :] + cache[0].cur_ind[...]
         positions = jnp.broadcast_to(positions, (batch, seq_len))
         sin, cos = _generate_rope(positions, self.config.text_config.head_dim, self.config.text_config.rope_theta)
 
@@ -736,7 +691,7 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
         if self.lm_head is not None:
             logits = self.lm_head(hidden_states)
         else:
-            embedding = self.model.language_model.embed_tokens.embedding.value
+            embedding = self.model.language_model.embed_tokens.embedding[...]
             logits = jnp.matmul(hidden_states, embedding.T)
 
         return logits
@@ -749,11 +704,6 @@ class Qwen3VLModel(nnx.Module):
         self.config = config
         self.visual = Qwen3VLVisionModel(config.vision_config, rngs=rngs)
         self.language_model = Qwen3VLTextModel(config.text_config, rngs=rngs)
-
-
-# =============================================================================
-# JIT-compiled Inference Functions
-# =============================================================================
 
 
 @jax.jit

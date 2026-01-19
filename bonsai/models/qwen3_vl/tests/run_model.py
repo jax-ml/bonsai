@@ -1,14 +1,3 @@
-"""Run Qwen3-VL JAX model with fast text generation using KV-cache.
-
-This script demonstrates:
-1. Loading a pretrained Qwen3-VL model
-2. Fast generation with JIT-compiled forward and KV-cache
-3. Text-only and Image+Text inputs
-
-Usage:
-    python run_model.py
-"""
-
 import time
 
 import jax.numpy as jnp
@@ -192,7 +181,7 @@ def main():
     print(f"\nInput: {seq_len2} tokens")
 
     cache2 = modeling.init_cache(flax_config, 1, seq_len2, generate_steps=100)
-    generated_ids2 = generate(flax_model, cache2, input_ids2, max_new_tokens=20)
+    generated_ids2 = generate(flax_model, cache2, input_ids2, max_new_tokens=60)
 
     generated_ids_trimmed2 = generated_ids2[:, seq_len2:]
     output_text2 = processor.batch_decode(
@@ -219,9 +208,9 @@ def main():
             "content": [
                 {
                     "type": "image",
-                    "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/image_processor_example.png",
+                    "image": "/teamspace/studios/this_studio/opensource/bonsai/bonsai/models/qwen3_vl/tests/image.jpg",  # (256 * 256)
                 },
-                {"type": "text", "text": "What is in this image? Answer briefly."},
+                {"type": "text", "text": "What is in this image? Answer in detail"},
             ],
         }
     ]
@@ -253,7 +242,7 @@ def main():
         print(f"   Image tokens in sequence: {int(token_type_ids.sum())}")
 
         # Initialize cache
-        cache_vision = modeling.init_cache(flax_config, 1, seq_len_vision, generate_steps=100)
+        cache_vision = modeling.init_cache(flax_config, 1, seq_len_vision, generate_steps=200)
 
         print("\n4. Generating with vision...")
         generated_ids_vision = generate_with_vision(
@@ -263,7 +252,7 @@ def main():
             pixel_values,
             image_grid_thw,
             token_type_ids,
-            max_new_tokens=50,
+            max_new_tokens=200,
         )
 
         # Decode

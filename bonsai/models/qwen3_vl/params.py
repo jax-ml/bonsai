@@ -1,23 +1,3 @@
-# Copyright 2025 The JAX Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""Parameter loading utilities for Qwen3-VL.
-
-Loads pretrained weights from HuggingFace safetensors format and converts
-to JAX/Flax NNX model structure.
-"""
-
 import gc
 import re
 from enum import Enum
@@ -27,18 +7,11 @@ import jax
 import safetensors
 from flax import nnx
 
-from . import modeling as model_lib
+from bonsai.models.qwen3_vl import modeling as model_lib
 
 
 class Transform(Enum):
-    """Weight transformation specifications.
-
-    Each value is (permute_axes, reshape, reshape_first).
-    - permute_axes: Tuple of axis permutation, or None
-    - reshape: Target shape, or None
-    - reshape_first: If True, reshape before permute
-    """
-
+    # (Permute_axes, reshape, reshape_first)
     DEFAULT = (None, None, False)
     BIAS = (None, None, False)
     LINEAR = ((1, 0), None, False)  # PyTorch (out, in) -> JAX (in, out)
@@ -55,7 +28,7 @@ def _get_vision_key_mapping():
         # PyTorch Conv3d: (out_channels, in_channels, D, H, W)
         r"^model\.visual\.patch_embed\.proj\.weight$": (
             "model.visual.patch_embed.proj.kernel",
-            Transform.CONV3D,  # (O, C, D, H, W) -> (D, H, W, C, O)
+            Transform.CONV3D,
         ),
         r"^model\.visual\.patch_embed\.proj\.bias$": (
             "model.visual.patch_embed.proj.bias",
