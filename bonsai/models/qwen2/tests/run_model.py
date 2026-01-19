@@ -1,9 +1,9 @@
 import jax
-import os
 import jax.numpy as jnp
 import numpy as np
 from jax import P
 from jax._src.mesh import AxisType
+from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 from bonsai.models.qwen2 import modeling, params
@@ -25,9 +25,9 @@ def tokenize(tokenizer, input: list[str], shd: P | None = None):
 
 def run_model():
 
-    model_ckpt_path = os.path.expanduser("~/.cache/modelscope/hub/models/Qwen/Qwen2-7B")
+    model_name = "Qwen/Qwen2-7B"
+    model_ckpt_path = snapshot_download(model_name)
 
-    # Disable sharding - run on single GPU
     config = modeling.ModelConfig.qwen2_7b(use_sharding=False)
     # mesh, batch_shd = None, None
 
@@ -40,8 +40,7 @@ def run_model():
     ]
 
     tokenizer = AutoTokenizer.from_pretrained(
-        model_ckpt_path,
-        local_files_only=True,
+        model_name,
         trust_remote_code=True,
     )
 

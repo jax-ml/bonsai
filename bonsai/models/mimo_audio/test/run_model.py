@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from flax import nnx
+from huggingface_hub import snapshot_download
 
 
 def load_audio_tokenizer(tokenizer_path: str):
@@ -217,13 +218,11 @@ def run_inference(
 
 def main():
 
-    """Replace it with the real model file location"""
-    model_path = os.path.expanduser(
-        "~/.cache/modelscope/hub/models/XiaomiMiMo/MiMo-Audio-7B-Instruct"
-    )
-    tokenizer_path = os.path.expanduser(
-        "~/.cache/modelscope/hub/models/XiaomiMiMo/MiMo-Audio-Tokenizer"
-    )
+    model_name = "XiaomiMiMo/MiMo-Audio-7B-Instruct"
+    tokenizer_name = "XiaomiMiMo/MiMo-Audio-Tokenizer"
+
+    model_path = snapshot_download(model_name)
+    tokenizer_path = snapshot_download(tokenizer_name)
 
     tokenizer_model, tokenizer_config = load_audio_tokenizer(tokenizer_path)
     main_model, config, args, text_tokenizer = load_main_model(model_path)
