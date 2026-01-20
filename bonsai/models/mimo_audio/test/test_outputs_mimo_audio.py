@@ -15,6 +15,9 @@ from transformers.masking_utils import create_causal_mask
 
 from bonsai.models.mimo_audio import params
 from bonsai.models.mimo_audio.mimo_audio_configuration import MiMoAudioConfig, MiMoAudioArguments
+
+# Since the transformer library does not yet support mimo-audio-tokenizer,
+# during testing, the official implementation code of mimo-audio-tokenizer (https://github.com/XiaomiMiMo/MiMo-Audio) needs to be copied to the corresponding location.
 from bonsai.models.mimo_audio.pytorch.src.mimo_audio.modeling_mimo_audio import (
     MiMoAudioForCausalLM as TorchMiMoAudio,
     MiMoAudioConfig as TorchMiMoAudioConfig,
