@@ -63,8 +63,7 @@ class TestModuleForwardPasses(absltest.TestCase):
             attention_mask = torch.ones((batch_size, seq_length), dtype=torch.bool, device=input_embeddings.device)
 
         causal_mask = torch.triu(
-            torch.ones((seq_length, seq_length), dtype=torch.bool, device=input_embeddings.device),
-            diagonal=1
+            torch.ones((seq_length, seq_length), dtype=torch.bool, device=input_embeddings.device), diagonal=1
         )
         causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)
         causal_mask = causal_mask.expand(batch_size, 1, seq_length, seq_length)
@@ -92,9 +91,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
     def _process_hf_tokens(self, query: list[str]):
         messages = [{"role": "user", "content": s} for s in query]
-        text = [
-            self.tokenizer.apply_chat_template([m], tokenize=False, add_generation_prompt=True) for m in messages
-        ]
+        text = [self.tokenizer.apply_chat_template([m], tokenize=False, add_generation_prompt=True) for m in messages]
         model_inputs = self.tokenizer(text, return_tensors="pt", padding=True, padding_side="left").to(
             self.torch_model.device
         )

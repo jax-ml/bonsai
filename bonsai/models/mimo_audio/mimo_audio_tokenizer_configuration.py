@@ -12,11 +12,6 @@ ShardingSpec = P
 
 @dataclass(slots=True, frozen=True)
 class MiMoShardingCfg:
-    """Sharding configuration for MiMo Audio Tokenizer.
-
-    Controls how model parameters and activations are distributed across devices.
-    """
-    # Conv layer weight sharding
     conv_weight: ShardingSpec  # (in_channels, out_channels, kernel_size)
     conv_bias: ShardingSpec  # (out_channels,)
 
@@ -106,51 +101,51 @@ class MiMoAudioTokenizerConfig(PretrainedConfig):
     model_type = "mimo_audio_tokenizer"
 
     def __init__(
-            self,
-            max_audio_seconds: int = 1800,
-            stride_size: int = 2,
-            avg_pooler: int = 2,
-            d_model: int = 1280,
-            scale_embedding: bool = False,
-            kernel_size: int = 3,
-            activation_function: str = "gelu",
-            encoder_layers: int = 32,
-            encoder_skip_layer_id: int = 3,
-            encoder_attention_heads: int = 20,
-            encoder_ffn_dim: int = 5120,
-            encoder_causal: bool = False,
-            encoder_attn_window_size: list[int] = None,  # [-1,-1]
-            decoder_layers: int = 32,
-            decoder_attention_heads: int = 20,
-            decoder_ffn_dim: int = 5120,
-            decoder_kernel_size: int = 3,
-            decoder_stride_size: int = 2,
-            decoder_causal: bool = True,
-            decoder_attn_window_size: list[int] = None,  # [-1,-1]
-            nfft: int = 960,
-            vocoder_dim: int = 256,
-            vocoder_intermediate_dim: int = 1024,
-            vocoder_num_layers: int = 16,
-            n_mels: int = 128,
-            sampling_rate: int = 24000,
-            hop_length: int = 240,
-            window_size: int = 960,
-            vocoder_padding: str = "same",
-            fmin: int = 0,
-            fmax: int = None,
-            num_quantizers: int = 20,
-            codebook_size: list[int] = None,
-            # [1024,1024,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
-            threshold_ema_dead_code: int = 2,
-            position_embedding_type: str = "rope",
-            rope_theta: int = 10000,
-            rope_type: str = "default",
-            ln_type: str = "LayerNorm",
-            vocoder_attention_heads: int = 16,
-            vocoder_attn_window_size: list[int] = None,  # [40,10]
-            use_sharding: bool = False,
-            shd_cfg: MiMoShardingCfg | None = None,
-            **kwargs,
+        self,
+        max_audio_seconds: int = 1800,
+        stride_size: int = 2,
+        avg_pooler: int = 2,
+        d_model: int = 1280,
+        scale_embedding: bool = False,
+        kernel_size: int = 3,
+        activation_function: str = "gelu",
+        encoder_layers: int = 32,
+        encoder_skip_layer_id: int = 3,
+        encoder_attention_heads: int = 20,
+        encoder_ffn_dim: int = 5120,
+        encoder_causal: bool = False,
+        encoder_attn_window_size: list[int] = None,  # [-1,-1]
+        decoder_layers: int = 32,
+        decoder_attention_heads: int = 20,
+        decoder_ffn_dim: int = 5120,
+        decoder_kernel_size: int = 3,
+        decoder_stride_size: int = 2,
+        decoder_causal: bool = True,
+        decoder_attn_window_size: list[int] = None,  # [-1,-1]
+        nfft: int = 960,
+        vocoder_dim: int = 256,
+        vocoder_intermediate_dim: int = 1024,
+        vocoder_num_layers: int = 16,
+        n_mels: int = 128,
+        sampling_rate: int = 24000,
+        hop_length: int = 240,
+        window_size: int = 960,
+        vocoder_padding: str = "same",
+        fmin: int = 0,
+        fmax: int = None,
+        num_quantizers: int = 20,
+        codebook_size: list[int] = None,
+        # [1024,1024,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128,128]
+        threshold_ema_dead_code: int = 2,
+        position_embedding_type: str = "rope",
+        rope_theta: int = 10000,
+        rope_type: str = "default",
+        ln_type: str = "LayerNorm",
+        vocoder_attention_heads: int = 16,
+        vocoder_attn_window_size: list[int] = None,  # [40,10]
+        use_sharding: bool = False,
+        shd_cfg: MiMoShardingCfg | None = None,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self.max_audio_seconds = max_audio_seconds
@@ -165,22 +160,14 @@ class MiMoAudioTokenizerConfig(PretrainedConfig):
         self.encoder_attention_heads = encoder_attention_heads
         self.encoder_ffn_dim = encoder_ffn_dim
         self.encoder_causal = encoder_causal
-        self.encoder_attn_window_size = (
-            encoder_attn_window_size
-            if encoder_attn_window_size is not None
-            else [-1, -1]
-        )
+        self.encoder_attn_window_size = encoder_attn_window_size if encoder_attn_window_size is not None else [-1, -1]
         self.decoder_layers = decoder_layers
         self.decoder_attention_heads = decoder_attention_heads
         self.decoder_ffn_dim = decoder_ffn_dim
         self.decoder_kernel_size = decoder_kernel_size
         self.decoder_stride_size = decoder_stride_size
         self.decoder_causal = decoder_causal
-        self.decoder_attn_window_size = (
-            decoder_attn_window_size
-            if decoder_attn_window_size is not None
-            else [-1, -1]
-        )
+        self.decoder_attn_window_size = decoder_attn_window_size if decoder_attn_window_size is not None else [-1, -1]
         self.nfft = nfft
         self.vocoder_dim = vocoder_dim
         self.vocoder_intermediate_dim = vocoder_intermediate_dim
@@ -200,11 +187,7 @@ class MiMoAudioTokenizerConfig(PretrainedConfig):
         self.rope_type = rope_type
         self.ln_type = ln_type
         self.vocoder_attention_heads = vocoder_attention_heads
-        self.vocoder_attn_window_size = (
-            vocoder_attn_window_size
-            if vocoder_attn_window_size is not None
-            else [40, 10]
-        )
+        self.vocoder_attn_window_size = vocoder_attn_window_size if vocoder_attn_window_size is not None else [40, 10]
 
         # Sharding configuration
         if shd_cfg is None:

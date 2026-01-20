@@ -47,19 +47,17 @@ def apply_rotary(x: Array, cos: Array, sin: Array) -> Array:
 
 
 class MelSpectrogram:
-    """Mel spectrogram computation for audio processing."""
-
     def __init__(
-            self,
-            sample_rate: int,
-            n_fft: int,
-            hop_length: int,
-            win_length: int,
-            f_min: float,
-            f_max: float,
-            n_mels: int,
-            power: float = 1.0,
-            center: bool = True,
+        self,
+        sample_rate: int,
+        n_fft: int,
+        hop_length: int,
+        win_length: int,
+        f_min: float,
+        f_max: float,
+        n_mels: int,
+        power: float = 1.0,
+        center: bool = True,
     ) -> None:
         self.sample_rate = int(sample_rate)
         self.n_fft = int(n_fft)
@@ -132,9 +130,7 @@ class MelSpectrogram:
             num_frames = 1
 
         starts = [idx * self.hop_length for idx in range(num_frames)]
-        frames = jnp.stack(
-            [waveform[start: start + frame_length] for start in starts], axis=0
-        )
+        frames = jnp.stack([waveform[start : start + frame_length] for start in starts], axis=0)
         return frames
 
     def _mel_spectrogram(self, waveform: jnp.ndarray) -> jnp.ndarray:
@@ -200,11 +196,16 @@ class RotaryEmbedding(nnx.Module):
 
 
 class ConvTranspose1d(nnx.Module):
-    """Custom 1D transposed convolution for specific audio processing requirements."""
-
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int,
-                 shd_cfg: MiMoShardingCfg | None = None,
-                 dtype=jnp.float32, rngs: Optional[nnx.Rngs] = None):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int,
+        shd_cfg: MiMoShardingCfg | None = None,
+        dtype=jnp.float32,
+        rngs: Optional[nnx.Rngs] = None,
+    ):
         self.stride = stride
         self.shd_cfg = shd_cfg or MiMoShardingCfg.no_sharding()
 
@@ -230,8 +231,8 @@ class ConvTranspose1d(nnx.Module):
             lhs=lhs,
             rhs=rhs,
             window_strides=(1,),
-            padding='VALID',
-            dimension_numbers=('NCH', 'OIH', 'NCH'),
+            padding="VALID",
+            dimension_numbers=("NCH", "OIH", "NCH"),
         )
         y = y + self.bias.value[None, :, None]
         y = jnp.swapaxes(y, 1, 2)
@@ -239,18 +240,22 @@ class ConvTranspose1d(nnx.Module):
 
 
 class ISTFT(nnx.Module):
-    def __init__(self, n_fft: int, hop_length: int, win_length: int, padding: str = "same",
-                 shd_cfg: MiMoShardingCfg | None = None, dtype=jnp.float32):
+    def __init__(
+        self,
+        n_fft: int,
+        hop_length: int,
+        win_length: int,
+        padding: str = "same",
+        shd_cfg: MiMoShardingCfg | None = None,
+        dtype=jnp.float32,
+    ):
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.win_length = win_length
         self.padding = padding
         self.shd_cfg = shd_cfg or MiMoShardingCfg.no_sharding()
 
-        self.window = shard(
-            nnx.Param(jnp.hanning(win_length).astype(dtype)),
-            self.shd_cfg.istft_window
-        )
+        self.window = shard(nnx.Param(jnp.hanning(win_length).astype(dtype)), self.shd_cfg.istft_window)
 
         self.pad = (self.win_length - self.hop_length) // 2 if padding == "same" else 0
 
@@ -286,26 +291,31 @@ class ISTFT(nnx.Module):
 
         audio, env = jax.lax.fori_loop(0, num_frames, body, (audio, env))
         if self.pad > 0:
-            audio = audio[:, self.pad: -self.pad]
-            env = env[:, self.pad: -self.pad]
+            audio = audio[:, self.pad : -self.pad]
+            env = env[:, self.pad : -self.pad]
         env = jnp.maximum(env, 1e-11)
         audio = audio / env
         return audio
 
 
 class ISTFTHead(nnx.Module):
-    def __init__(self, dim: int, n_fft: int, hop_length: int, padding: str = "same",
-                 shd_cfg: MiMoShardingCfg | None = None,
-                 dtype=jnp.float32, rngs: Optional[nnx.Rngs] = None):
+    def __init__(
+        self,
+        dim: int,
+        n_fft: int,
+        hop_length: int,
+        padding: str = "same",
+        shd_cfg: MiMoShardingCfg | None = None,
+        dtype=jnp.float32,
+        rngs: Optional[nnx.Rngs] = None,
+    ):
         self.shd_cfg = shd_cfg or MiMoShardingCfg.no_sharding()
 
-        self.linear = shard(
-            nnx.Linear(dim, n_fft + 2, dtype=dtype, rngs=rngs),
-            self.shd_cfg.istft_linear_weight
-        )
+        self.linear = shard(nnx.Linear(dim, n_fft + 2, dtype=dtype, rngs=rngs), self.shd_cfg.istft_linear_weight)
 
-        self.istft = ISTFT(n_fft=n_fft, hop_length=hop_length, win_length=n_fft,
-                           padding=padding, shd_cfg=self.shd_cfg, dtype=dtype)
+        self.istft = ISTFT(
+            n_fft=n_fft, hop_length=hop_length, win_length=n_fft, padding=padding, shd_cfg=self.shd_cfg, dtype=dtype
+        )
 
     def __call__(self, hidden_states: Array) -> Array:
         x = self.linear(hidden_states)
@@ -327,9 +337,16 @@ class ISTFTHead(nnx.Module):
 
 
 class Attention(nnx.Module):
-    def __init__(self, embed_dim: int, num_heads: int, window_size: Tuple[int, int], causal: bool,
-                 shd_cfg: MiMoShardingCfg, dtype=jnp.float32,
-                 rngs: Optional[nnx.Rngs] = None):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        window_size: Tuple[int, int],
+        causal: bool,
+        shd_cfg: MiMoShardingCfg,
+        dtype=jnp.float32,
+        rngs: Optional[nnx.Rngs] = None,
+    ):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
@@ -339,21 +356,15 @@ class Attention(nnx.Module):
         self.shd_cfg = shd_cfg
 
         self.q_proj = shard(
-            nnx.Linear(embed_dim, embed_dim, use_bias=True, dtype=dtype, rngs=rngs),
-            shd_cfg.attn_qkvo_weight
+            nnx.Linear(embed_dim, embed_dim, use_bias=True, dtype=dtype, rngs=rngs), shd_cfg.attn_qkvo_weight
         )
         self.k_proj = shard(
-            nnx.Linear(embed_dim, embed_dim, use_bias=False, dtype=dtype, rngs=rngs),
-            shd_cfg.attn_qkvo_weight
+            nnx.Linear(embed_dim, embed_dim, use_bias=False, dtype=dtype, rngs=rngs), shd_cfg.attn_qkvo_weight
         )
         self.v_proj = shard(
-            nnx.Linear(embed_dim, embed_dim, use_bias=True, dtype=dtype, rngs=rngs),
-            shd_cfg.attn_qkvo_weight
+            nnx.Linear(embed_dim, embed_dim, use_bias=True, dtype=dtype, rngs=rngs), shd_cfg.attn_qkvo_weight
         )
-        self.out_proj = shard(
-            nnx.Linear(embed_dim, embed_dim, dtype=dtype, rngs=rngs),
-            shd_cfg.attn_qkvo_weight
-        )
+        self.out_proj = shard(nnx.Linear(embed_dim, embed_dim, dtype=dtype, rngs=rngs), shd_cfg.attn_qkvo_weight)
 
     def _window_mask(self, seq_len: int) -> Optional[Array]:
         left, right = self.window_size
@@ -409,32 +420,31 @@ class Attention(nnx.Module):
 
 
 class TransformerLayer(nnx.Module):
-    def __init__(self, d_model: int, attention_heads: int, ffn_dim: int, causal: bool,
-                 attn_window_size: Tuple[int, int], shd_cfg: MiMoShardingCfg, dtype=jnp.float32,
-                 rngs: Optional[nnx.Rngs] = None):
+    def __init__(
+        self,
+        d_model: int,
+        attention_heads: int,
+        ffn_dim: int,
+        causal: bool,
+        attn_window_size: Tuple[int, int],
+        shd_cfg: MiMoShardingCfg,
+        dtype=jnp.float32,
+        rngs: Optional[nnx.Rngs] = None,
+    ):
         self.act = jax.nn.gelu
         self.shd_cfg = shd_cfg
 
-        self.self_attn = Attention(d_model, attention_heads, attn_window_size, causal,
-                                   shd_cfg, dtype=dtype, rngs=rngs)
+        self.self_attn = Attention(d_model, attention_heads, attn_window_size, causal, shd_cfg, dtype=dtype, rngs=rngs)
 
         self.self_attn_layer_norm = shard(
-            nnx.LayerNorm(d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs),
-            shd_cfg.norm_scale
+            nnx.LayerNorm(d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs), shd_cfg.norm_scale
         )
         self.final_layer_norm = shard(
-            nnx.LayerNorm(d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs),
-            shd_cfg.norm_scale
+            nnx.LayerNorm(d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs), shd_cfg.norm_scale
         )
 
-        self.fc1 = shard(
-            nnx.Linear(d_model, ffn_dim, dtype=dtype, rngs=rngs),
-            shd_cfg.ffn_weight_in
-        )
-        self.fc2 = shard(
-            nnx.Linear(ffn_dim, d_model, dtype=dtype, rngs=rngs),
-            shd_cfg.ffn_weight_out
-        )
+        self.fc1 = shard(nnx.Linear(d_model, ffn_dim, dtype=dtype, rngs=rngs), shd_cfg.ffn_weight_in)
+        self.fc2 = shard(nnx.Linear(ffn_dim, d_model, dtype=dtype, rngs=rngs), shd_cfg.ffn_weight_out)
 
     def __call__(self, hidden_states: Array, mask: Optional[Array], rope: Optional[Tuple[Array, Array]]) -> Array:
         residual = hidden_states
@@ -451,9 +461,15 @@ class TransformerLayer(nnx.Module):
 
 
 class ResidualVectorQuantizer(nnx.Module):
-    def __init__(self, dimension: int, n_q: int, bins: Sequence[int],
-                 shd_cfg: MiMoShardingCfg, dtype=jnp.float32,
-                 rngs: Optional[nnx.Rngs] = None):
+    def __init__(
+        self,
+        dimension: int,
+        n_q: int,
+        bins: Sequence[int],
+        shd_cfg: MiMoShardingCfg,
+        dtype=jnp.float32,
+        rngs: Optional[nnx.Rngs] = None,
+    ):
         self.dimension = dimension
         self.n_q = n_q
         self.shd_cfg = shd_cfg
@@ -465,8 +481,9 @@ class ResidualVectorQuantizer(nnx.Module):
             codebooks_list.append(shard(nnx.Param(embed), shd_cfg.codebook))
         self.codebooks = nnx.List(codebooks_list)
 
-    def encode(self, hidden_states: Array, mask: Optional[Array] = None, n_q: Optional[int] = None) -> Tuple[
-        Array, Array]:
+    def encode(
+        self, hidden_states: Array, mask: Optional[Array] = None, n_q: Optional[int] = None
+    ) -> Tuple[Array, Array]:
         num_levels = n_q or self.n_q
         residual = hidden_states
         quantized = jnp.zeros_like(hidden_states)
@@ -506,9 +523,9 @@ class AudioEncoder(nnx.Module):
                 kernel_size=config.kernel_size,
                 padding=1,
                 param_dtype=dtype,
-                rngs=rngs
+                rngs=rngs,
             ),
-            self.shd_cfg.conv_weight
+            self.shd_cfg.conv_weight,
         )
         self.conv2 = shard(
             nnx.Conv(
@@ -518,25 +535,37 @@ class AudioEncoder(nnx.Module):
                 strides=config.stride_size,
                 padding=1,
                 param_dtype=dtype,
-                rngs=rngs
+                rngs=rngs,
             ),
-            self.shd_cfg.conv_weight
+            self.shd_cfg.conv_weight,
         )
 
-        self.position_embedding = RotaryEmbedding(config.rope_theta, config.d_model // config.encoder_attention_heads,
-                                                  config.max_audio_seconds * config.sampling_rate // config.hop_length,
-                                                  config.rope_type, dtype=dtype)
+        self.position_embedding = RotaryEmbedding(
+            config.rope_theta,
+            config.d_model // config.encoder_attention_heads,
+            config.max_audio_seconds * config.sampling_rate // config.hop_length,
+            config.rope_type,
+            dtype=dtype,
+        )
 
-        self.layers = nnx.List([
-            TransformerLayer(config.d_model, config.encoder_attention_heads, config.encoder_ffn_dim,
-                             config.encoder_causal, tuple(config.encoder_attn_window_size),
-                             self.shd_cfg, dtype=dtype, rngs=rngs)
-            for _ in range(config.encoder_layers)
-        ])
+        self.layers = nnx.List(
+            [
+                TransformerLayer(
+                    config.d_model,
+                    config.encoder_attention_heads,
+                    config.encoder_ffn_dim,
+                    config.encoder_causal,
+                    tuple(config.encoder_attn_window_size),
+                    self.shd_cfg,
+                    dtype=dtype,
+                    rngs=rngs,
+                )
+                for _ in range(config.encoder_layers)
+            ]
+        )
 
         self.layer_norm = shard(
-            nnx.LayerNorm(config.d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs),
-            self.shd_cfg.norm_scale
+            nnx.LayerNorm(config.d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs), self.shd_cfg.norm_scale
         )
 
         if config.avg_pooler != 1:
@@ -549,13 +578,12 @@ class AudioEncoder(nnx.Module):
                     padding="SAME",
                     use_bias=False,
                     param_dtype=dtype,
-                    rngs=rngs
+                    rngs=rngs,
                 ),
-                self.shd_cfg.conv_weight
+                self.shd_cfg.conv_weight,
             )
             self.down_norm = shard(
-                nnx.LayerNorm(config.d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs),
-                self.shd_cfg.norm_scale
+                nnx.LayerNorm(config.d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs), self.shd_cfg.norm_scale
             )
         else:
             self.down_sample_layer = None
@@ -563,8 +591,9 @@ class AudioEncoder(nnx.Module):
 
         if config.num_quantizers:
             bins = config.codebook_size or [1024]
-            self.quantizer = ResidualVectorQuantizer(config.d_model, config.num_quantizers, bins,
-                                                     self.shd_cfg, dtype=dtype, rngs=rngs)
+            self.quantizer = ResidualVectorQuantizer(
+                config.d_model, config.num_quantizers, bins, self.shd_cfg, dtype=dtype, rngs=rngs
+            )
         else:
             self.quantizer = None
 
@@ -572,8 +601,9 @@ class AudioEncoder(nnx.Module):
         tgt = mel_len + 3 - self.config.kernel_size
         return (tgt + 2 - self.config.kernel_size) // self.config.stride_size + 1
 
-    def __call__(self, input_features: Array, input_lens: Array, use_quantizer: bool = True,
-                 n_q: Optional[int] = None) -> EncoderOutput:
+    def __call__(
+        self, input_features: Array, input_lens: Array, use_quantizer: bool = True, n_q: Optional[int] = None
+    ) -> EncoderOutput:
         x = input_features
         x = jax.nn.gelu(self.conv1(x))
         x = shard(x, self.shd_cfg.act_btd)
@@ -598,7 +628,8 @@ class AudioEncoder(nnx.Module):
             x = shard(x, self.shd_cfg.act_btd)
 
             lengths = (lengths // self.config.avg_pooler) + ((lengths % self.config.avg_pooler) != 0).astype(
-                lengths.dtype)
+                lengths.dtype
+            )
             max_len = x.shape[1]
             mask = make_sequence_mask(lengths, max_len)
             x = self.down_norm(x)
@@ -619,18 +650,25 @@ class AudioEncoder(nnx.Module):
 
 
 class CausalConvTranspose1d(nnx.Module):
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int,
-                 shd_cfg: MiMoShardingCfg | None = None,
-                 dtype=jnp.float32, rngs: Optional[nnx.Rngs] = None):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int,
+        shd_cfg: MiMoShardingCfg | None = None,
+        dtype=jnp.float32,
+        rngs: Optional[nnx.Rngs] = None,
+    ):
         self.shd_cfg = shd_cfg or MiMoShardingCfg.no_sharding()
 
-        self.conv = ConvTranspose1d(in_channels, out_channels, kernel_size, stride,
-                                    shd_cfg=self.shd_cfg, dtype=dtype, rngs=rngs)
+        self.conv = ConvTranspose1d(
+            in_channels, out_channels, kernel_size, stride, shd_cfg=self.shd_cfg, dtype=dtype, rngs=rngs
+        )
 
         self.norm = shard(
-            nnx.GroupNorm(num_features=out_channels, num_groups=1, epsilon=1e-5,
-                          param_dtype=dtype, rngs=rngs),
-            self.shd_cfg.norm_scale
+            nnx.GroupNorm(num_features=out_channels, num_groups=1, epsilon=1e-5, param_dtype=dtype, rngs=rngs),
+            self.shd_cfg.norm_scale,
         )
 
         self.kernel_size = kernel_size
@@ -653,29 +691,46 @@ class TransformerVocos(nnx.Module):
 
         self.embeddings = shard(
             nnx.Linear(config.n_mels, config.vocoder_dim, use_bias=False, dtype=dtype, rngs=rngs),
-            self.shd_cfg.attn_qkvo_weight
+            self.shd_cfg.attn_qkvo_weight,
         )
 
-        self.position_embedding = RotaryEmbedding(config.rope_theta,
-                                                  config.vocoder_dim // config.vocoder_attention_heads,
-                                                  config.max_audio_seconds * config.sampling_rate // config.hop_length,
-                                                  config.rope_type, dtype=dtype)
+        self.position_embedding = RotaryEmbedding(
+            config.rope_theta,
+            config.vocoder_dim // config.vocoder_attention_heads,
+            config.max_audio_seconds * config.sampling_rate // config.hop_length,
+            config.rope_type,
+            dtype=dtype,
+        )
 
-        self.layers = nnx.List([
-            TransformerLayer(config.vocoder_dim, config.vocoder_attention_heads, config.vocoder_intermediate_dim,
-                             False, tuple(config.vocoder_attn_window_size),
-                             self.shd_cfg, dtype=dtype, rngs=rngs)
-            for _ in range(config.vocoder_num_layers)
-        ])
+        self.layers = nnx.List(
+            [
+                TransformerLayer(
+                    config.vocoder_dim,
+                    config.vocoder_attention_heads,
+                    config.vocoder_intermediate_dim,
+                    False,
+                    tuple(config.vocoder_attn_window_size),
+                    self.shd_cfg,
+                    dtype=dtype,
+                    rngs=rngs,
+                )
+                for _ in range(config.vocoder_num_layers)
+            ]
+        )
 
         self.layer_norm = shard(
-            nnx.LayerNorm(config.vocoder_dim, epsilon=1e-6, param_dtype=dtype, rngs=rngs),
-            self.shd_cfg.norm_scale
+            nnx.LayerNorm(config.vocoder_dim, epsilon=1e-6, param_dtype=dtype, rngs=rngs), self.shd_cfg.norm_scale
         )
 
-        self.head = ISTFTHead(config.vocoder_dim, config.nfft, config.hop_length,
-                              config.vocoder_padding, shd_cfg=self.shd_cfg,
-                              dtype=dtype, rngs=rngs)
+        self.head = ISTFTHead(
+            config.vocoder_dim,
+            config.nfft,
+            config.hop_length,
+            config.vocoder_padding,
+            shd_cfg=self.shd_cfg,
+            dtype=dtype,
+            rngs=rngs,
+        )
 
     def __call__(self, mels: Array, input_length: Array) -> VocoderOutput:
         x = self.embeddings(mels)
@@ -698,31 +753,55 @@ class AudioDecoder(nnx.Module):
         self.shd_cfg = config.shd_cfg
 
         if config.avg_pooler != 1:
-            self.dconv1 = CausalConvTranspose1d(config.d_model, config.d_model, config.avg_pooler,
-                                                config.avg_pooler, shd_cfg=self.shd_cfg,
-                                                dtype=dtype, rngs=rngs)
+            self.dconv1 = CausalConvTranspose1d(
+                config.d_model,
+                config.d_model,
+                config.avg_pooler,
+                config.avg_pooler,
+                shd_cfg=self.shd_cfg,
+                dtype=dtype,
+                rngs=rngs,
+            )
         else:
             self.dconv1 = None
 
-        self.position_embedding = RotaryEmbedding(config.rope_theta, config.d_model // config.decoder_attention_heads,
-                                                  config.max_audio_seconds * config.sampling_rate // config.hop_length,
-                                                  config.rope_type, dtype=dtype)
-
-        self.layers = nnx.List([
-            TransformerLayer(config.d_model, config.decoder_attention_heads, config.decoder_ffn_dim,
-                             config.decoder_causal, tuple(config.decoder_attn_window_size),
-                             self.shd_cfg, dtype=dtype, rngs=rngs)
-            for _ in range(config.decoder_layers)
-        ])
-
-        self.layer_norm = shard(
-            nnx.LayerNorm(config.d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs),
-            self.shd_cfg.norm_scale
+        self.position_embedding = RotaryEmbedding(
+            config.rope_theta,
+            config.d_model // config.decoder_attention_heads,
+            config.max_audio_seconds * config.sampling_rate // config.hop_length,
+            config.rope_type,
+            dtype=dtype,
         )
 
-        self.dconv2 = CausalConvTranspose1d(config.d_model, config.n_mels, config.decoder_kernel_size,
-                                            config.decoder_stride_size, shd_cfg=self.shd_cfg,
-                                            dtype=dtype, rngs=rngs)
+        self.layers = nnx.List(
+            [
+                TransformerLayer(
+                    config.d_model,
+                    config.decoder_attention_heads,
+                    config.decoder_ffn_dim,
+                    config.decoder_causal,
+                    tuple(config.decoder_attn_window_size),
+                    self.shd_cfg,
+                    dtype=dtype,
+                    rngs=rngs,
+                )
+                for _ in range(config.decoder_layers)
+            ]
+        )
+
+        self.layer_norm = shard(
+            nnx.LayerNorm(config.d_model, epsilon=1e-6, param_dtype=dtype, rngs=rngs), self.shd_cfg.norm_scale
+        )
+
+        self.dconv2 = CausalConvTranspose1d(
+            config.d_model,
+            config.n_mels,
+            config.decoder_kernel_size,
+            config.decoder_stride_size,
+            shd_cfg=self.shd_cfg,
+            dtype=dtype,
+            rngs=rngs,
+        )
 
         self.vocoder = TransformerVocos(config, dtype=dtype, rngs=rngs)
 
@@ -753,8 +832,9 @@ class FlaxMiMoAudioTokenizer(nnx.Module):
         enc = self.encoder(mels, input_lens, use_quantizer=use_quantizer)
         return self.decoder(enc.hidden_states, enc.output_lengths)
 
-    def encode(self, mels: Array, input_lens: Array, use_quantizer: bool = True,
-               n_q: Optional[int] = None) -> EncoderOutput:
+    def encode(
+        self, mels: Array, input_lens: Array, use_quantizer: bool = True, n_q: Optional[int] = None
+    ) -> EncoderOutput:
         return self.encoder(mels, input_lens, use_quantizer=use_quantizer, n_q=n_q)
 
     def decode(self, codes: Array) -> Array:

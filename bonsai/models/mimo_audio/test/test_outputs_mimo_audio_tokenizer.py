@@ -58,8 +58,7 @@ class TestMiMoAudioTokenizerOutputs(absltest.TestCase):
             config_dict = json.load(f)
         jax_config = JaxTokenizerConfig(**config_dict, use_sharding=False)
         cls.nnx_model = load_tokenizer_weights_from_safetensors(
-            config=jax_config, safetensors_path=safetensors_path,
-            dtype=jnp.float32, mesh=None, rngs=nnx.Rngs(params=0)
+            config=jax_config, safetensors_path=safetensors_path, dtype=jnp.float32, mesh=None, rngs=nnx.Rngs(params=0)
         )
 
         cls.batch_size = 1
@@ -72,8 +71,11 @@ class TestMiMoAudioTokenizerOutputs(absltest.TestCase):
         if ty.dim() == 2 and jy.ndim == 3:
             ty = ty.unsqueeze(0)
         torch.testing.assert_close(
-            torch.tensor(np.array(jy, dtype=np.float32)), ty,
-            rtol=self.tol, atol=self.tol, check_dtype=False,
+            torch.tensor(np.array(jy, dtype=np.float32)),
+            ty,
+            rtol=self.tol,
+            atol=self.tol,
+            check_dtype=False,
         )
 
     def test_encoder_conv1(self):
@@ -172,9 +174,13 @@ class TestMiMoAudioTokenizerOutputs(absltest.TestCase):
         ty = self.torch_model.decoder.vocoder.head(x)
 
         torch.testing.assert_close(
-            torch.tensor(np.array(jy, dtype=np.float32)), ty,
-            rtol=1e-2, atol=1e-2, check_dtype=False,
+            torch.tensor(np.array(jy, dtype=np.float32)),
+            ty,
+            rtol=1e-2,
+            atol=1e-2,
+            check_dtype=False,
         )
+
 
 if __name__ == "__main__":
     absltest.main()

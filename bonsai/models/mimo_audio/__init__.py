@@ -1,4 +1,3 @@
-from bonsai.models.mimo_audio.mimo_audio import MimoAudio
 from bonsai.models.mimo_audio.modeling import (
     MiMoAudioConfig,
     MiMoAudioArguments,
@@ -11,7 +10,6 @@ from bonsai.models.mimo_audio.mimo_audio_tokenizer import (
 )
 
 __all__ = [
-    "MimoAudio",
     "MiMoAudioConfig",
     "MiMoAudioArguments",
     "FlaxMiMoAudioForCausalLM",

@@ -7,15 +7,13 @@ from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 from bonsai.models.qwen2 import modeling, params
-from bonsai.utils import GreedySampler, Sampler
+from bonsai.utils import Sampler
 
 
 def tokenize(tokenizer, input: list[str], shd: P | None = None):
     pad_idx = tokenizer.pad_token_id
     lines = [
-        tokenizer.apply_chat_template(
-            [{"role": "user", "content": l}], tokenize=False, add_generation_prompt=True
-        )
+        tokenizer.apply_chat_template([{"role": "user", "content": l}], tokenize=False, add_generation_prompt=True)
         for l in input
     ]
     lines = [tokenizer.encode(line) for line in lines]
@@ -24,7 +22,6 @@ def tokenize(tokenizer, input: list[str], shd: P | None = None):
 
 
 def run_model():
-
     model_name = "Qwen/Qwen2-7B"
     model_ckpt_path = snapshot_download(model_name)
 
@@ -44,18 +41,12 @@ def run_model():
         trust_remote_code=True,
     )
 
-    print(f"Tokenizer special tokens:")
-    print(f"  eos_token: {tokenizer.eos_token} (ID: {tokenizer.eos_token_id})")
-    print(f"  pad_token: {tokenizer.pad_token} (ID: {tokenizer.pad_token_id})")
-
     print()
     tokens = tokenize(tokenizer, query, batch_shd)
     batch_size, token_len = tokens.shape
 
     generate_steps = 1024
-    print(f"\nLoading model...")
     model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh)
-    print(f"Model loaded successfully\n")
 
     cache = model.init_cache(config, batch_size, token_len, generate_steps)
 
@@ -70,23 +61,20 @@ def run_model():
 
     im_end_token_id = tokenizer.encode("<|im_end|>")[0]
     for i in range(generate_steps):
-        # CRITICAL: Split key for each step to avoid deterministic sampling
         key, subkey = jax.random.split(key)
         next_tokens = jit_sampler(logits, key=subkey)
 
         current_token_id = int(next_tokens.squeeze(-1)[0])
 
-        # Only check for actual EOS token
-        is_eos = (next_tokens.squeeze(-1) == tokenizer.eos_token_id)
-        is_im_end = (next_tokens.squeeze(-1) == im_end_token_id)
-
+        is_eos = next_tokens.squeeze(-1) == tokenizer.eos_token_id
+        is_im_end = next_tokens.squeeze(-1) == im_end_token_id
 
         finished = finished | is_eos | is_im_end
 
         tokens_list.append(next_tokens)
 
         if finished.all():
-            print(f"✓ Generation stopped at step {i+1}/{generate_steps} (EOS token reached)")
+            print(f"✓ Generation stopped at step {i + 1}/{generate_steps} (EOS token reached)")
             break
 
         # Continue generation

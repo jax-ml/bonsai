@@ -23,31 +23,24 @@ TRANSFORM_NONE = Transform()
 
 
 def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig) -> dict[str, tuple[str | None, Transform | None]]:
-    # For Linear layers, we only need simple transpose from PyTorch's (out, in) to JAX's (in, out)
-
     return {
         r"model\.embed_tokens\.weight": ("embedder.embedding", TRANSFORM_NONE),
-        # Attention projections: simple transpose for Linear layers
         r"model\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (r"layers.\1.attn.q_proj.kernel", TRANSFORM_LINEAR),
         r"model\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (r"layers.\1.attn.k_proj.kernel", TRANSFORM_LINEAR),
         r"model\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (r"layers.\1.attn.v_proj.kernel", TRANSFORM_LINEAR),
         r"model\.layers\.([0-9]+)\.self_attn\.o_proj\.weight": (r"layers.\1.attn.o_proj.kernel", TRANSFORM_LINEAR),
-        # Attention biases: no transformation needed
         r"model\.layers\.([0-9]+)\.self_attn\.q_proj\.bias": (r"layers.\1.attn.q_proj.bias", TRANSFORM_NONE),
         r"model\.layers\.([0-9]+)\.self_attn\.k_proj\.bias": (r"layers.\1.attn.k_proj.bias", TRANSFORM_NONE),
         r"model\.layers\.([0-9]+)\.self_attn\.v_proj\.bias": (r"layers.\1.attn.v_proj.bias", TRANSFORM_NONE),
-        # MLP projections
         r"model\.layers\.([0-9]+)\.mlp\.gate_proj\.weight": (r"layers.\1.mlp.gate_proj.kernel", TRANSFORM_LINEAR),
         r"model\.layers\.([0-9]+)\.mlp\.up_proj\.weight": (r"layers.\1.mlp.up_proj.kernel", TRANSFORM_LINEAR),
         r"model\.layers\.([0-9]+)\.mlp\.down_proj\.weight": (r"layers.\1.mlp.down_proj.kernel", TRANSFORM_LINEAR),
-        # Normalization layers
         r"model\.norm\.weight": ("final_norm.scale", TRANSFORM_NONE),
         r"model\.layers\.([0-9]+)\.input_layernorm\.weight": (r"layers.\1.input_layernorm.scale", TRANSFORM_NONE),
         r"model\.layers\.([0-9]+)\.post_attention_layernorm\.weight": (
             r"layers.\1.post_attention_layernorm.scale",
             TRANSFORM_NONE,
         ),
-        # LM head
         r"lm_head\.weight": ("lm_head.kernel", TRANSFORM_LINEAR),
     }
 

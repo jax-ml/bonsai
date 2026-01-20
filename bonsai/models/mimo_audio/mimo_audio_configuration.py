@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from bonsai.models.qwen3.modeling import ShardingCfg
 
 if TYPE_CHECKING:
@@ -8,8 +8,6 @@ if TYPE_CHECKING:
 
 @dataclass
 class MiMoAudioConfig:
-
-    # 主 Transformer 配置
     vocab_size: int = 151680
     hidden_size: int = 4096
     num_hidden_layers: int = 36
@@ -23,24 +21,21 @@ class MiMoAudioConfig:
     group_size: int = 4
     audio_channels: int = 8
 
-    # Local Transformer config
     local_dim: int = 1024
     local_layers: int = 16
     local_attn_heads: int = 64
     local_ffn_dim: int = 4096
     local_attn_dropout: float = 0.1
 
-    # Input Local Transformer config
     input_local_layers: int = 6
     input_local_dim: int = 1024
     input_full_attention: bool = True
 
-    # Sharding config
     shd_cfg: ShardingCfg = ShardingCfg.no_sharding()
 
     @classmethod
     def with_sharding(cls, **kwargs):
-        kwargs['shd_cfg'] = ShardingCfg.default()
+        kwargs["shd_cfg"] = ShardingCfg.default()
         return cls(**kwargs)
 
     def create_qwen2_config(self) -> "Qwen2Config":
@@ -80,14 +75,13 @@ class MiMoAudioConfig:
     def create_input_local_qwen2_config(self) -> "Qwen2Config":
         from bonsai.models.qwen2.modeling import ModelConfig as Qwen2Config
 
-        # input_full_attention=True -> use_causal_mask=False (bidirectional attention)
         return Qwen2Config(
             num_layers=6,
             vocab_size=151680,
             emb_dim=1024,
-            mlp_dim=4096,  # 1024 * 4
+            mlp_dim=4096,
             num_heads=64,
-            head_dim=16,  # 1024 // 64 = 16
+            head_dim=16,
             num_kv_heads=64,
             rope_theta=640000,
             norm_eps=1e-6,
@@ -99,7 +93,6 @@ class MiMoAudioConfig:
 
 @dataclass
 class MiMoAudioArguments:
-    """Arguments for special token indices"""
     model_name_or_path: str
     sosp_idx: int
     eosp_idx: int
@@ -111,7 +104,6 @@ class MiMoAudioArguments:
 
 @dataclass
 class MiMoSamplerConfig:
-    """Sampler configuration for text/audio generation"""
     do_sample: bool = True
     temperature: float = 1.0
     top_k: int = 50

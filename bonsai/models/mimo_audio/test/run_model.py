@@ -17,7 +17,7 @@ def load_audio_tokenizer(tokenizer_path: str):
     with open(config_path) as f:
         config_dict = json.load(f)
 
-    config_dict['use_sharding'] = False
+    config_dict["use_sharding"] = False
     config = MiMoAudioTokenizerConfig(**config_dict)
     safetensors_path = os.path.join(tokenizer_path, "model.safetensors")
 
@@ -30,6 +30,7 @@ def load_audio_tokenizer(tokenizer_path: str):
     )
 
     return tokenizer_model, config
+
 
 def load_main_model(model_path: str):
     from bonsai.models.mimo_audio.mimo_audio_configuration import MiMoAudioConfig, MiMoAudioArguments
@@ -63,6 +64,7 @@ def load_main_model(model_path: str):
 
     return model, config, args, text_tokenizer
 
+
 def insert_between(tokens: list, group_size: int, fill_value: int) -> list:
     if group_size <= 1:
         return tokens
@@ -84,7 +86,7 @@ def run_inference(
     tokenizer_config,
     text_to_speak: str,
     max_steps: int = 100,
-    output_dir: str = "test_outputs"
+    output_dir: str = "test_outputs",
 ):
     from bonsai.models.mimo_audio.modeling import forward_jit, MiMoSampler
     from bonsai.models.mimo_audio.mimo_audio_configuration import MiMoSamplerConfig
@@ -125,11 +127,8 @@ def run_inference(
     text_sampler = MiMoSampler(MiMoSamplerConfig(temperature=0.6, top_p=1.0, do_sample=True))
     audio_sampler = MiMoSampler(MiMoSamplerConfig(temperature=0.9, top_p=0.95, do_sample=True))
 
-
     pad_id = text_tokenizer.pad_token_id
-    text_logits, local_hidden_states, cache = forward_jit(
-        main_model, input_ids, cache, pad_id
-    )
+    text_logits, local_hidden_states, cache = forward_jit(main_model, input_ids, cache, pad_id)
 
     generated_text_tokens = []
     generated_audio_tokens_list = []
@@ -157,11 +156,7 @@ def run_inference(
                 generated_audio_tokens_list.append(audio_tokens_step)
         else:
             key, subkey = jax.random.split(key)
-            audio_tokens = main_model.local_forward(
-                local_hidden_states,
-                subkey,
-                audio_sampler
-            )
+            audio_tokens = main_model.local_forward(local_hidden_states, subkey, audio_sampler)
 
             for t in range(group_size):
                 audio_tokens_step = audio_tokens[0, t, :]
@@ -184,13 +179,10 @@ def run_inference(
                 for i in range(group_size):
                     next_input = next_input.at[0, ch + 1, i].set(audio_tokens[0, i, ch])
 
-        text_logits, local_hidden_states, cache = forward_jit(
-            main_model, next_input, cache, pad_id
-        )
+        text_logits, local_hidden_states, cache = forward_jit(main_model, next_input, cache, pad_id)
 
     generated_text = text_tokenizer.decode(generated_text_tokens, skip_special_tokens=True)
     print(f"text token output: {generated_text}")
-
 
     audio_tokens_array = jnp.stack(generated_audio_tokens_list, axis=0).T
 
@@ -202,12 +194,12 @@ def run_inference(
         not_empty = audio_tokens_array[ch, :] != empty_id
         is_real_audio_mask = is_real_audio_mask | not_empty
 
-
     audio_tokens_array = audio_tokens_array[:, is_real_audio_mask]
     decoded_audio = tokenizer_model.decode(audio_tokens_array)
     os.makedirs(output_dir, exist_ok=True)
 
     import soundfile as sf
+
     audio_path = os.path.join(output_dir, "generated_audio.wav")
     audio_np = np.array(decoded_audio[0, 0, :])
     sample_rate = tokenizer_config.sampling_rate
@@ -217,7 +209,6 @@ def run_inference(
 
 
 def main():
-
     model_name = "XiaomiMiMo/MiMo-Audio-7B-Instruct"
     tokenizer_name = "XiaomiMiMo/MiMo-Audio-Tokenizer"
 
@@ -227,10 +218,12 @@ def main():
     tokenizer_model, tokenizer_config = load_audio_tokenizer(tokenizer_path)
     main_model, config, args, text_tokenizer = load_main_model(model_path)
 
-    text_to_speak = ("And now here is my secret, a very simple secret:It is only with the heart that one can see rightly;"
-                     "What is essential is invisible to the eye.It's the time you wasted for your rose that makes your rose so important."
-                     "Men have forgotten this truth, but you must not forget it.You become responsible for what you have tamed."
-                     "You are responsible for your rose...")
+    text_to_speak = (
+        "And now here is my secret, a very simple secret:It is only with the heart that one can see rightly;"
+        "What is essential is invisible to the eye.It's the time you wasted for your rose that makes your rose so important."
+        "Men have forgotten this truth, but you must not forget it.You become responsible for what you have tamed."
+        "You are responsible for your rose..."
+    )
     run_inference(
         main_model=main_model,
         tokenizer_model=tokenizer_model,

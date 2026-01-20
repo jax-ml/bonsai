@@ -2,14 +2,10 @@ from typing import Optional, Tuple, List
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from bonsai.models.qwen2.modeling import Qwen2, ModelConfig as Qwen2Config, Cache
+from bonsai.models.qwen2.modeling import Qwen2, Cache
 from bonsai.models.qwen3.modeling import shard
 from bonsai.utils.samplers import Sampler, GreedySampler
-from bonsai.models.mimo_audio.mimo_audio_configuration import (
-    MiMoAudioConfig,
-    MiMoAudioArguments,
-    MiMoSamplerConfig
-)
+from bonsai.models.mimo_audio.mimo_audio_configuration import MiMoAudioConfig, MiMoAudioArguments, MiMoSamplerConfig
 
 
 class MiMoSampler:
@@ -18,19 +14,12 @@ class MiMoSampler:
     def __init__(self, config: MiMoSamplerConfig):
         self.config = config
         if config.do_sample:
-            self._sampler = Sampler(
-                temperature=config.temperature,
-                top_k=config.top_k,
-                top_p=config.top_p
-            )
+            self._sampler = Sampler(temperature=config.temperature, top_k=config.top_k, top_p=config.top_p)
         else:
             self._sampler = GreedySampler()
 
     def sample(
-            self,
-            logits: jnp.ndarray,
-            key: jax.random.PRNGKey,
-            removed_tokens: Optional[List[int]] = None
+        self, logits: jnp.ndarray, key: jax.random.PRNGKey, removed_tokens: Optional[List[int]] = None
     ) -> jnp.ndarray:
         if removed_tokens:
             for t in removed_tokens:
@@ -42,11 +31,11 @@ class MiMoSampler:
 
 class FlaxMiMoAudioForCausalLM(nnx.Module):
     def __init__(
-            self,
-            config: MiMoAudioConfig,
-            args: MiMoAudioArguments,
-            rngs: Optional[nnx.Rngs] = None,
-            dtype: jnp.dtype = jnp.bfloat16,
+        self,
+        config: MiMoAudioConfig,
+        args: MiMoAudioArguments,
+        rngs: Optional[nnx.Rngs] = None,
+        dtype: jnp.dtype = jnp.bfloat16,
     ):
         if rngs is None:
             rngs = nnx.Rngs(0)
@@ -76,42 +65,31 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
         self.input_local_transformer.embedder = None
 
         self.lm_head = shard(
-            nnx.Linear(
-                config.hidden_size,
-                config.vocab_size,
-                use_bias=False,
-                dtype=self.dtype,
-                rngs=rngs
-            ),
-            self.shd_cfg.emb_dv
+            nnx.Linear(config.hidden_size, config.vocab_size, use_bias=False, dtype=self.dtype, rngs=rngs),
+            self.shd_cfg.emb_dv,
         )
 
-        self.local_transformer_lm_heads = nnx.List([
-            shard(
-                nnx.Linear(
-                    config.local_dim,
-                    self.speech_vocab_sizes[i],
-                    use_bias=False,
-                    dtype=self.dtype,
-                    rngs=rngs
-                ),
-                self.shd_cfg.emb_dv
-            )
-            for i in range(self.audio_channels)
-        ])
+        self.local_transformer_lm_heads = nnx.List(
+            [
+                shard(
+                    nnx.Linear(
+                        config.local_dim, self.speech_vocab_sizes[i], use_bias=False, dtype=self.dtype, rngs=rngs
+                    ),
+                    self.shd_cfg.emb_dv,
+                )
+                for i in range(self.audio_channels)
+            ]
+        )
 
-        self.speech_embeddings = nnx.List([
-            shard(
-                nnx.Embed(
-                    self.speech_vocab_sizes[i],
-                    config.input_local_dim,
-                    dtype=self.dtype,
-                    rngs=rngs
-                ),
-                self.shd_cfg.emb_vd
-            )
-            for i in range(self.audio_channels)
-        ])
+        self.speech_embeddings = nnx.List(
+            [
+                shard(
+                    nnx.Embed(self.speech_vocab_sizes[i], config.input_local_dim, dtype=self.dtype, rngs=rngs),
+                    self.shd_cfg.emb_vd,
+                )
+                for i in range(self.audio_channels)
+            ]
+        )
 
         self.speech_group_downcast = shard(
             nnx.Linear(
@@ -119,26 +97,18 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
                 config.hidden_size,
                 use_bias=False,
                 dtype=self.dtype,
-                rngs=rngs
+                rngs=rngs,
             ),
-            self.shd_cfg.ffw_weight_df
+            self.shd_cfg.ffw_weight_df,
         )
 
         self.hidden_states_downcast = shard(
-            nnx.Linear(
-                config.hidden_size,
-                config.local_dim,
-                use_bias=False,
-                dtype=self.dtype,
-                rngs=rngs
-            ),
-            self.shd_cfg.ffw_weight_df
+            nnx.Linear(config.hidden_size, config.local_dim, use_bias=False, dtype=self.dtype, rngs=rngs),
+            self.shd_cfg.ffw_weight_df,
         )
 
     def apply_input_local_transformer(
-            self,
-            speech_embeddings: jnp.ndarray,
-            cache: Optional[Cache] = None
+        self, speech_embeddings: jnp.ndarray, cache: Optional[Cache] = None
     ) -> jnp.ndarray:
         """Apply input local transformer to speech embeddings"""
         B, T_groups, group_size, hidden_size = speech_embeddings.shape
@@ -148,11 +118,7 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
 
         if cache is None:
             cache = self.input_local_transformer.init_cache(
-                self.input_local_qwen2_config,
-                B * T_groups,
-                group_size,
-                generate_steps=0,
-                dtype=self.dtype
+                self.input_local_qwen2_config, B * T_groups, group_size, generate_steps=0, dtype=self.dtype
             )
 
         x = input_embeddings
@@ -162,24 +128,19 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
 
         return x.reshape(B, T_groups, group_size, hidden_size)
 
-    def _prepare_input_embeds(
-            self,
-            input_ids: jnp.ndarray,
-            text_embed_fn
-    ) -> jnp.ndarray:
+    def _prepare_input_embeds(self, input_ids: jnp.ndarray, text_embed_fn) -> jnp.ndarray:
         """Prepare input embeddings from interleaved text and speech tokens"""
         B = input_ids.shape[0]
 
-        text_input_ids = input_ids[:, 0, ::self.group_size]
-        speech_input_ids = input_ids[:, 1:, :].reshape(
-            B, self.audio_channels, -1, self.group_size
-        ).transpose(0, 2, 1, 3)
+        text_input_ids = input_ids[:, 0, :: self.group_size]
+        speech_input_ids = (
+            input_ids[:, 1:, :].reshape(B, self.audio_channels, -1, self.group_size).transpose(0, 2, 1, 3)
+        )
 
         is_speech = text_input_ids == self.args.empty_idx
 
         speech_embeds = jnp.zeros(
-            (B, is_speech.shape[1], self.group_size, self.config.input_local_dim),
-            dtype=self.dtype
+            (B, is_speech.shape[1], self.group_size, self.config.input_local_dim), dtype=self.dtype
         )
 
         for idx in range(self.audio_channels):
@@ -198,9 +159,7 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
         speech_embeds = speech_embeds * is_speech[:, :, None, None]
 
         T_groups = speech_embeds.shape[1]
-        speech_grouped_embeds = self.speech_group_downcast(
-            speech_embeds.reshape(B, T_groups, -1)
-        )
+        speech_grouped_embeds = self.speech_group_downcast(speech_embeds.reshape(B, T_groups, -1))
 
         text_input_ids_safe = jnp.where(text_input_ids == -100, 0, text_input_ids)
         text_embeds = text_embed_fn(text_input_ids_safe)
@@ -212,13 +171,12 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
         return shard(output, self.shd_cfg.act_btd)
 
     def forward(
-            self,
-            input_ids: jnp.ndarray,
-            cache: Cache,
-            pad_id: int = 0,
+        self,
+        input_ids: jnp.ndarray,
+        cache: Cache,
+        pad_id: int = 0,
     ) -> Tuple[jnp.ndarray, jnp.ndarray, Cache]:
-        """Forward pass through the model"""
-        text_input_ids = input_ids[:, 0, ::self.group_size]
+        text_input_ids = input_ids[:, 0, :: self.group_size]
 
         def text_embed_fn(x):
             return self.model.embedder.embedding.value[x]
@@ -228,26 +186,23 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
         B, T_groups, _ = inputs_embeds.shape
         segment_ids = 1 * (text_input_ids != -100)
 
-        # Run through main transformer
         x = inputs_embeds
         for i, layer in enumerate(self.model.layers):
             x = layer(x, cache[i], segment_ids)
-        hidden_states = self.model.final_norm(x)  # [B, T_groups, hidden_size]
+        hidden_states = self.model.final_norm(x)
 
         text_logits = self.lm_head(hidden_states[:, -1:, :])  # [B, 1, vocab_size]
 
         # Downcast hidden states for local transformer
-        local_hidden_states = self.hidden_states_downcast(
-            hidden_states[:, -1:, :]
-        )  # [B, 1, local_dim]
+        local_hidden_states = self.hidden_states_downcast(hidden_states[:, -1:, :])  # [B, 1, local_dim]
 
         return text_logits, local_hidden_states, cache
 
     def local_forward(
-            self,
-            local_embeds: jnp.ndarray,  # [B, 1, local_dim]
-            key: jax.random.PRNGKey,
-            local_sampler: Optional[MiMoSampler] = None,
+        self,
+        local_embeds: jnp.ndarray,
+        key: jax.random.PRNGKey,
+        local_sampler: Optional[MiMoSampler] = None,
     ) -> jnp.ndarray:
         """
         Generate audio tokens for one group using local transformer.
@@ -263,10 +218,7 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
         B = local_embeds.shape[0]
         delay_iters = self.group_size + max(self.delay_pattern)
 
-        local_tokens = jnp.zeros(
-            (B, self.group_size, self.audio_channels),
-            dtype=jnp.int32
-        )
+        local_tokens = jnp.zeros((B, self.group_size, self.audio_channels), dtype=jnp.int32)
 
         if local_sampler is None:
             local_sampler = MiMoSampler(MiMoSamplerConfig())
@@ -282,9 +234,7 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
         segment_ids = jnp.ones((B, 1), dtype=jnp.int32)
 
         for t in range(delay_iters):
-            hidden_state, cache = _local_transformer_step_jit(
-                self.local_transformer, local_embeds, cache, segment_ids
-            )
+            hidden_state, cache = _local_transformer_step_jit(self.local_transformer, local_embeds, cache, segment_ids)
 
             next_local_embeds = jnp.zeros_like(local_embeds)
 
@@ -298,11 +248,7 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
                     cur_logits = cur_lm_head(hidden_state[:, -1, :])
 
                     key, subkey = jax.random.split(key)
-                    cur_token = local_sampler.sample(
-                        cur_logits,
-                        subkey,
-                        removed_tokens=[cur_empty]
-                    )
+                    cur_token = local_sampler.sample(cur_logits, subkey, removed_tokens=[cur_empty])
 
                     local_tokens = local_tokens.at[:, t - cur_start, idx].set(cur_token)
 
@@ -315,10 +261,6 @@ class FlaxMiMoAudioForCausalLM(nnx.Module):
         return local_tokens
 
 
-# ============================================================================
-# JIT-compiled functions for fast inference
-# ============================================================================
-
 @jax.jit
 def _local_transformer_step_jit(
     local_transformer: nnx.Module,
@@ -326,23 +268,6 @@ def _local_transformer_step_jit(
     cache: Cache,
     segment_ids: jnp.ndarray,
 ) -> Tuple[jnp.ndarray, Cache]:
-    """
-    JIT-compiled single step of local transformer forward pass.
-
-    This is a helper function to accelerate the inner loop of local_forward.
-    Being a module-level function (not instance method) allows JAX to properly
-    JIT compile it.
-
-    Args:
-        local_transformer: The local transformer module
-        local_embeds: [B, 1, local_dim]
-        cache: Cache for local transformer
-        segment_ids: [B, 1]
-
-    Returns:
-        hidden_state: [B, 1, local_dim]
-        cache: Updated cache (IMPORTANT for correct behavior)
-    """
     x = local_embeds
     for i, layer in enumerate(local_transformer.layers):
         x = layer(x, cache[i], segment_ids)
@@ -357,23 +282,6 @@ def forward_jit(
     cache: Cache,
     pad_id: int = 0,
 ) -> Tuple[jnp.ndarray, jnp.ndarray, Cache]:
-    """
-    JIT-compiled forward pass for fast inference.
-
-    Similar to qwen2's forward function, this returns the cache to enable
-    proper JAX tracing of stateful computations.
-
-    Args:
-        model: FlaxMiMoAudioForCausalLM instance
-        input_ids: [B, audio_channels + 1, T * group_size]
-        cache: Cache for KV storage
-        pad_id: Padding token ID
-
-    Returns:
-        text_logits: [B, 1, vocab_size]
-        local_hidden_states: [B, 1, local_dim]
-        cache: Updated cache (for JAX tracing)
-    """
     text_logits, local_hidden_states, cache = model.forward(input_ids, cache, pad_id)
     return text_logits, local_hidden_states, cache
 
@@ -384,42 +292,4 @@ def local_forward_jit(
     local_embeds: jnp.ndarray,
     key: jax.random.PRNGKey,
 ) -> jnp.ndarray:
-    """
-    JIT-compiled local forward pass for audio generation.
-
-    NOTE: This version uses greedy sampling (no sampler parameter for JIT simplicity).
-    For temperature-based sampling, use model.local_forward() directly.
-
-    Args:
-        model: FlaxMiMoAudioForCausalLM instance
-        local_embeds: [B, 1, local_dim]
-        key: Random key (used if needed in future, currently greedy)
-
-    Returns:
-        audio_tokens: [B, group_size, audio_channels]
-    """
-    # Use greedy sampling for JIT-compiled version
     return model.local_forward(local_embeds, key, local_sampler=None)
-
-
-# Example usage:
-if __name__ == "__main__":
-    # Create configuration
-    config = MiMoAudioConfig()
-    args = MiMoAudioArguments(
-        model_name_or_path="mimo-audio",
-        sosp_idx=151646,
-        eosp_idx=151647,
-        sostm_idx=151648,
-        eostm_idx=151649,
-        eot_idx=151643,
-        empty_idx=151645,
-    )
-
-    # Create model
-    model = FlaxMiMoAudioForCausalLM(config,args)
-
-    print("Model created successfully!")
-    print(f"Audio channels: {model.audio_channels}")
-    print(f"Group size: {model.group_size}")
-    print(f"Speech vocab sizes: {model.speech_vocab_sizes}")

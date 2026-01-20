@@ -41,7 +41,7 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
             config_dict = json.load(f)
 
         config_kwargs = {k: v for k, v in config_dict.items() if k in MiMoAudioConfig.__dataclass_fields__}
-        config_kwargs['shd_cfg'] = ShardingCfg.no_sharding()
+        config_kwargs["shd_cfg"] = ShardingCfg.no_sharding()
         cls.bonsai_config = MiMoAudioConfig(**config_kwargs)
 
         cls.args = MiMoAudioArguments(
@@ -55,13 +55,21 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
         )
 
         torch_config = TorchMiMoAudioConfig.from_pretrained(model_ckpt_path)
-        cls.torch_model = TorchMiMoAudio.from_pretrained(
-            model_ckpt_path, config=torch_config, args=asdict(cls.args), torch_dtype=torch.float32
-        ).eval().cpu()
+        cls.torch_model = (
+            TorchMiMoAudio.from_pretrained(
+                model_ckpt_path, config=torch_config, args=asdict(cls.args), torch_dtype=torch.float32
+            )
+            .eval()
+            .cpu()
+        )
 
         cls.nnx_model = params.create_model_with_weights(
-            model_path=model_ckpt_path, config=cls.bonsai_config, args=cls.args,
-            rngs=nnx.Rngs(0), dtype=jnp.float32, mesh=None,
+            model_path=model_ckpt_path,
+            config=cls.bonsai_config,
+            args=cls.args,
+            rngs=nnx.Rngs(0),
+            dtype=jnp.float32,
+            mesh=None,
         )
 
         cls.batch_size = 1
@@ -72,16 +80,22 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
 
     def _init_cache(self, batch_size, token_len):
         return self.nnx_model.model.init_cache(
-            cfg=self.nnx_model.qwen2_config, batch_size=batch_size,
-            token_len=token_len, generate_steps=0, dtype=jnp.float32
+            cfg=self.nnx_model.qwen2_config,
+            batch_size=batch_size,
+            token_len=token_len,
+            generate_steps=0,
+            dtype=jnp.float32,
         )
 
     def _compare(self, jy, ty):
         if ty.dim() == 2 and jy.ndim == 3:
             ty = ty.unsqueeze(0)
         torch.testing.assert_close(
-            torch.tensor(np.array(jy, dtype=np.float32)), ty,
-            rtol=self.tol, atol=self.tol, check_dtype=False,
+            torch.tensor(np.array(jy, dtype=np.float32)),
+            ty,
+            rtol=self.tol,
+            atol=self.tol,
+            check_dtype=False,
         )
 
     def test_text_embedder(self):
@@ -117,8 +131,11 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
 
         with torch.no_grad():
             ty_output = self.torch_model.model.layers[0].to(torch.float32)(
-                tx, position_ids=position_ids, position_embeddings=position_embeddings,
-                past_key_value=DynamicCache(), cache_position=cache_position,
+                tx,
+                position_ids=position_ids,
+                position_embeddings=position_embeddings,
+                past_key_value=DynamicCache(),
+                cache_position=cache_position,
             )
             ty = ty_output[0] if isinstance(ty_output, tuple) else ty_output
 
@@ -128,9 +145,9 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
         cache = self._init_cache(self.batch_size, self.num_input_tokens)
         shape = (self.batch_size, self.num_input_tokens, self.bonsai_config.hidden_size)
 
-        for layer_idx, (nm, tm, nc) in enumerate(zip(
-            self.nnx_model.model.layers, self.torch_model.model.layers, cache
-        )):
+        for layer_idx, (nm, tm, nc) in enumerate(
+            zip(self.nnx_model.model.layers, self.torch_model.model.layers, cache)
+        ):
             jx = jax.random.normal(jax.random.key(layer_idx), shape=shape)
             tx = torch.tensor(np.array(jx, dtype=np.float32))
             segment_ids = jnp.ones((self.batch_size, self.num_input_tokens))
@@ -142,8 +159,11 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
 
             with torch.no_grad():
                 ty_output = tm.to(torch.float32)(
-                    tx, position_ids=position_ids, position_embeddings=position_embeddings,
-                    past_key_value=DynamicCache(), cache_position=cache_position,
+                    tx,
+                    position_ids=position_ids,
+                    position_embeddings=position_embeddings,
+                    past_key_value=DynamicCache(),
+                    cache_position=cache_position,
                 )
                 ty = ty_output[0] if isinstance(ty_output, tuple) else ty_output
 
@@ -171,14 +191,22 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
         position_ids = cache_position.unsqueeze(0)
         position_embeddings = self.torch_model.model.rotary_emb(tx, position_ids)
         attention_mask = create_causal_mask(
-            config=self.torch_model.config, input_embeds=tx, attention_mask=None,
-            cache_position=cache_position, past_key_values=DynamicCache(), position_ids=position_ids,
+            config=self.torch_model.config,
+            input_embeds=tx,
+            attention_mask=None,
+            cache_position=cache_position,
+            past_key_values=DynamicCache(),
+            position_ids=position_ids,
         )
 
         with torch.no_grad():
             ty = self.torch_model.model.layers[0].self_attn.to(torch.float32)(
-                tx, position_ids=position_ids, position_embeddings=position_embeddings,
-                attention_mask=attention_mask, past_key_value=DynamicCache(), cache_position=cache_position,
+                tx,
+                position_ids=position_ids,
+                position_embeddings=position_embeddings,
+                attention_mask=attention_mask,
+                past_key_value=DynamicCache(),
+                cache_position=cache_position,
             )[0]
         self._compare(jy, ty)
 
@@ -234,8 +262,11 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
         tx = torch.tensor(np.array(jx, dtype=np.float32))
 
         cache = self.nnx_model.local_transformer.init_cache(
-            cfg=self.nnx_model.local_qwen2_config, batch_size=self.batch_size,
-            token_len=self.num_input_tokens, generate_steps=0, dtype=jnp.float32
+            cfg=self.nnx_model.local_qwen2_config,
+            batch_size=self.batch_size,
+            token_len=self.num_input_tokens,
+            generate_steps=0,
+            dtype=jnp.float32,
         )
         segment_ids = jnp.ones((self.batch_size, self.num_input_tokens))
         jy = self.nnx_model.local_transformer.layers[0](jx, cache[0], segment_ids)
@@ -246,8 +277,11 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
 
         with torch.no_grad():
             ty_output = self.torch_model.local_transformer.layers[0].to(torch.float32)(
-                tx, position_ids=position_ids, position_embeddings=position_embeddings,
-                past_key_value=DynamicCache(), cache_position=cache_position,
+                tx,
+                position_ids=position_ids,
+                position_embeddings=position_embeddings,
+                past_key_value=DynamicCache(),
+                cache_position=cache_position,
             )
             ty = ty_output[0] if isinstance(ty_output, tuple) else ty_output
 
@@ -259,8 +293,11 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
         tx = torch.tensor(np.array(jx, dtype=np.float32))
 
         cache = self.nnx_model.input_local_transformer.init_cache(
-            cfg=self.nnx_model.input_local_qwen2_config, batch_size=self.batch_size,
-            token_len=self.num_input_tokens, generate_steps=0, dtype=jnp.float32
+            cfg=self.nnx_model.input_local_qwen2_config,
+            batch_size=self.batch_size,
+            token_len=self.num_input_tokens,
+            generate_steps=0,
+            dtype=jnp.float32,
         )
         segment_ids = jnp.ones((self.batch_size, self.num_input_tokens))
         jy = self.nnx_model.input_local_transformer.layers[0](jx, cache[0], segment_ids)
@@ -269,22 +306,29 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
         position_ids = cache_position.unsqueeze(0)
         position_embeddings = self.torch_model.input_local_transformer.rotary_emb(tx, position_ids)
         attention_mask = torch.ones(
-            (self.batch_size, 1, self.num_input_tokens, self.num_input_tokens),
-            dtype=torch.float32, device=tx.device
+            (self.batch_size, 1, self.num_input_tokens, self.num_input_tokens), dtype=torch.float32, device=tx.device
         )
 
         with torch.no_grad():
             ty_output = self.torch_model.input_local_transformer.layers[0].to(torch.float32)(
-                tx, position_ids=position_ids, position_embeddings=position_embeddings,
-                attention_mask=attention_mask, past_key_value=DynamicCache(), cache_position=cache_position,
+                tx,
+                position_ids=position_ids,
+                position_embeddings=position_embeddings,
+                attention_mask=attention_mask,
+                past_key_value=DynamicCache(),
+                cache_position=cache_position,
             )
             ty = ty_output[0] if isinstance(ty_output, tuple) else ty_output
 
         self._compare(jy, ty)
 
     def test_apply_input_local_transformer(self):
-        shape = (self.batch_size, self.num_input_tokens // self.group_size, self.group_size,
-                 self.bonsai_config.input_local_dim)
+        shape = (
+            self.batch_size,
+            self.num_input_tokens // self.group_size,
+            self.group_size,
+            self.bonsai_config.input_local_dim,
+        )
         jx = jax.random.normal(jax.random.key(0), shape=shape)
         tx = torch.tensor(np.array(jx, dtype=np.float32))
         jy = self.nnx_model.apply_input_local_transformer(jx, cache=None)
@@ -306,6 +350,7 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
 
         def text_embed_fn_jax(x):
             return self.nnx_model.model.embedder.embedding.value[x]
+
         jax_embeds = self.nnx_model._prepare_input_embeds(input_ids_jax, text_embed_fn_jax)
 
         with torch.no_grad():
@@ -333,8 +378,10 @@ class TestMiMoAudioLayerOutputs(absltest.TestCase):
             position_ids = torch.arange(num_groups).unsqueeze(0).expand(self.batch_size, -1)
             cache_position = torch.arange(num_groups)
             outputs_torch = self.torch_model(
-                input_ids=input_ids_torch, attention_mask=attention_mask,
-                position_ids=position_ids, cache_position=cache_position,
+                input_ids=input_ids_torch,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                cache_position=cache_position,
             )
             text_logits_torch = outputs_torch.text_logits
             local_hidden_torch = outputs_torch.local_hidden_states

@@ -14,18 +14,51 @@ def _get_qwen2_key_mapping(prefix: str) -> dict[str, tuple[str, Transform]]:
 
     return {
         rf"{prefix}\.embed_tokens\.weight": (f"{prefix}.embedder.embedding", TRANSFORM_NONE),
-        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (rf"{prefix}.layers.\1.attn.q_proj.kernel", TRANSFORM_LINEAR),
-        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (rf"{prefix}.layers.\1.attn.k_proj.kernel", TRANSFORM_LINEAR),
-        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (rf"{prefix}.layers.\1.attn.v_proj.kernel", TRANSFORM_LINEAR),
-        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.o_proj\.weight": (rf"{prefix}.layers.\1.attn.o_proj.kernel", TRANSFORM_LINEAR),
-        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.q_proj\.bias": (rf"{prefix}.layers.\1.attn.q_proj.bias", q_bias_flatten),
-        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.k_proj\.bias": (rf"{prefix}.layers.\1.attn.k_proj.bias", kv_bias_flatten),
-        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.v_proj\.bias": (rf"{prefix}.layers.\1.attn.v_proj.bias", kv_bias_flatten),
-        rf"{prefix}\.layers\.([0-9]+)\.mlp\.gate_proj\.weight": (rf"{prefix}.layers.\1.mlp.gate_proj.kernel", TRANSFORM_LINEAR),
-        rf"{prefix}\.layers\.([0-9]+)\.mlp\.up_proj\.weight": (rf"{prefix}.layers.\1.mlp.up_proj.kernel", TRANSFORM_LINEAR),
-        rf"{prefix}\.layers\.([0-9]+)\.mlp\.down_proj\.weight": (rf"{prefix}.layers.\1.mlp.down_proj.kernel", TRANSFORM_LINEAR),
+        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (
+            rf"{prefix}.layers.\1.attn.q_proj.kernel",
+            TRANSFORM_LINEAR,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (
+            rf"{prefix}.layers.\1.attn.k_proj.kernel",
+            TRANSFORM_LINEAR,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (
+            rf"{prefix}.layers.\1.attn.v_proj.kernel",
+            TRANSFORM_LINEAR,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.o_proj\.weight": (
+            rf"{prefix}.layers.\1.attn.o_proj.kernel",
+            TRANSFORM_LINEAR,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.q_proj\.bias": (
+            rf"{prefix}.layers.\1.attn.q_proj.bias",
+            q_bias_flatten,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.k_proj\.bias": (
+            rf"{prefix}.layers.\1.attn.k_proj.bias",
+            kv_bias_flatten,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.self_attn\.v_proj\.bias": (
+            rf"{prefix}.layers.\1.attn.v_proj.bias",
+            kv_bias_flatten,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.mlp\.gate_proj\.weight": (
+            rf"{prefix}.layers.\1.mlp.gate_proj.kernel",
+            TRANSFORM_LINEAR,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.mlp\.up_proj\.weight": (
+            rf"{prefix}.layers.\1.mlp.up_proj.kernel",
+            TRANSFORM_LINEAR,
+        ),
+        rf"{prefix}\.layers\.([0-9]+)\.mlp\.down_proj\.weight": (
+            rf"{prefix}.layers.\1.mlp.down_proj.kernel",
+            TRANSFORM_LINEAR,
+        ),
         rf"{prefix}\.norm\.weight": (f"{prefix}.final_norm.scale", TRANSFORM_NONE),
-        rf"{prefix}\.layers\.([0-9]+)\.input_layernorm\.weight": (rf"{prefix}.layers.\1.input_layernorm.scale", TRANSFORM_NONE),
+        rf"{prefix}\.layers\.([0-9]+)\.input_layernorm\.weight": (
+            rf"{prefix}.layers.\1.input_layernorm.scale",
+            TRANSFORM_NONE,
+        ),
         rf"{prefix}\.layers\.([0-9]+)\.post_attention_layernorm\.weight": (
             rf"{prefix}.layers.\1.post_attention_layernorm.scale",
             TRANSFORM_NONE,
@@ -43,14 +76,15 @@ def _get_mimo_key_mapping(audio_channels: int) -> dict[str, tuple[str, Transform
 
     for i in range(audio_channels):
         mapping[rf"speech_embeddings\.{i}\.weight"] = (f"speech_embeddings.{i}.embedding", TRANSFORM_NONE)
-        mapping[rf"local_transformer_lm_heads\.{i}\.weight"] = (f"local_transformer_lm_heads.{i}.kernel", TRANSFORM_LINEAR)
+        mapping[rf"local_transformer_lm_heads\.{i}\.weight"] = (
+            f"local_transformer_lm_heads.{i}.kernel",
+            TRANSFORM_LINEAR,
+        )
 
     return mapping
 
 
-def _get_jax_key(
-    mapping: dict[str, tuple[str, Transform]], source_key: str
-) -> tuple[str | None, Transform | None]:
+def _get_jax_key(mapping: dict[str, tuple[str, Transform]], source_key: str) -> tuple[str | None, Transform | None]:
     """Get JAX key from source key using regex mapping."""
     for pat, (jax_key, transform) in mapping.items():
         match = re.fullmatch(pat, source_key)

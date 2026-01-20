@@ -37,18 +37,54 @@ def _get_key_mapping(config: model_lib.MiMoAudioTokenizerConfig) -> dict[str, tu
 
     for idx in range(config.encoder_layers):
         layer_mappings = {
-            rf"encoder\.layers\.{idx}\.self_attn\.q_proj\.weight": (f"encoder.layers.{idx}.self_attn.q_proj.kernel", TRANSFORM_LINEAR),
-            rf"encoder\.layers\.{idx}\.self_attn\.q_proj\.bias": (f"encoder.layers.{idx}.self_attn.q_proj.bias", TRANSFORM_NONE),
-            rf"encoder\.layers\.{idx}\.self_attn\.k_proj\.weight": (f"encoder.layers.{idx}.self_attn.k_proj.kernel", TRANSFORM_LINEAR),
-            rf"encoder\.layers\.{idx}\.self_attn\.k_proj\.bias": (f"encoder.layers.{idx}.self_attn.k_proj.bias", TRANSFORM_NONE),
-            rf"encoder\.layers\.{idx}\.self_attn\.v_proj\.weight": (f"encoder.layers.{idx}.self_attn.v_proj.kernel", TRANSFORM_LINEAR),
-            rf"encoder\.layers\.{idx}\.self_attn\.v_proj\.bias": (f"encoder.layers.{idx}.self_attn.v_proj.bias", TRANSFORM_NONE),
-            rf"encoder\.layers\.{idx}\.self_attn\.out_proj\.weight": (f"encoder.layers.{idx}.self_attn.out_proj.kernel", TRANSFORM_LINEAR),
-            rf"encoder\.layers\.{idx}\.self_attn\.out_proj\.bias": (f"encoder.layers.{idx}.self_attn.out_proj.bias", TRANSFORM_NONE),
-            rf"encoder\.layers\.{idx}\.self_attn_layer_norm\.weight": (f"encoder.layers.{idx}.self_attn_layer_norm.scale", TRANSFORM_NONE),
-            rf"encoder\.layers\.{idx}\.self_attn_layer_norm\.bias": (f"encoder.layers.{idx}.self_attn_layer_norm.bias", TRANSFORM_NONE),
-            rf"encoder\.layers\.{idx}\.final_layer_norm\.weight": (f"encoder.layers.{idx}.final_layer_norm.scale", TRANSFORM_NONE),
-            rf"encoder\.layers\.{idx}\.final_layer_norm\.bias": (f"encoder.layers.{idx}.final_layer_norm.bias", TRANSFORM_NONE),
+            rf"encoder\.layers\.{idx}\.self_attn\.q_proj\.weight": (
+                f"encoder.layers.{idx}.self_attn.q_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn\.q_proj\.bias": (
+                f"encoder.layers.{idx}.self_attn.q_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn\.k_proj\.weight": (
+                f"encoder.layers.{idx}.self_attn.k_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn\.k_proj\.bias": (
+                f"encoder.layers.{idx}.self_attn.k_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn\.v_proj\.weight": (
+                f"encoder.layers.{idx}.self_attn.v_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn\.v_proj\.bias": (
+                f"encoder.layers.{idx}.self_attn.v_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn\.out_proj\.weight": (
+                f"encoder.layers.{idx}.self_attn.out_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn\.out_proj\.bias": (
+                f"encoder.layers.{idx}.self_attn.out_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn_layer_norm\.weight": (
+                f"encoder.layers.{idx}.self_attn_layer_norm.scale",
+                TRANSFORM_NONE,
+            ),
+            rf"encoder\.layers\.{idx}\.self_attn_layer_norm\.bias": (
+                f"encoder.layers.{idx}.self_attn_layer_norm.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"encoder\.layers\.{idx}\.final_layer_norm\.weight": (
+                f"encoder.layers.{idx}.final_layer_norm.scale",
+                TRANSFORM_NONE,
+            ),
+            rf"encoder\.layers\.{idx}\.final_layer_norm\.bias": (
+                f"encoder.layers.{idx}.final_layer_norm.bias",
+                TRANSFORM_NONE,
+            ),
             rf"encoder\.layers\.{idx}\.fc1\.weight": (f"encoder.layers.{idx}.fc1.kernel", TRANSFORM_LINEAR),
             rf"encoder\.layers\.{idx}\.fc1\.bias": (f"encoder.layers.{idx}.fc1.bias", TRANSFORM_NONE),
             rf"encoder\.layers\.{idx}\.fc2\.weight": (f"encoder.layers.{idx}.fc2.kernel", TRANSFORM_LINEAR),
@@ -56,12 +92,14 @@ def _get_key_mapping(config: model_lib.MiMoAudioTokenizerConfig) -> dict[str, tu
         }
         mapping.update(layer_mappings)
 
-    mapping.update({
-        r"encoder\.down_sample_layer\.0\.weight": ("encoder.down_sample_layer.kernel", TRANSFORM_CONV1D),
-        r"encoder\.down_sample_layer\.0\.bias": ("encoder.down_sample_layer.bias", TRANSFORM_NONE),
-        r"encoder\.down_sample_norm\.weight": ("encoder.down_norm.scale", TRANSFORM_NONE),
-        r"encoder\.down_sample_norm\.bias": ("encoder.down_norm.bias", TRANSFORM_NONE),
-    })
+    mapping.update(
+        {
+            r"encoder\.down_sample_layer\.0\.weight": ("encoder.down_sample_layer.kernel", TRANSFORM_CONV1D),
+            r"encoder\.down_sample_layer\.0\.bias": ("encoder.down_sample_layer.bias", TRANSFORM_NONE),
+            r"encoder\.down_sample_norm\.weight": ("encoder.down_norm.scale", TRANSFORM_NONE),
+            r"encoder\.down_sample_norm\.bias": ("encoder.down_norm.bias", TRANSFORM_NONE),
+        }
+    )
 
     for idx in range(config.num_quantizers):
         mapping[rf"encoder\.quantizer\.vq\.layers\.{idx}\._codebook\.embed"] = (
@@ -69,33 +107,71 @@ def _get_key_mapping(config: model_lib.MiMoAudioTokenizerConfig) -> dict[str, tu
             TRANSFORM_NONE,
         )
 
-    mapping.update({
-        r"decoder\.dconv1\.conv\.weight": ("decoder.dconv1.conv.kernel", TRANSFORM_NONE),
-        r"decoder\.dconv1\.conv\.bias": ("decoder.dconv1.conv.bias", TRANSFORM_NONE),
-        r"decoder\.dconv1\.norm\.weight": ("decoder.dconv1.norm.scale", TRANSFORM_NONE),
-        r"decoder\.dconv1\.norm\.bias": ("decoder.dconv1.norm.bias", TRANSFORM_NONE),
-        r"decoder\.layer_norm\.weight": ("decoder.layer_norm.scale", TRANSFORM_NONE),
-        r"decoder\.layer_norm\.bias": ("decoder.layer_norm.bias", TRANSFORM_NONE),
-        r"decoder\.dconv2\.conv\.weight": ("decoder.dconv2.conv.kernel", TRANSFORM_NONE),
-        r"decoder\.dconv2\.conv\.bias": ("decoder.dconv2.conv.bias", TRANSFORM_NONE),
-        r"decoder\.dconv2\.norm\.weight": ("decoder.dconv2.norm.scale", TRANSFORM_NONE),
-        r"decoder\.dconv2\.norm\.bias": ("decoder.dconv2.norm.bias", TRANSFORM_NONE),
-    })
+    mapping.update(
+        {
+            r"decoder\.dconv1\.conv\.weight": ("decoder.dconv1.conv.kernel", TRANSFORM_NONE),
+            r"decoder\.dconv1\.conv\.bias": ("decoder.dconv1.conv.bias", TRANSFORM_NONE),
+            r"decoder\.dconv1\.norm\.weight": ("decoder.dconv1.norm.scale", TRANSFORM_NONE),
+            r"decoder\.dconv1\.norm\.bias": ("decoder.dconv1.norm.bias", TRANSFORM_NONE),
+            r"decoder\.layer_norm\.weight": ("decoder.layer_norm.scale", TRANSFORM_NONE),
+            r"decoder\.layer_norm\.bias": ("decoder.layer_norm.bias", TRANSFORM_NONE),
+            r"decoder\.dconv2\.conv\.weight": ("decoder.dconv2.conv.kernel", TRANSFORM_NONE),
+            r"decoder\.dconv2\.conv\.bias": ("decoder.dconv2.conv.bias", TRANSFORM_NONE),
+            r"decoder\.dconv2\.norm\.weight": ("decoder.dconv2.norm.scale", TRANSFORM_NONE),
+            r"decoder\.dconv2\.norm\.bias": ("decoder.dconv2.norm.bias", TRANSFORM_NONE),
+        }
+    )
 
     for idx in range(config.decoder_layers):
         layer_mappings = {
-            rf"decoder\.layers\.{idx}\.self_attn\.q_proj\.weight": (f"decoder.layers.{idx}.self_attn.q_proj.kernel", TRANSFORM_LINEAR),
-            rf"decoder\.layers\.{idx}\.self_attn\.q_proj\.bias": (f"decoder.layers.{idx}.self_attn.q_proj.bias", TRANSFORM_NONE),
-            rf"decoder\.layers\.{idx}\.self_attn\.k_proj\.weight": (f"decoder.layers.{idx}.self_attn.k_proj.kernel", TRANSFORM_LINEAR),
-            rf"decoder\.layers\.{idx}\.self_attn\.k_proj\.bias": (f"decoder.layers.{idx}.self_attn.k_proj.bias", TRANSFORM_NONE),
-            rf"decoder\.layers\.{idx}\.self_attn\.v_proj\.weight": (f"decoder.layers.{idx}.self_attn.v_proj.kernel", TRANSFORM_LINEAR),
-            rf"decoder\.layers\.{idx}\.self_attn\.v_proj\.bias": (f"decoder.layers.{idx}.self_attn.v_proj.bias", TRANSFORM_NONE),
-            rf"decoder\.layers\.{idx}\.self_attn\.out_proj\.weight": (f"decoder.layers.{idx}.self_attn.out_proj.kernel", TRANSFORM_LINEAR),
-            rf"decoder\.layers\.{idx}\.self_attn\.out_proj\.bias": (f"decoder.layers.{idx}.self_attn.out_proj.bias", TRANSFORM_NONE),
-            rf"decoder\.layers\.{idx}\.self_attn_layer_norm\.weight": (f"decoder.layers.{idx}.self_attn_layer_norm.scale", TRANSFORM_NONE),
-            rf"decoder\.layers\.{idx}\.self_attn_layer_norm\.bias": (f"decoder.layers.{idx}.self_attn_layer_norm.bias", TRANSFORM_NONE),
-            rf"decoder\.layers\.{idx}\.final_layer_norm\.weight": (f"decoder.layers.{idx}.final_layer_norm.scale", TRANSFORM_NONE),
-            rf"decoder\.layers\.{idx}\.final_layer_norm\.bias": (f"decoder.layers.{idx}.final_layer_norm.bias", TRANSFORM_NONE),
+            rf"decoder\.layers\.{idx}\.self_attn\.q_proj\.weight": (
+                f"decoder.layers.{idx}.self_attn.q_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn\.q_proj\.bias": (
+                f"decoder.layers.{idx}.self_attn.q_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn\.k_proj\.weight": (
+                f"decoder.layers.{idx}.self_attn.k_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn\.k_proj\.bias": (
+                f"decoder.layers.{idx}.self_attn.k_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn\.v_proj\.weight": (
+                f"decoder.layers.{idx}.self_attn.v_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn\.v_proj\.bias": (
+                f"decoder.layers.{idx}.self_attn.v_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn\.out_proj\.weight": (
+                f"decoder.layers.{idx}.self_attn.out_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn\.out_proj\.bias": (
+                f"decoder.layers.{idx}.self_attn.out_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn_layer_norm\.weight": (
+                f"decoder.layers.{idx}.self_attn_layer_norm.scale",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.layers\.{idx}\.self_attn_layer_norm\.bias": (
+                f"decoder.layers.{idx}.self_attn_layer_norm.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.layers\.{idx}\.final_layer_norm\.weight": (
+                f"decoder.layers.{idx}.final_layer_norm.scale",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.layers\.{idx}\.final_layer_norm\.bias": (
+                f"decoder.layers.{idx}.final_layer_norm.bias",
+                TRANSFORM_NONE,
+            ),
             rf"decoder\.layers\.{idx}\.fc1\.weight": (f"decoder.layers.{idx}.fc1.kernel", TRANSFORM_LINEAR),
             rf"decoder\.layers\.{idx}\.fc1\.bias": (f"decoder.layers.{idx}.fc1.bias", TRANSFORM_NONE),
             rf"decoder\.layers\.{idx}\.fc2\.weight": (f"decoder.layers.{idx}.fc2.kernel", TRANSFORM_LINEAR),
@@ -103,33 +179,77 @@ def _get_key_mapping(config: model_lib.MiMoAudioTokenizerConfig) -> dict[str, tu
         }
         mapping.update(layer_mappings)
 
-    mapping.update({
-        r"decoder\.vocoder\.embeddings\.weight": ("decoder.vocoder.embeddings.kernel", TRANSFORM_LINEAR),
-        r"decoder\.vocoder\.embeddings\.bias": ("decoder.vocoder.embeddings.bias", TRANSFORM_NONE),
-        r"decoder\.vocoder\.layer_norm\.weight": ("decoder.vocoder.layer_norm.scale", TRANSFORM_NONE),
-        r"decoder\.vocoder\.layer_norm\.bias": ("decoder.vocoder.layer_norm.bias", TRANSFORM_NONE),
-        r"decoder\.vocoder\.head\.out\.weight": ("decoder.vocoder.head.linear.kernel", TRANSFORM_LINEAR),
-        r"decoder\.vocoder\.head\.out\.bias": ("decoder.vocoder.head.linear.bias", TRANSFORM_NONE),
-        r"decoder\.vocoder\.head\.istft\.window": ("decoder.vocoder.head.istft.window", TRANSFORM_NONE),
-    })
+    mapping.update(
+        {
+            r"decoder\.vocoder\.embeddings\.weight": ("decoder.vocoder.embeddings.kernel", TRANSFORM_LINEAR),
+            r"decoder\.vocoder\.embeddings\.bias": ("decoder.vocoder.embeddings.bias", TRANSFORM_NONE),
+            r"decoder\.vocoder\.layer_norm\.weight": ("decoder.vocoder.layer_norm.scale", TRANSFORM_NONE),
+            r"decoder\.vocoder\.layer_norm\.bias": ("decoder.vocoder.layer_norm.bias", TRANSFORM_NONE),
+            r"decoder\.vocoder\.head\.out\.weight": ("decoder.vocoder.head.linear.kernel", TRANSFORM_LINEAR),
+            r"decoder\.vocoder\.head\.out\.bias": ("decoder.vocoder.head.linear.bias", TRANSFORM_NONE),
+            r"decoder\.vocoder\.head\.istft\.window": ("decoder.vocoder.head.istft.window", TRANSFORM_NONE),
+        }
+    )
 
     for idx in range(config.vocoder_num_layers):
         layer_mappings = {
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.q_proj\.weight": (f"decoder.vocoder.layers.{idx}.self_attn.q_proj.kernel", TRANSFORM_LINEAR),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.q_proj\.bias": (f"decoder.vocoder.layers.{idx}.self_attn.q_proj.bias", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.k_proj\.weight": (f"decoder.vocoder.layers.{idx}.self_attn.k_proj.kernel", TRANSFORM_LINEAR),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.k_proj\.bias": (f"decoder.vocoder.layers.{idx}.self_attn.k_proj.bias", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.v_proj\.weight": (f"decoder.vocoder.layers.{idx}.self_attn.v_proj.kernel", TRANSFORM_LINEAR),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.v_proj\.bias": (f"decoder.vocoder.layers.{idx}.self_attn.v_proj.bias", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.out_proj\.weight": (f"decoder.vocoder.layers.{idx}.self_attn.out_proj.kernel", TRANSFORM_LINEAR),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.out_proj\.bias": (f"decoder.vocoder.layers.{idx}.self_attn.out_proj.bias", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn_layer_norm\.weight": (f"decoder.vocoder.layers.{idx}.self_attn_layer_norm.scale", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.self_attn_layer_norm\.bias": (f"decoder.vocoder.layers.{idx}.self_attn_layer_norm.bias", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.final_layer_norm\.weight": (f"decoder.vocoder.layers.{idx}.final_layer_norm.scale", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.final_layer_norm\.bias": (f"decoder.vocoder.layers.{idx}.final_layer_norm.bias", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.fc1\.weight": (f"decoder.vocoder.layers.{idx}.fc1.kernel", TRANSFORM_LINEAR),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.q_proj\.weight": (
+                f"decoder.vocoder.layers.{idx}.self_attn.q_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.q_proj\.bias": (
+                f"decoder.vocoder.layers.{idx}.self_attn.q_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.k_proj\.weight": (
+                f"decoder.vocoder.layers.{idx}.self_attn.k_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.k_proj\.bias": (
+                f"decoder.vocoder.layers.{idx}.self_attn.k_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.v_proj\.weight": (
+                f"decoder.vocoder.layers.{idx}.self_attn.v_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.v_proj\.bias": (
+                f"decoder.vocoder.layers.{idx}.self_attn.v_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.out_proj\.weight": (
+                f"decoder.vocoder.layers.{idx}.self_attn.out_proj.kernel",
+                TRANSFORM_LINEAR,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn\.out_proj\.bias": (
+                f"decoder.vocoder.layers.{idx}.self_attn.out_proj.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn_layer_norm\.weight": (
+                f"decoder.vocoder.layers.{idx}.self_attn_layer_norm.scale",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.self_attn_layer_norm\.bias": (
+                f"decoder.vocoder.layers.{idx}.self_attn_layer_norm.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.final_layer_norm\.weight": (
+                f"decoder.vocoder.layers.{idx}.final_layer_norm.scale",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.final_layer_norm\.bias": (
+                f"decoder.vocoder.layers.{idx}.final_layer_norm.bias",
+                TRANSFORM_NONE,
+            ),
+            rf"decoder\.vocoder\.layers\.{idx}\.fc1\.weight": (
+                f"decoder.vocoder.layers.{idx}.fc1.kernel",
+                TRANSFORM_LINEAR,
+            ),
             rf"decoder\.vocoder\.layers\.{idx}\.fc1\.bias": (f"decoder.vocoder.layers.{idx}.fc1.bias", TRANSFORM_NONE),
-            rf"decoder\.vocoder\.layers\.{idx}\.fc2\.weight": (f"decoder.vocoder.layers.{idx}.fc2.kernel", TRANSFORM_LINEAR),
+            rf"decoder\.vocoder\.layers\.{idx}\.fc2\.weight": (
+                f"decoder.vocoder.layers.{idx}.fc2.kernel",
+                TRANSFORM_LINEAR,
+            ),
             rf"decoder\.vocoder\.layers\.{idx}\.fc2\.bias": (f"decoder.vocoder.layers.{idx}.fc2.bias", TRANSFORM_NONE),
         }
         mapping.update(layer_mappings)
@@ -137,9 +257,7 @@ def _get_key_mapping(config: model_lib.MiMoAudioTokenizerConfig) -> dict[str, tu
     return mapping
 
 
-def _get_jax_key(
-    mapping: dict[str, tuple[str, Transform]], source_key: str
-) -> tuple[str | None, Transform | None]:
+def _get_jax_key(mapping: dict[str, tuple[str, Transform]], source_key: str) -> tuple[str | None, Transform | None]:
     for pat, (jax_key, transform) in mapping.items():
         if re.fullmatch(pat, source_key):
             return jax_key, transform
@@ -190,7 +308,6 @@ def load_tokenizer_weights_from_safetensors(
     mesh: jax.sharding.Mesh | None = None,
     rngs: nnx.Rngs | None = None,
 ) -> model_lib.FlaxMiMoAudioTokenizer:
-
     model = nnx.eval_shape(lambda: model_lib.FlaxMiMoAudioTokenizer(config, dtype=dtype, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(model)
     state_dict = abs_state.to_pure_dict()
@@ -227,17 +344,23 @@ def load_tokenizer_weights_from_safetensors(
 
     encoder_rotary_dim = config.d_model // config.encoder_attention_heads
     encoder_half_dim = encoder_rotary_dim // 2
-    encoder_inv_freq = 1.0 / (config.rope_theta ** (jnp.arange(0, encoder_half_dim, dtype=jnp.float32) / float(encoder_half_dim)))
+    encoder_inv_freq = 1.0 / (
+        config.rope_theta ** (jnp.arange(0, encoder_half_dim, dtype=jnp.float32) / float(encoder_half_dim))
+    )
     model.encoder.position_embedding.inv_freq.value = encoder_inv_freq
 
     decoder_rotary_dim = config.d_model // config.decoder_attention_heads
     decoder_half_dim = decoder_rotary_dim // 2
-    decoder_inv_freq = 1.0 / (config.rope_theta ** (jnp.arange(0, decoder_half_dim, dtype=jnp.float32) / float(decoder_half_dim)))
+    decoder_inv_freq = 1.0 / (
+        config.rope_theta ** (jnp.arange(0, decoder_half_dim, dtype=jnp.float32) / float(decoder_half_dim))
+    )
     model.decoder.position_embedding.inv_freq.value = decoder_inv_freq
 
     vocoder_rotary_dim = config.vocoder_dim // config.vocoder_attention_heads
     vocoder_half_dim = vocoder_rotary_dim // 2
-    vocoder_inv_freq = 1.0 / (config.rope_theta ** (jnp.arange(0, vocoder_half_dim, dtype=jnp.float32) / float(vocoder_half_dim)))
+    vocoder_inv_freq = 1.0 / (
+        config.rope_theta ** (jnp.arange(0, vocoder_half_dim, dtype=jnp.float32) / float(vocoder_half_dim))
+    )
     model.decoder.vocoder.position_embedding.inv_freq.value = vocoder_inv_freq
 
     window = jnp.hanning(config.nfft).astype(dtype)
