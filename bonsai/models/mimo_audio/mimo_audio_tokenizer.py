@@ -504,7 +504,7 @@ class AudioEncoder(nnx.Module):
                 in_features=config.n_mels,
                 out_features=config.d_model,
                 kernel_size=config.kernel_size,
-                padding="SAME",
+                padding=1,
                 param_dtype=dtype,
                 rngs=rngs
             ),
@@ -516,7 +516,7 @@ class AudioEncoder(nnx.Module):
                 out_features=config.d_model,
                 kernel_size=config.kernel_size,
                 strides=config.stride_size,
-                padding="SAME",
+                padding=1,
                 param_dtype=dtype,
                 rngs=rngs
             ),
