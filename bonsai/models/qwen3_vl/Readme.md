@@ -12,8 +12,10 @@ This directory contains a pure JAX implementation of the [Qwen3-VL SOTA Vision L
 | [Qwen3-VL-2B-Thinking](https://huggingface.co/Qwen/Qwen3-VL-2B-Thinking) | **✅ Supported** |
 | [Qwen3-VL-4B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct) | **✅ Supported** |
 | [Qwen3-VL-4B-Thinking](https://huggingface.co/Qwen/Qwen3-VL-4B-Thinking) | **✅ Supported** |
-| [Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) | **✅ Supported** |
-| [Qwen3-VL-8B-Thinking](https://huggingface.co/Qwen/Qwen3-VL-8B-Thinking) | **✅ Supported** |
+| [Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) | **✅ Supported** , *Needs sharding |
+| [Qwen3-VL-8B-Thinking](https://huggingface.co/Qwen/Qwen3-VL-8B-Thinking) | **✅ Supported** , *Needs sharding |
+| [Qwen3-VL-32B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct) | **✅ Supported**, *Needs sharding |
+| [Qwen3-VL-32B-Thinking](https://huggingface.co/Qwen/Qwen3-VL-32B-Thinking) | **✅ Supported**, *Needs sharding |
 | **MoE Models** | |
 | [Qwen3-VL-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B) | **🟡 Not started** |
 | [Qwen3-VL-235B-A22B](https://huggingface.co/Qwen/Qwen3-235B-A22B) | **🟡 Not started** |

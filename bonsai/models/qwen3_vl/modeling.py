@@ -131,6 +131,27 @@ class Qwen3VLConfig:
         )
 
     @classmethod
+    def qwen3vl_32b(cls):
+        return cls(
+            vision_config=Qwen3VLVisionConfig(
+                depth=27,
+                hidden_size=1152,
+                intermediate_size=4304,
+                num_heads=16,
+                out_hidden_size=5120,
+                deepstack_visual_indexes=(8, 16, 24),
+            ),
+            text_config=Qwen3VLTextConfig(
+                hidden_size=5120,
+                intermediate_size=25600,
+                num_hidden_layers=64,
+                num_attention_heads=64,
+                num_key_value_heads=8,
+                tie_word_embeddings=False,
+            ),
+        )
+
+    @classmethod
     def standard_test(cls):
         """Small configuration for unit testing."""
         return cls(
