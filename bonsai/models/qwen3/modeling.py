@@ -329,7 +329,8 @@ class Attention(nnx.Module):
         attn_logits = jnp.where(attn_mask, attn_logits, _K_MASK)
 
         # Softmax
-        attn_weights = jax.nn.softmax(attn_logits.astype(jnp.float32), axis=2).astype(attn_logits.dtype)
+        attn_logits_f32 = attn_logits.astype(jnp.float32)
+        attn_weights = jax.nn.softmax(attn_logits_f32, axis=2).astype(attn_logits.dtype)
         qkv = jnp.einsum("BTSKG,BSKH->BTKGH", attn_weights, cache.v_cache.value)
         qkv = qkv.reshape((b, t, n, h))
 

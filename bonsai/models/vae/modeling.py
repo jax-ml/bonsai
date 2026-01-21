@@ -114,9 +114,7 @@ def scaled_dot_product_attention(query, key, value):
     d_k = query.shape[-1]
     scale_factor = 1.0 / jnp.sqrt(d_k)
 
-    attention_scores = jnp.einsum("bhld,bhsd->bhls", query, key)
-
-    attention_scores *= scale_factor
+    attention_scores = jnp.einsum("bhld,bhsd->bhls", query, key) * scale_factor
     attention_weights = jax.nn.softmax(attention_scores, axis=-1)
 
     output = jnp.einsum("bhls,bhsd->bhld", attention_weights, value)

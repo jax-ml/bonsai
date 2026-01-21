@@ -275,7 +275,9 @@ class Mamba2Mixer(nnx.Module):
         key = rngs.params()
         low, high = cfg.time_step_min, cfg.time_step_max
         floor = cfg.time_step_floor
-        dt_init = jnp.exp(jax.random.uniform(key, (cfg.num_heads,)) * (jnp.log(high) - jnp.log(low)) + jnp.log(low))
+        log_low = jnp.log(low)
+        log_high = jnp.log(high)
+        dt_init = jnp.exp(jax.random.uniform(key, (cfg.num_heads,)) * (log_high - log_low) + log_low)
         dt_init = jnp.maximum(dt_init, floor)
         self.dt_bias = nnx.Param(dt_init + jnp.log(-jnp.expm1(-dt_init)))  # inverse softplus
 

@@ -176,6 +176,7 @@ def rotate_half(x: Array) -> Array:
 
 
 def apply_rotary_pos_emb(q: Array, k: Array, cos: Array, sin: Array) -> Tuple[Array, Array]:
+    q_orig_dtype = q.dtype
     q = q.astype(jnp.bfloat16)
     k = k.astype(jnp.bfloat16)
     cos = cos.astype(jnp.bfloat16)
@@ -187,13 +188,10 @@ def apply_rotary_pos_emb(q: Array, k: Array, cos: Array, sin: Array) -> Tuple[Ar
     k_prefix, k_patches = jnp.split(k, [num_prefix], axis=-2)
     cos_b = cos[None, None, ...]
     sin_b = sin[None, None, ...]
-    # Rotation
     q_patches = (q_patches * cos_b) + (rotate_half(q_patches) * sin_b)
     k_patches = (k_patches * cos_b) + (rotate_half(k_patches) * sin_b)
-    q = jnp.concatenate([q_prefix, q_patches], axis=-2)
-    k = jnp.concatenate([k_prefix, k_patches], axis=-2)
-    q = q.astype(jnp.float32)
-    k = k.astype(jnp.float32)
+    q = jnp.concatenate([q_prefix, q_patches], axis=-2).astype(q_orig_dtype)
+    k = jnp.concatenate([k_prefix, k_patches], axis=-2).astype(q_orig_dtype)
     return (q, k)
 
 
