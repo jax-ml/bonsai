@@ -191,7 +191,7 @@ def apply_rotary_pos_emb(q: Array, k: Array, cos: Array, sin: Array) -> Tuple[Ar
     q_patches = (q_patches * cos_b) + (rotate_half(q_patches) * sin_b)
     k_patches = (k_patches * cos_b) + (rotate_half(k_patches) * sin_b)
     q = jnp.concatenate([q_prefix, q_patches], axis=-2).astype(q_orig_dtype)
-    k = jnp.concatenate([k_prefix, k_patches], axis=-2).astype(q_orig_dtype)
+    k = jnp.concatenate([k_prefix, k_patches], axis=-2).astype(k_orig_dtype)
     return (q, k)
 
 
