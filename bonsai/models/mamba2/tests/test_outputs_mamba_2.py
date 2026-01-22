@@ -471,7 +471,7 @@ class TestMamba2Cache(absltest.TestCase):
     def test_create_empty_cache(self):
         """Test creating empty cache with correct shapes."""
         batch_size = 4
-        cache = params.create_empty_cache(self.cfg, batch_size)
+        cache = modeling.create_empty_cache(self.cfg, batch_size)
 
         self.assertIsInstance(cache, modeling.Mamba2Cache)
         self.assertLen(cache.ssm_states, self.cfg.num_hidden_layers)

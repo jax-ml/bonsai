@@ -95,6 +95,33 @@ class Mamba2Cache:
         return cls(ssm_states=list(children[0]), conv_states=list(children[1]))
 
 
+def create_empty_cache(
+    cfg: Mamba2Config,
+    batch_size: int,
+    dtype: jnp.dtype = jnp.float32,
+) -> Mamba2Cache:
+    """Create an empty cache for Mamba2 model.
+
+    Args:
+        cfg: Mamba2Config for the model.
+        batch_size: Batch size for the cache.
+        dtype: Data type for cache arrays.
+
+    Returns:
+        Empty Mamba2Cache with zero-initialized states.
+    """
+    conv_dim = cfg.intermediate_size + 2 * cfg.state_size
+    cache_len = cfg.conv_kernel - 1
+
+    conv_states = [jnp.zeros((batch_size, conv_dim, cache_len), dtype=dtype) for _ in range(cfg.num_hidden_layers)]
+    ssm_states = [
+        jnp.zeros((batch_size, cfg.num_heads, cfg.head_dim, cfg.state_size), dtype=dtype)
+        for _ in range(cfg.num_hidden_layers)
+    ]
+
+    return Mamba2Cache(ssm_states=ssm_states, conv_states=conv_states)
+
+
 # SSD Core Algorithm
 
 

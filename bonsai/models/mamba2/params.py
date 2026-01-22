@@ -86,33 +86,6 @@ def count_parameters(model: nnx.Module) -> int:
     return sum(p.size for p in jax.tree.leaves(params))
 
 
-def create_empty_cache(
-    cfg: modeling.Mamba2Config,
-    batch_size: int,
-    dtype: jnp.dtype = jnp.float32,
-) -> modeling.Mamba2Cache:
-    """Create an empty cache for Mamba2 model.
-
-    Args:
-        cfg: Mamba2Config for the model.
-        batch_size: Batch size for the cache.
-        dtype: Data type for cache arrays.
-
-    Returns:
-        Empty Mamba2Cache with zero-initialized states.
-    """
-    conv_dim = cfg.intermediate_size + 2 * cfg.state_size
-    cache_len = cfg.conv_kernel - 1
-
-    conv_states = [jnp.zeros((batch_size, conv_dim, cache_len), dtype=dtype) for _ in range(cfg.num_hidden_layers)]
-    ssm_states = [
-        jnp.zeros((batch_size, cfg.num_heads, cfg.head_dim, cfg.state_size), dtype=dtype)
-        for _ in range(cfg.num_hidden_layers)
-    ]
-
-    return modeling.Mamba2Cache(ssm_states=ssm_states, conv_states=conv_states)
-
-
 def _get_key_mapping() -> list[tuple[re.Pattern, str, str]]:
     """Get mapping from PyTorch state-spaces/mamba2 keys to JAX parameter paths.
 
