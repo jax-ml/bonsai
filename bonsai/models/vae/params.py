@@ -283,7 +283,7 @@ def create_model_from_safe_tensors(
 
     vae = nnx.eval_shape(lambda: model_lib.VAE(cfg=cfg, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(vae)
-    jax_state = abs_state.to_pure_dict()
+    jax_state = nnx.to_pure_dict(abs_state)
 
     mapping = _get_key_and_transform_mapping()
 
@@ -295,7 +295,7 @@ def create_model_from_safe_tensors(
         _assign_weights(keys, tensor, jax_state, st_key, transform.value)
 
     if mesh is not None:
-        sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
+        sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh))
         state_dict = jax.device_put(jax_state, sharding)
     else:
         state_dict = jax.device_put(jax_state, jax.devices()[0])
