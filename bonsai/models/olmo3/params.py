@@ -115,7 +115,10 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform):
                 tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
             raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = jax.device_put(tensor, state_dict[key].sharding.spec)
+        if hasattr(state_dict[key], "sharding"):
+            state_dict[key] = jax.device_put(tensor, state_dict[key].sharding.spec)
+        else:
+            state_dict[key] = tensor
     else:
         _assign_weights(rest, tensor, state_dict[key], st_key, transform)
 
