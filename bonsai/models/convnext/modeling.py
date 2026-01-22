@@ -84,7 +84,7 @@ class Block(nnx.Module):
         x = self.pwconv2(x)
 
         if self.gamma is not None:
-            x = self.gamma.value * x
+            x = self.gamma[...] * x
 
         return res + drop_path(x, self.drop_path_rate, rngs=rngs, train=train)
 
