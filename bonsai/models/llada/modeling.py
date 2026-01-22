@@ -416,6 +416,29 @@ def generate(
     shd = model.config.shd_cfg.activation
     fsdp_enabled, tp_enabled = shd[0] is not None, shd[2] is not None
 
+    # Functions to enable sharded computation or make it more efficient
+    if fsdp_enabled:
+        argsort = jax.jit(
+            jax.shard_map(lambda x: jnp.argsort(x, axis=-1), in_specs=P(shd[0], None), out_specs=P(shd[0], None))
+        )
+    else:
+        argsort = lambda x: jnp.argsort(x, axis=-1)
+    if tp_enabled:
+
+        @jax.jit
+        @partial(jax.shard_map, in_specs=(P(shd[0], None, shd[2]), P(shd[0], None)), out_specs=P(shd[0], None))
+        def take_along_axis(p, x0):
+            idx = jax.lax.axis_index(shd[2])
+            shard_size = p.shape[-1]
+            lower, upper = idx * shard_size, (idx + 1) * shard_size
+            where_max = (x0 >= lower) & (x0 < upper)
+            local_max = jnp.take_along_axis(p, x0[..., None] - lower, axis=-1).squeeze(-1)
+            local_max = jnp.nan_to_num(local_max, nan=0.0)
+            tmp = local_max * where_max
+            return jax.lax.psum(tmp, axis_name=shd[2])
+    else:
+        take_along_axis = lambda p, x0: jnp.take_along_axis(p, x0[:, :, None], axis=-1).squeeze(-1)
+
     # Write mask_id into the generation part of the array
     x = jnp.concatenate([prompt, jnp.full((prompt.shape[0], gen_length), mask_id, dtype=jnp.int32)], axis=1)
     if fsdp_enabled:
@@ -472,9 +495,7 @@ def generate(
             # Compute remasking confidence for next step of diffusion
             if remasking == "low_confidence":
                 p = jax.nn.softmax(logits, axis=-1)
-                if tp_enabled:
-                    p = jax.sharding.reshard(p, out_shardings=P(ShardMode.FSDP.value if fsdp_enabled else None))
-                x0_p = jnp.take_along_axis(p, x0[..., None], axis=-1).squeeze(-1)
+                x0_p = take_along_axis(p, x0)
             elif remasking == "random":
                 key, subkey = jax.random.split(key)
                 x0_p = jax.random.uniform(subkey, x0.shape[:2])
@@ -488,15 +509,11 @@ def generate(
             mask_index = x == mask_id
             x0 = jnp.where(mask_index, x0, x)
             confidence = jnp.where(mask_index, x0_p, -jnp.inf)
-            if fsdp_enabled:
-                confidence = jax.sharding.reshard(confidence, P())
 
             # Compute array ranks for topk mask
-            ranks = jnp.argsort(jnp.argsort(confidence, axis=-1), axis=-1)
+            ranks = argsort(argsort(confidence))
             rank_threshold = (confidence.shape[-1] - num_transfer_tokens[:, i])[:, None]
             topk_mask = ranks >= rank_threshold
-            if fsdp_enabled:
-                topk_mask = jax.sharding.reshard(topk_mask, P(ShardMode.FSDP.value))
 
             # Assign topk from x0 to x
             x = jnp.where(topk_mask, x0, x)
