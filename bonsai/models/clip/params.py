@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+from typing import Optional
+
+from huggingface_hub import hf_hub_download
+
 
 @dataclass
 class CLIPConfig:
-
     embed_dim: int = 512
 
     image_size: int = 224
@@ -16,3 +19,12 @@ class CLIPConfig:
     text_width: int = 512
     text_layers: int = 12
     text_heads: int = 8
+
+
+def load_pretrained_clip(
+    model_name: str = "openai/clip-vit-base-patch32",
+    revision: Optional[str] = None,
+):
+    raise NotImplementedError(
+        
+    )
