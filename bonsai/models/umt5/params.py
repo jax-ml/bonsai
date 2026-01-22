@@ -314,7 +314,7 @@ def create_model(
     graph_def, abs_state = nnx.split(umt5)
     state_dict = nnx.to_pure_dict(abs_state)
     # Only use sharding if mesh is provided
-    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
+    sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh)) if mesh is not None else None
 
     if not key_mapping:
         key_mapping = _get_key_and_transform_mapping(cls, cfg)
