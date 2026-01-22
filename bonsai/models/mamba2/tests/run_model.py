@@ -182,7 +182,7 @@ def run_model(*, max_new_tokens: int = 32, use_cache: bool = True) -> None:
             print(f"User:\n {q}")
             print(f"Answer:\n {text.strip()}\n")
     else:
-        print("Using non-cached generation (O(n²) complexity)\n")
+        print("Using non-cached generation (O(n^2) complexity)\n")
         # Determine padding id robustly.
         pad_id = tokenizer.pad_token_id
         if pad_id is None:
