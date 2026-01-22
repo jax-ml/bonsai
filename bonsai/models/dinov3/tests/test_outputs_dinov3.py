@@ -97,7 +97,7 @@ class TestForwardPass(absltest.TestCase):
 
         with torch.inference_mode():
             ty = self.baseline_model(tx).last_hidden_state
-        jy = self.bonsai_model(jx).last_hidden_state
+        jy = self.bonsai_model(jx)["last_hidden_state"]
 
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
@@ -113,7 +113,7 @@ class TestForwardPass(absltest.TestCase):
 
         with torch.inference_mode():
             ty = self.baseline_model(tx).pooler_output
-        jy = self.bonsai_model(jx).pooler_output
+        jy = self.bonsai_model(jx)["pooler_output"]
 
         np_y = np.asarray(jax.device_get(jy))
         ty_bonsai = torch.tensor(np_y, dtype=torch.float32)

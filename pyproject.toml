@@ -45,6 +45,7 @@ test-env = [
   "timm",
   "h5py",
   "diffusers[flax]",
+  "keras_hub",
 ]
 
 testing = [
