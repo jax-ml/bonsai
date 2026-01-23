@@ -1,4 +1,4 @@
-# Copyright 2025 The JAX Authors.
+# Copyright 2026 The JAX Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,10 +21,9 @@ import jax.numpy as jnp
 import numpy as np
 from huggingface_hub import snapshot_download
 from jax.sharding import AxisType
-
 from transformers import AutoTokenizer
 
-from bonsai.models.llama32 import modeling, params
+from bonsai.models.llama3_2 import modeling, params
 from bonsai.utils import Sampler
 
 
@@ -32,19 +31,15 @@ def tokenize(tokenizer, prompts: list[str], shd=None):
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
-    lines = [
-        tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True)
-        for prompt in prompts
-    ]
-    batch = tokenizer(lines, padding=True, return_tensors="np", add_special_tokens=False)
+    batch = tokenizer(prompts, padding=True, return_tensors="np")
     input_ids = jnp.array(batch["input_ids"], out_sharding=shd)
     attention_mask = jnp.array(batch["attention_mask"], out_sharding=shd)
     return input_ids, attention_mask
 
 
 def run_model():
-    # Choose a checkpoint and config; defaults to the 1B Instruct variant.
-    model_id = "meta-llama/Llama-3.2-1B-Instruct"
+    # Choose a checkpoint and config; defaults to the 1B base variant.
+    model_id = "meta-llama/Llama-3.2-1B"
     try:
         access_token = os.environ["HF_TOKEN"]
     except KeyError:
@@ -62,8 +57,8 @@ def run_model():
     batch_shd = None
 
     prompts = [
-        "Summarize what a tokenizer does in one paragraph.",
-        "Write a short, friendly explanation of gradient descent for beginners.",
+        "The capital of France is",
+        "The definition of a tokenizer in NLP is strictly defined as follows: A tokenizer is an algorithm that",
     ]
 
     tokenizer = AutoTokenizer.from_pretrained(model_ckpt_path)
@@ -101,13 +96,13 @@ def run_model():
     all_output_tokens = jax.device_get(jnp.concatenate(tokens_list, axis=-1))
     print(f"Generated {all_output_tokens.shape[1]} tokens in {elapsed:.3f}s")
     for i, prompt in enumerate(prompts):
-        print(f"User:\n {prompt}")
+        print(f"Prompt:\n {prompt}")
         seq_tokens = all_output_tokens[i]
         eos_idx = np.where(seq_tokens == tokenizer.eos_token_id)[0]
         if eos_idx.size > 0:
             seq_tokens = seq_tokens[: eos_idx[0]]
         decoded = tokenizer.decode(seq_tokens, skip_special_tokens=True)
-        print(f"Answer:\n {decoded}\n\n")
+        print(f"Completion:\n {decoded}\n\n")
 
 
 if __name__ == "__main__":

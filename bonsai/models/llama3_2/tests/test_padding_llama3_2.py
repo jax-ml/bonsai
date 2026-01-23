@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from flax import nnx
 from jax.sharding import AxisType
 
-from bonsai.models.llama32 import modeling
+from bonsai.models.llama3_2 import modeling
 
 
 def _tiny_config() -> modeling.ModelConfig:

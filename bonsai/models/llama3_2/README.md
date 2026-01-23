@@ -27,10 +27,10 @@ Hugging Face UI for the specific model you want to use.
 
 ```sh
 # Base model
-python3 -m bonsai.models.llama32.tests.run_model_base
+python3 -m bonsai.models.llama3_2.tests.run_model_base
 
 # Instruct model
-python3 -m bonsai.models.llama32.tests.run_model
+python3 -m bonsai.models.llama3_2.tests.run_model
 ```
 
 ## Output parity tests
@@ -38,7 +38,7 @@ python3 -m bonsai.models.llama32.tests.run_model
 These tests compare JAX outputs against Hugging Face PyTorch outputs and require `HF_TOKEN`.
 
 ```sh
-python3 -m bonsai.models.llama32.tests.test_outputs_llama32
+python3 -m bonsai.models.llama3_2.tests.test_outputs_llama3_2
 ```
 
 ## References

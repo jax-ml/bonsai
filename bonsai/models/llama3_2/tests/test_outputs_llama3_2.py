@@ -12,7 +12,7 @@ from huggingface_hub import snapshot_download
 from jax.sharding import AxisType
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from bonsai.models.llama32 import modeling, params
+from bonsai.models.llama3_2 import modeling, params
 
 # used to set highest precision on matrix multiplication for testing
 jax.config.update("jax_default_matmul_precision", "highest")
