@@ -28,7 +28,8 @@ from flax.nnx.nn.linear import default_embed_init
 
 
 class ShardMode(Enum):
-    """ Sharding Modes for Model Parameters """
+    """Sharding Modes for Model Parameters"""
+
     FSDP = "fsdp"
     TP = "tp"
 
@@ -92,7 +93,6 @@ class RopeScalingConfig:
     low_freq_factor: float = 1.0
     high_freq_factor: float = 4.0
     original_max_position_embeddings: int = 8192
-
 
 
 @dataclasses.dataclass(frozen=True)
@@ -181,6 +181,7 @@ class LlamaRMSNorm(nnx.Module):
 
         return (self.scale[...] * x_fp32 * inv_rms).astype(dtype)
 
+
 # TODO: Replace with nnx.Linear once explicit sharding is supported.
 class ShardedLinear(nnx.Module):
     def __init__(
@@ -225,7 +226,6 @@ class ShardedEmbedding(nnx.Embed):
         return jnp.dot(query, embedding.T, out_sharding=out_sharding)
 
 
-
 class LlamaMLP(nnx.Module):
     """Feed Forward Network"""
 
@@ -242,11 +242,24 @@ class LlamaMLP(nnx.Module):
             dtype=cfg.dtype,
             rngs=rngs,
         )
-        self.up_proj = ShardedLinear(self.hidden_size, self.intermediate_size, sharding=cfg.shd_cfg.up_proj, use_bias=False, dtype=cfg.dtype, rngs=rngs)
-        self.down_proj = ShardedLinear(self.intermediate_size, self.hidden_size, sharding=cfg.shd_cfg.down_proj, use_bias=False, dtype=cfg.dtype, rngs=rngs)
+        self.up_proj = ShardedLinear(
+            self.hidden_size,
+            self.intermediate_size,
+            sharding=cfg.shd_cfg.up_proj,
+            use_bias=False,
+            dtype=cfg.dtype,
+            rngs=rngs,
+        )
+        self.down_proj = ShardedLinear(
+            self.intermediate_size,
+            self.hidden_size,
+            sharding=cfg.shd_cfg.down_proj,
+            use_bias=False,
+            dtype=cfg.dtype,
+            rngs=rngs,
+        )
 
-
-    @jax.named_scope('feed_forward')
+    @jax.named_scope("feed_forward")
     def __call__(self, x: ArrayLike) -> Array:
         act_shd = self.config.shd_cfg.activation
         gated = nnx.silu(self.gate_proj(x, out_sharding=act_shd)) * self.up_proj(x, out_sharding=act_shd)
@@ -263,9 +276,7 @@ def _generate_pos_embeddings(
     if rope_scaling is None:
         rope_scaling = RopeScalingConfig(factor=1.0)
 
-    inv_freq = 1.0 / (
-        rope_theta ** (jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim)
-    )
+    inv_freq = 1.0 / (rope_theta ** (jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim))
 
     factor = rope_scaling.factor
     low_freq_factor = rope_scaling.low_freq_factor
@@ -277,9 +288,7 @@ def _generate_pos_embeddings(
 
     wavelen = (2.0 * math.pi) / inv_freq
     inv_freq_llama = jnp.where(wavelen > low_freq_wavelen, inv_freq / factor, inv_freq)
-    smooth_factor = (old_context_len / wavelen - low_freq_factor) / (
-        high_freq_factor - low_freq_factor
-    )
+    smooth_factor = (old_context_len / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
     smoothed_inv_freq = (1.0 - smooth_factor) * inv_freq_llama / factor + smooth_factor * inv_freq_llama
     is_medium_freq = jnp.logical_and(
         wavelen >= high_freq_wavelen,
@@ -288,9 +297,7 @@ def _generate_pos_embeddings(
     inv_freq_llama = jnp.where(is_medium_freq, smoothed_inv_freq, inv_freq_llama)
 
     positions_f32 = positions.astype(jnp.float32)
-    sinusoid_inp = jnp.einsum(
-        "BT,k->BTk", positions_f32, inv_freq_llama, precision=jax.lax.Precision.HIGHEST
-    )
+    sinusoid_inp = jnp.einsum("BT,k->BTk", positions_f32, inv_freq_llama, precision=jax.lax.Precision.HIGHEST)
     return jnp.sin(sinusoid_inp), jnp.cos(sinusoid_inp)
 
 
@@ -327,6 +334,7 @@ def count_right_pads_from_mask(attn_mask: Array) -> Array:
     right_pad = jnp.argmax(jnp.flip(mask, axis=1), axis=1)
     max_len = jnp.full_like(right_pad, mask.shape[1])
     return jnp.where(all_pad, max_len, right_pad)
+
 
 def compute_positions_from_segment_ids(seg_ids: Array) -> Array:
     """Compute position ids from segment ids."""
@@ -377,8 +385,6 @@ def sharded_attention(
     attn_output = jnp.einsum("BTSKG,BSKH->BTKGH", attn_weights, v, out_sharding=out_sharding)
 
     return attn_output.astype(q.dtype)
-
-
 
 
 class LlamaAttention(nnx.Module):
@@ -546,6 +552,7 @@ class LlamaDecoderLayer(nnx.Module):
 
 class Llama(nnx.Module):
     """Llama Model"""
+
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.config = cfg
         embed_init = partial(default_embed_init, out_sharding=cfg.shd_cfg.emb_weight)
@@ -613,12 +620,10 @@ def forward(
     attention_mask: Array | None = None,
     segment_ids: Array | None = None,
 ) -> tuple[Array, Cache]:
-
     # Use attention_mask when available because pad_id can equal eos_id, which would
     # misclassify real tokens as padding if we rely on tokens != pad_id.
     if attention_mask is not None and segment_ids is not None:
         raise ValueError("Provide only one of attention_mask or segment_ids.")
-
 
     if segment_ids is None:
         if attention_mask is None:

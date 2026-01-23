@@ -33,9 +33,7 @@ def tokenize(tokenizer, prompts: list[str], shd=None):
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
     lines = [
-        tokenizer.apply_chat_template(
-            [{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True
-        )
+        tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True)
         for prompt in prompts
     ]
     batch = tokenizer(lines, padding=True, return_tensors="np", add_special_tokens=False)
@@ -45,7 +43,6 @@ def tokenize(tokenizer, prompts: list[str], shd=None):
 
 
 def run_model():
-
     # Choose a checkpoint and config; defaults to the 1B Instruct variant.
     model_id = "meta-llama/Llama-3.2-1B-Instruct"
     try:

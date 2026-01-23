@@ -38,7 +38,6 @@ def tokenize(tokenizer, prompts: list[str], shd=None):
 
 
 def run_model():
-
     # Choose a checkpoint and config; defaults to the 1B base variant.
     model_id = "meta-llama/Llama-3.2-1B"
     try:
