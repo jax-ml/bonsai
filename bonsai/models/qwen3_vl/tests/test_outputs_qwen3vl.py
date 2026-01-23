@@ -1,11 +1,13 @@
 import os
+import shutil
+import tempfile
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
 from absl.testing import absltest
-from huggingface_hub import constants, snapshot_download
+from huggingface_hub import snapshot_download
 from safetensors.torch import save_model
 from transformers import AutoProcessor, Qwen3VLConfig, Qwen3VLForConditionalGeneration
 from PIL import Image
@@ -91,24 +93,27 @@ class TestForwardPass(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.save_dir = constants.default_cache_path
-        os.makedirs(self.save_dir, exist_ok=True)
+        self.test_dir = tempfile.mkdtemp()
 
         self.pt_config = get_test_config_torch()
         self.pt_model = Qwen3VLForConditionalGeneration(config=self.pt_config)
-        self.model_ckpt_path = os.path.join(self.save_dir, "qwen3vl_test.safetensors")
+        self.model_filename = "qwen3vl_test.safetensors"
+        self.model_ckpt_path = os.path.join(self.test_dir, self.model_filename)
         save_model(self.pt_model, self.model_ckpt_path)
 
         self.flax_config = get_test_config_flax()
         self.flax_model = params.create_model_from_safe_tensors(
-            self.save_dir, self.flax_config, model_filename="qwen3vl_test.safetensors"
+            self.test_dir, self.flax_config, model_filename=self.model_filename
         )
 
-        if os.path.exists(self.model_ckpt_path):
-            os.remove(self.model_ckpt_path)
         self.pt_model.eval()
         self.batch_size = 1
         self.seq_len = 10
+
+    def tearDown(self):
+        # Recursively remove the temporary directory and all its contents
+        shutil.rmtree(self.test_dir)
+        super().tearDown()
 
     def test_text_embeddings(self):
         """Compare embedding layer output."""
@@ -123,7 +128,7 @@ class TestForwardPass(absltest.TestCase):
             pt_out = pt_embed(pt_ids)
         flax_out = flax_embed(input_ids)
 
-        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-7, atol=1e-7)
 
     def test_rms_norm(self):
         """Compare RMSNorm layer."""
@@ -139,7 +144,7 @@ class TestForwardPass(absltest.TestCase):
             pt_out = pt_norm(tx)
         flax_out = flax_norm(jx)
 
-        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-6, atol=1e-6)
 
     def test_text_mlp(self):
         """Compare gated MLP layer."""
@@ -155,7 +160,7 @@ class TestForwardPass(absltest.TestCase):
             pt_out = pt_mlp(tx)
         flax_out = flax_mlp(jx)
 
-        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-3, atol=1e-3)
+        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-7, atol=1e-7)
 
 
 class TestVisionComponentsEquivalence(absltest.TestCase):
@@ -163,22 +168,25 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.save_dir = constants.default_cache_path
-        os.makedirs(self.save_dir, exist_ok=True)
+        self.test_dir = tempfile.mkdtemp()
 
         self.pt_config = get_test_config_torch()
         self.pt_model = Qwen3VLForConditionalGeneration(config=self.pt_config)
-        self.model_ckpt_path = os.path.join(self.save_dir, "qwen3vl_vision_test.safetensors")
+        self.model_filename = "qwen3vl_vision_test.safetensors"
+        self.model_ckpt_path = os.path.join(self.test_dir, self.model_filename)
         save_model(self.pt_model, self.model_ckpt_path)
 
         self.flax_config = get_test_config_flax()
         self.flax_model = params.create_model_from_safe_tensors(
-            self.save_dir, self.flax_config, model_filename="qwen3vl_vision_test.safetensors"
+            self.test_dir, self.flax_config, model_filename=self.model_filename
         )
 
-        if os.path.exists(self.model_ckpt_path):
-            os.remove(self.model_ckpt_path)
         self.pt_model.eval()
+
+    def tearDown(self):
+        # Recursively remove the temporary directory and all its contents
+        shutil.rmtree(self.test_dir)
+        super().tearDown()
 
     def test_vision_mlp(self):
         """Compare vision MLP output."""
@@ -194,7 +202,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
             pt_out = pt_mlp(tx)
         flax_out = flax_mlp(jx)
 
-        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-3, atol=1e-3)
+        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-7, atol=1e-7)
 
     def test_vision_layernorm(self):
         """Compare vision LayerNorm output."""
@@ -210,7 +218,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
             pt_out = pt_norm(tx)
         flax_out = flax_norm(jx)
 
-        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-6, atol=1e-6)
 
     def test_vision_attention_qkv(self):
         """Compare vision attention QKV projections."""
@@ -228,7 +236,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
             pt_qkv = pt_attn.qkv(tx).numpy()
         flax_qkv = np.array(flax_attn.qkv(jx))
 
-        np.testing.assert_allclose(flax_qkv, pt_qkv, rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(flax_qkv, pt_qkv, rtol=1e-6, atol=1e-6)
 
     def test_vision_block_components(self):
         """Compare vision block layer norm and MLP separately."""
@@ -245,19 +253,19 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         with torch.inference_mode():
             pt_norm1 = pt_block.norm1(tx).numpy()
         flax_norm1 = np.array(flax_block.norm1(jx))
-        np.testing.assert_allclose(flax_norm1, pt_norm1, rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(flax_norm1, pt_norm1, rtol=1e-6, atol=1e-6)
 
         # Test norm2
         with torch.inference_mode():
             pt_norm2 = pt_block.norm2(tx).numpy()
         flax_norm2 = np.array(flax_block.norm2(jx))
-        np.testing.assert_allclose(flax_norm2, pt_norm2, rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(flax_norm2, pt_norm2, rtol=1e-6, atol=1e-6)
 
         # Test MLP
         with torch.inference_mode():
             pt_mlp = pt_block.mlp(tx).numpy()
         flax_mlp = np.array(flax_block.mlp(jx))
-        np.testing.assert_allclose(flax_mlp, pt_mlp, rtol=1e-3, atol=1e-3)
+        np.testing.assert_allclose(flax_mlp, pt_mlp, rtol=1e-6, atol=1e-6)
 
 
 class TestKVCache(absltest.TestCase):
