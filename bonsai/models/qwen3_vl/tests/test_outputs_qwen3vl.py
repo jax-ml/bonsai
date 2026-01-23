@@ -171,44 +171,13 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         os.makedirs(self.save_dir, exist_ok=True)
 
         # Create small PyTorch config
-        self.pt_config = Qwen3VLConfig(
-            vision_config={
-                "depth": 2,
-                "hidden_size": 64,
-                "intermediate_size": 128,
-                "num_heads": 4,
-                "in_channels": 3,
-                "patch_size": 8,
-                "temporal_patch_size": 2,
-                "spatial_merge_size": 2,
-                "out_hidden_size": 128,
-                "num_position_embeddings": 256,
-                "deepstack_visual_indexes": [0, 1],
-                "hidden_act": "gelu_pytorch_tanh",
-            },
-            text_config={
-                "vocab_size": 1000,
-                "hidden_size": 128,
-                "intermediate_size": 256,
-                "num_hidden_layers": 2,
-                "num_attention_heads": 4,
-                "num_key_value_heads": 2,
-                "head_dim": 32,
-                "tie_word_embeddings": True,
-                "rope_theta": 5_000_000,
-                "rope_scaling": {
-                    "mrope_interleaved": True,
-                    "mrope_section": [12, 10, 10],
-                    "rope_type": "default",
-                },
-            },
-        )
+        self.pt_config = get_test_config_torch()
 
         self.pt_model = Qwen3VLForConditionalGeneration(config=self.pt_config)
         self.model_ckpt_path = os.path.join(self.save_dir, "qwen3vl_vision_test.safetensors")
         save_model(self.pt_model, self.model_ckpt_path)
 
-        self.flax_config = model_lib.Qwen3VLConfig.standard_test()
+        self.flax_config = get_test_config_flax()
         self.flax_model = params.create_model_from_safe_tensors(
             self.save_dir, self.flax_config, model_filename="qwen3vl_vision_test.safetensors"
         )
@@ -255,7 +224,7 @@ class TestKVCache(absltest.TestCase):
 
     def test_cache_initialization(self):
         """Test cache is initialized with correct shapes."""
-        config = model_lib.Qwen3VLConfig.standard_test()
+        config = get_test_config_flax()
         cache = model_lib.init_cache(config, batch_size=2, token_len=10, generate_steps=5)
 
         self.assertEqual(len(cache), config.text_config.num_hidden_layers)
