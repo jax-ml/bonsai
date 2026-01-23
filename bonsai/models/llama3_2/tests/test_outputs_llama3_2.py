@@ -67,7 +67,6 @@ class TestOutputsLlama32(absltest.TestCase):
 
         cls.batch_size = 4
         cls.num_input_tokens = 6
-        cls.relaxed_tol = 1e-3
 
     def _make_torch_input(self):
         messages = [{"role": "user", "content": "Summarize what a tokenizer does in one paragraph."}]
@@ -92,9 +91,9 @@ class TestOutputsLlama32(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.array(jy, dtype=np.float32)),
             ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-            check_dtype=False,
+            rtol=1e-5,
+            atol=1e-5,
+            check_dtype=True,
         )
 
     def test_rms_norm(self):
@@ -109,9 +108,9 @@ class TestOutputsLlama32(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.array(jy, dtype=np.float32)),
             ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-            check_dtype=False,
+            rtol=1e-5,
+            atol=1e-5,
+            check_dtype=True,
         )
 
     def test_q_proj(self):
@@ -130,9 +129,9 @@ class TestOutputsLlama32(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.array(jy, dtype=np.float32)),
             ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-            check_dtype=False,
+            rtol=1e-5,
+            atol=1e-5,
+            check_dtype=True,
         )
 
     def test_k_proj(self):
@@ -151,9 +150,9 @@ class TestOutputsLlama32(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.array(jy, dtype=np.float32)),
             ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-            check_dtype=False,
+            rtol=1e-5,
+            atol=1e-5,
+            check_dtype=True,
         )
 
     def test_v_proj(self):
@@ -172,9 +171,9 @@ class TestOutputsLlama32(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.array(jy, dtype=np.float32)),
             ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-            check_dtype=False,
+            rtol=1e-5,
+            atol=1e-5,
+            check_dtype=True,
         )
 
     def test_o_proj(self):
@@ -189,9 +188,9 @@ class TestOutputsLlama32(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.array(jy, dtype=np.float32)),
             ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-            check_dtype=False,
+            rtol=1e-5,
+            atol=1e-5,
+            check_dtype=True,
         )
 
     def test_mlp(self):
@@ -206,9 +205,9 @@ class TestOutputsLlama32(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.array(jy, dtype=np.float32)),
             ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-            check_dtype=False,
+            rtol=1e-5,
+            atol=1e-5,
+            check_dtype=True,
         )
 
     def test_lm_head(self):
@@ -223,9 +222,9 @@ class TestOutputsLlama32(absltest.TestCase):
         torch.testing.assert_close(
             torch.tensor(np.array(jy, dtype=np.float32)),
             ty,
-            rtol=self.relaxed_tol,
-            atol=self.relaxed_tol,
-            check_dtype=False,
+            rtol=1e-5,
+            atol=1e-5,
+            check_dtype=True,
         )
 
     def test_full_logits(self):
@@ -238,7 +237,7 @@ class TestOutputsLlama32(absltest.TestCase):
             t_logits = self.torch_model(**t_inputs).logits
 
         n_logits = self.llama_model(n_tokens, segment_ids, cache=None, attn_mask=None)
-        np.testing.assert_allclose(n_logits, t_logits.detach().cpu().numpy(), rtol=5e-2, atol=5e-2)
+        np.testing.assert_allclose(n_logits, t_logits.detach().cpu().numpy(), rtol=5e-4, atol=1e-3)
 
     def test_forward_logits(self):
         t_inputs = self._make_torch_input()
