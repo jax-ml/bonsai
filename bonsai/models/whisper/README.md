@@ -1,6 +1,6 @@
 # Whisper in JAX NNX (In Progress)
 
-This directory contains a **JAX + NNX** implementation of the [OpenAI Whisper speech recognition model](https://github.com/openai/whisper), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
+This directory contains a **JAX + NNX** implementation of the [OpenAI Whisper speech recognition model](https://github.com/openai/whisper), using the [Flax NNX](https://flax.readthedocs.io/en/stable/index.html) API.
 
 Whisper is a general-purpose speech recognition model that can transcribe audio in multiple languages and perform various speech recognition tasks including transcription, translation, and language identification.
 
