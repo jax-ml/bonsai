@@ -33,6 +33,50 @@ class Qwen3VLVisionConfig:
     def head_dim(self) -> int:
         return self.hidden_size // self.num_heads
 
+    @classmethod
+    def qwen3vl_2b(cls):
+        return cls(
+            depth=24,
+            hidden_size=1024,
+            intermediate_size=4096,
+            num_heads=16,
+            out_hidden_size=2048,
+            deepstack_visual_indexes=(5, 11, 17),
+        )
+
+    @classmethod
+    def qwen3vl_4b(cls):
+        return cls(
+            depth=24,
+            hidden_size=1024,
+            intermediate_size=4096,
+            num_heads=16,
+            out_hidden_size=2560,
+            deepstack_visual_indexes=(5, 11, 17),
+        )
+
+    @classmethod
+    def qwen3vl_8b(cls):
+        return cls(
+            depth=27,
+            hidden_size=1152,
+            intermediate_size=4304,
+            num_heads=16,
+            out_hidden_size=4096,
+            deepstack_visual_indexes=(8, 16, 24),
+        )
+
+    @classmethod
+    def qwen3vl_32b(cls):
+        return cls(
+            depth=27,
+            hidden_size=1152,
+            intermediate_size=4304,
+            num_heads=16,
+            out_hidden_size=5120,
+            deepstack_visual_indexes=(8, 16, 24),
+        )
+
 
 @dataclass(frozen=True)
 class Qwen3VLTextConfig:
@@ -52,6 +96,50 @@ class Qwen3VLTextConfig:
     attention_bias: bool = False
     tie_word_embeddings: bool = True
 
+    @classmethod
+    def qwen3vl_2b(cls):
+        return cls(
+            hidden_size=2048,
+            intermediate_size=6144,
+            num_hidden_layers=28,
+            num_attention_heads=16,
+            num_key_value_heads=8,
+            tie_word_embeddings=True,
+        )
+
+    @classmethod
+    def qwen3vl_4b(cls):
+        return cls(
+            hidden_size=2560,
+            intermediate_size=9728,
+            num_hidden_layers=36,
+            num_attention_heads=32,
+            num_key_value_heads=8,
+            tie_word_embeddings=True,
+        )
+
+    @classmethod
+    def qwen3vl_8b(cls):
+        return cls(
+            hidden_size=4096,
+            intermediate_size=12288,
+            num_hidden_layers=36,
+            num_attention_heads=32,
+            num_key_value_heads=8,
+            tie_word_embeddings=False,
+        )
+
+    @classmethod
+    def qwen3vl_32b(cls):
+        return cls(
+            hidden_size=5120,
+            intermediate_size=25600,
+            num_hidden_layers=64,
+            num_attention_heads=64,
+            num_key_value_heads=8,
+            tie_word_embeddings=False,
+        )
+
 
 @dataclass(frozen=True)
 class Qwen3VLConfig:
@@ -68,117 +156,31 @@ class Qwen3VLConfig:
     def qwen3vl_2b(cls):
         """Qwen3-VL 2B configuration."""
         return cls(
-            vision_config=Qwen3VLVisionConfig(
-                depth=24,
-                hidden_size=1024,
-                intermediate_size=4096,
-                num_heads=16,
-                out_hidden_size=2048,
-                deepstack_visual_indexes=(5, 11, 17),
-            ),
-            text_config=Qwen3VLTextConfig(
-                hidden_size=2048,
-                intermediate_size=6144,
-                num_hidden_layers=28,
-                num_attention_heads=16,
-                num_key_value_heads=8,
-                tie_word_embeddings=True,
-            ),
+            vision_config=Qwen3VLVisionConfig.qwen3vl_2b(),
+            text_config=Qwen3VLTextConfig.qwen3vl_2b(),
         )
 
     @classmethod
     def qwen3vl_4b(cls):
         """Qwen3-VL 4B configuration."""
         return cls(
-            vision_config=Qwen3VLVisionConfig(
-                depth=24,
-                hidden_size=1024,
-                intermediate_size=4096,
-                num_heads=16,
-                out_hidden_size=2560,
-                deepstack_visual_indexes=(5, 11, 17),
-            ),
-            text_config=Qwen3VLTextConfig(
-                hidden_size=2560,
-                intermediate_size=9728,
-                num_hidden_layers=36,
-                num_attention_heads=32,
-                num_key_value_heads=8,
-                tie_word_embeddings=True,
-            ),
+            vision_config=Qwen3VLVisionConfig.qwen3vl_4b(),
+            text_config=Qwen3VLTextConfig.qwen3vl_4b(),
         )
 
     @classmethod
     def qwen3vl_8b(cls):
         """Qwen3-VL 8B configuration."""
         return cls(
-            vision_config=Qwen3VLVisionConfig(
-                depth=27,
-                hidden_size=1152,
-                intermediate_size=4304,
-                num_heads=16,
-                out_hidden_size=4096,
-                deepstack_visual_indexes=(8, 16, 24),
-            ),
-            text_config=Qwen3VLTextConfig(
-                hidden_size=4096,
-                intermediate_size=12288,
-                num_hidden_layers=36,
-                num_attention_heads=32,
-                num_key_value_heads=8,
-                tie_word_embeddings=False,
-            ),
+            vision_config=Qwen3VLVisionConfig.qwen3vl_8b(),
+            text_config=Qwen3VLTextConfig.qwen3vl_8b(),
         )
 
     @classmethod
     def qwen3vl_32b(cls):
         return cls(
-            vision_config=Qwen3VLVisionConfig(
-                depth=27,
-                hidden_size=1152,
-                intermediate_size=4304,
-                num_heads=16,
-                out_hidden_size=5120,
-                deepstack_visual_indexes=(8, 16, 24),
-            ),
-            text_config=Qwen3VLTextConfig(
-                hidden_size=5120,
-                intermediate_size=25600,
-                num_hidden_layers=64,
-                num_attention_heads=64,
-                num_key_value_heads=8,
-                tie_word_embeddings=False,
-            ),
-        )
-
-    @classmethod
-    def standard_test(cls):
-        """Small configuration for unit testing."""
-        return cls(
-            vision_config=Qwen3VLVisionConfig(
-                depth=2,
-                hidden_size=64,
-                intermediate_size=128,
-                num_heads=4,
-                in_channels=3,
-                patch_size=8,
-                temporal_patch_size=2,
-                spatial_merge_size=2,
-                out_hidden_size=128,
-                num_position_embeddings=256,
-                deepstack_visual_indexes=(0, 1),
-            ),
-            text_config=Qwen3VLTextConfig(
-                vocab_size=1000,
-                hidden_size=128,
-                intermediate_size=256,
-                num_hidden_layers=2,
-                num_attention_heads=4,
-                num_key_value_heads=2,
-                head_dim=32,
-                mrope_section=(12, 10, 10),
-                tie_word_embeddings=True,
-            ),
+            vision_config=Qwen3VLVisionConfig.qwen3vl_32b(),
+            text_config=Qwen3VLTextConfig.qwen3vl_32b(),
         )
 
 
@@ -190,11 +192,10 @@ class RMSNorm(nnx.Module):
         self.weight = nnx.Param(jnp.ones((dim,), dtype=jnp.float32))
 
     def __call__(self, x: Array) -> Array:
-        dtype = x.dtype
         x_f32 = x.astype(jnp.float32)
         rms = jax.lax.rsqrt(jnp.mean(x_f32**2, axis=-1, keepdims=True) + self.eps)
         out = (x_f32 * rms) * self.weight[...]
-        return out.astype(dtype)
+        return out.astype(x.dtype)
 
 
 class Qwen3VLPatchEmbed(nnx.Module):
@@ -217,18 +218,14 @@ class Qwen3VLPatchEmbed(nnx.Module):
         cfg = self.config
         seq_len = hidden_states.shape[0]
 
-        # Reshape to (1, D, H, W, C) for nnx.Conv (channels last)
         hidden_states = hidden_states.reshape(
             seq_len, cfg.in_channels, cfg.temporal_patch_size, cfg.patch_size, cfg.patch_size
         )
         # (seq, C, D, H, W) -> (seq, D, H, W, C)
         hidden_states = hidden_states.transpose(0, 2, 3, 4, 1)
 
-        # Apply conv: input (seq, D, H, W, C) -> output (seq, 1, 1, 1, hidden_size)
-        out = self.proj(hidden_states)
-
-        # Flatten: (seq, 1, 1, 1, hidden_size) -> (seq, hidden_size)
-        return out.reshape(seq_len, cfg.hidden_size)
+        # Apply conv: input (seq, D, H, W, C) -> output (seq , hidden_size)
+        return self.proj(hidden_states).reshape(seq_len, cfg.hidden_size)
 
 
 class Qwen3VLVisionMLP(nnx.Module):
@@ -256,24 +253,26 @@ class Qwen3VLVisionAttention(nnx.Module):
         self.proj = nnx.Linear(hidden_size, hidden_size, use_bias=True, rngs=rngs)
         self.scale = self.head_dim**-0.5
 
+    def apply_rope(self, cos: Array, sin: Array, q: Array, k: Array):
+        # Apply RoPE - split cos/sin into halves for the half-rotation
+        half_dim = self.head_dim // 2
+        cos1, cos2 = cos[:, None, :half_dim], cos[:, None, half_dim:]  # (seq, head_dim//2)
+        sin1, sin2 = sin[:, None, :half_dim], sin[:, None, half_dim:]
+
+        q1, q2 = q[..., :half_dim], q[..., half_dim:]  # (seq, heads, half_dim)
+        q = jnp.concatenate([q1 * cos1 - q2 * sin1, q2 * cos2 + q1 * sin2], axis=-1)
+        k1, k2 = k[..., :half_dim], k[..., half_dim:]
+        k = jnp.concatenate([k1 * cos1 - k2 * sin1, k2 * cos2 + k1 * sin2], axis=-1)
+
+        return (q, k)
+
     def __call__(self, hidden_states: Array, position_embeddings: Tuple[Array, Array]) -> Array:
         seq_len = hidden_states.shape[0]
         cos, sin = position_embeddings  # (seq_len, head_dim)
         qkv = self.qkv(hidden_states).reshape(seq_len, 3, self.num_heads, self.head_dim)
         q, k, v = qkv[:, 0], qkv[:, 1], qkv[:, 2]  # (seq, heads, head_dim)
 
-        # Apply RoPE - split cos/sin into halves for the half-rotation
-        half_dim = self.head_dim // 2
-        cos1, cos2 = cos[:, :half_dim], cos[:, half_dim:]  # (seq, head_dim//2)
-        sin1, sin2 = sin[:, :half_dim], sin[:, half_dim:]
-
-        cos1, sin1 = cos1[:, None, :], sin1[:, None, :]  # (seq, 1, half_dim)
-        cos2, sin2 = cos2[:, None, :], sin2[:, None, :]
-
-        q1, q2 = q[..., :half_dim], q[..., half_dim:]  # (seq, heads, half_dim)
-        q = jnp.concatenate([q1 * cos1 - q2 * sin1, q2 * cos2 + q1 * sin2], axis=-1)
-        k1, k2 = k[..., :half_dim], k[..., half_dim:]
-        k = jnp.concatenate([k1 * cos1 - k2 * sin1, k2 * cos2 + k1 * sin2], axis=-1)
+        q, k = self.apply_rope(cos, sin, q, k)
 
         q, k, v = q.transpose(1, 0, 2), k.transpose(1, 0, 2), v.transpose(1, 0, 2)
         attn_weights = jnp.matmul(q, k.transpose(0, 2, 1)) * self.scale

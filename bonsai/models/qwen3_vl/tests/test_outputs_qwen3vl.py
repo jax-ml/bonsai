@@ -17,6 +17,75 @@ from bonsai.models.qwen3_vl import params
 jax.config.update("jax_default_matmul_precision", "highest")
 
 
+def get_test_config_torch() -> Qwen3VLConfig:
+    return Qwen3VLConfig(
+        vision_config={
+            "depth": 2,
+            "hidden_size": 64,
+            "intermediate_size": 128,
+            "num_heads": 4,
+            "in_channels": 3,
+            "patch_size": 8,
+            "temporal_patch_size": 2,
+            "spatial_merge_size": 2,
+            "out_hidden_size": 128,
+            "num_position_embeddings": 256,
+            "deepstack_visual_indexes": [0, 1],
+            "hidden_act": "gelu_pytorch_tanh",
+        },
+        text_config={
+            "vocab_size": 1000,
+            "hidden_size": 128,
+            "intermediate_size": 256,
+            "num_hidden_layers": 2,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 2,
+            "head_dim": 32,
+            "hidden_act": "silu",
+            "rms_norm_eps": 1e-6,
+            "rope_theta": 5_000_000,
+            "rope_scaling": {
+                "mrope_interleaved": True,
+                "mrope_section": [12, 10, 10],
+                "rope_type": "default",
+            },
+            "attention_bias": False,
+            "tie_word_embeddings": True,
+        },
+        image_token_id=151655,
+        video_token_id=151656,
+    )
+
+
+def get_test_config_flax() -> model_lib.Qwen3VLConfig:
+    return model_lib.Qwen3VLConfig(
+        vision_config=model_lib.Qwen3VLVisionConfig(
+            depth=2,
+            hidden_size=64,
+            intermediate_size=128,
+            num_heads=4,
+            in_channels=3,
+            patch_size=8,
+            temporal_patch_size=2,
+            spatial_merge_size=2,
+            out_hidden_size=128,
+            num_position_embeddings=256,
+            deepstack_visual_indexes=(0, 1),
+        ),
+        text_config=model_lib.Qwen3VLTextConfig(
+            vocab_size=1000,
+            hidden_size=128,
+            intermediate_size=256,
+            num_hidden_layers=2,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            head_dim=32,
+            mrope_section=(12, 10, 10),
+            tie_word_embeddings=True,
+        ),
+    )
+
+
 class TestForwardPass(absltest.TestCase):
     """Test forward pass using small manually-initialized models."""
 
@@ -26,43 +95,7 @@ class TestForwardPass(absltest.TestCase):
         os.makedirs(self.save_dir, exist_ok=True)
 
         # Create small PyTorch config for testing
-        self.pt_config = Qwen3VLConfig(
-            vision_config={
-                "depth": 2,
-                "hidden_size": 64,
-                "intermediate_size": 128,
-                "num_heads": 4,
-                "in_channels": 3,
-                "patch_size": 8,
-                "temporal_patch_size": 2,
-                "spatial_merge_size": 2,
-                "out_hidden_size": 128,
-                "num_position_embeddings": 256,
-                "deepstack_visual_indexes": [0, 1],
-                "hidden_act": "gelu_pytorch_tanh",
-            },
-            text_config={
-                "vocab_size": 1000,
-                "hidden_size": 128,
-                "intermediate_size": 256,
-                "num_hidden_layers": 2,
-                "num_attention_heads": 4,
-                "num_key_value_heads": 2,
-                "head_dim": 32,
-                "hidden_act": "silu",
-                "rms_norm_eps": 1e-6,
-                "rope_theta": 5_000_000,
-                "rope_scaling": {
-                    "mrope_interleaved": True,
-                    "mrope_section": [12, 10, 10],
-                    "rope_type": "default",
-                },
-                "attention_bias": False,
-                "tie_word_embeddings": True,
-            },
-            image_token_id=151655,
-            video_token_id=151656,
-        )
+        self.pt_config = get_test_config_torch()
 
         # Create PyTorch model and save weights
         self.pt_model = Qwen3VLForConditionalGeneration(config=self.pt_config)
@@ -70,7 +103,7 @@ class TestForwardPass(absltest.TestCase):
         save_model(self.pt_model, self.model_ckpt_path)
 
         # Create Flax config and load model
-        self.flax_config = model_lib.Qwen3VLConfig.standard_test()
+        self.flax_config = get_test_config_flax()
         self.flax_model = params.create_model_from_safe_tensors(
             self.save_dir, self.flax_config, model_filename="qwen3vl_test.safetensors"
         )
