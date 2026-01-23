@@ -367,23 +367,3 @@ def create_model_from_safe_tensors(
 
     gc.collect()
     return nnx.merge(graph_def, state_dict)
-
-
-def get_pretrained_config(model_size: str = "2b") -> model_lib.Qwen3VLConfig:
-    """Get configuration for a pretrained model size.
-
-    Args:
-        model_size: One of "2b", "4b", "8b", or "test".
-
-    Returns:
-        Qwen3VLConfig for the specified size.
-    """
-    configs = {
-        "2b": model_lib.Qwen3VLConfig.qwen3vl_2b,
-        "4b": model_lib.Qwen3VLConfig.qwen3vl_4b,
-        "8b": model_lib.Qwen3VLConfig.qwen3vl_8b,
-        "test": model_lib.Qwen3VLConfig.standard_test,
-    }
-    if model_size not in configs:
-        raise ValueError(f"Unknown model size: {model_size}. Choose from {list(configs.keys())}")
-    return configs[model_size]()

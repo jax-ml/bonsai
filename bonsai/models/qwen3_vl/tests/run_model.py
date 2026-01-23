@@ -96,7 +96,7 @@ def main():
     # Load Flax model
     print("\n2. Loading Flax model...")
     start = time.time()
-    flax_config = params.get_pretrained_config("2b")
+    flax_config = modeling.Qwen3VLConfig.qwen3vl_2b()
     flax_model = params.create_model_from_safe_tensors(model_path, flax_config)
     print(f"   Model loaded in {time.time() - start:.2f}s")
 
