@@ -1,13 +1,26 @@
 import time
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from huggingface_hub import snapshot_download
+from jax._src.mesh import AxisType
 from transformers import AutoProcessor
 
 from bonsai.models.qwen3_vl import modeling
 from bonsai.models.qwen3_vl import params
 
+# ============================================================================
+# MESH CONFIGURATION - Modify these to enable sharding
+
+# Set USE_SHARDING=True and MESH_SHAPE to enable distributed inference
+# Examples:
+#   MESH_SHAPE = (2, 4)  -> 2 FSDP devices x 4 TP devices (8 total)
+#   MESH_SHAPE = (1, 4)  -> Pure tensor parallelism on 4 devices
+#   MESH_SHAPE = (4, 1)  -> Pure FSDP on 4 devices
+USE_SHARDING = False
+MESH_SHAPE = (1, 1)  # (fsdp, tp) - only used when USE_SHARDING=True
+# ============================================================================
 
 MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
 EOS_TOKEN_ID = 151643
@@ -89,6 +102,17 @@ def main():
     print("Qwen3-VL JAX Fast Generation Demo")
     print("=" * 60)
 
+    # Setup mesh context if sharding enabled
+    use_fsdp = USE_SHARDING and MESH_SHAPE[0] > 1
+    use_tp = USE_SHARDING and MESH_SHAPE[1] > 1
+
+    if USE_SHARDING:
+        print(f"\nSharding enabled: MESH_SHAPE={MESH_SHAPE}, use_fsdp={use_fsdp}, use_tp={use_tp}")
+        mesh = jax.make_mesh(MESH_SHAPE, ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        jax.set_mesh(mesh)
+    else:
+        print("\nSharding disabled (running on single device)")
+
     # Download model
     print("\n1. Downloading model...")
     model_path = snapshot_download(MODEL_ID)
@@ -96,7 +120,7 @@ def main():
     # Load Flax model
     print("\n2. Loading Flax model...")
     start = time.time()
-    flax_config = modeling.Qwen3VLConfig.qwen3vl_2b()
+    flax_config = modeling.Qwen3VLConfig.qwen3vl_2b(use_fsdp=use_fsdp, use_tp=use_tp)
     flax_model = params.create_model_from_safe_tensors(model_path, flax_config)
     print(f"   Model loaded in {time.time() - start:.2f}s")
 

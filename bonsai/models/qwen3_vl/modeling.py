@@ -5,9 +5,112 @@ from typing import Optional, Tuple, TypeAlias
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from jax import Array
+from jax import Array, P
+from jax.sharding import PartitionSpec, get_abstract_mesh, reshard
 
 _K_MASK = jnp.finfo(jnp.bfloat16).min
+
+
+# --- Sharding Configuration --- #
+@dataclass(slots=True, frozen=True)
+class VisionShardingCfg:
+    """Sharding configuration for vision encoder components."""
+
+    attn_qkv_kernel: PartitionSpec
+    attn_proj_kernel: PartitionSpec
+    mlp_fc1_kernel: PartitionSpec
+    mlp_fc2_kernel: PartitionSpec
+    layer_norm: PartitionSpec
+    activation: PartitionSpec
+    patch_embed_kernel: PartitionSpec
+    pos_embed: PartitionSpec
+
+    @staticmethod
+    def no_sharding():
+        return VisionShardingCfg(
+            attn_qkv_kernel=P(None, None),
+            attn_proj_kernel=P(None, None),
+            mlp_fc1_kernel=P(None, None),
+            mlp_fc2_kernel=P(None, None),
+            layer_norm=P(None),
+            activation=P(None, None),
+            patch_embed_kernel=P(None, None, None, None, None),
+            pos_embed=P(None, None),
+        )
+
+    @staticmethod
+    def default(use_fsdp: bool, use_tp: bool):
+        fsdp = "fsdp" if use_fsdp else None
+        tp = "tp" if use_tp else None
+        return VisionShardingCfg(
+            attn_qkv_kernel=P(fsdp, tp),
+            attn_proj_kernel=P(tp, fsdp),
+            mlp_fc1_kernel=P(fsdp, tp),
+            mlp_fc2_kernel=P(tp, fsdp),
+            layer_norm=P(tp),
+            activation=P(fsdp, tp),
+            patch_embed_kernel=P(None, None, None, None, tp),
+            pos_embed=P(None, tp),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class TextShardingCfg:
+    """Sharding configuration for text decoder components."""
+
+    q_weight: PartitionSpec
+    kv_weight: PartitionSpec
+    o_weight: PartitionSpec
+    mlp_gate_up_kernel: PartitionSpec
+    mlp_down_kernel: PartitionSpec
+    rms_norm: PartitionSpec
+    embed_kernel: PartitionSpec
+    cache: PartitionSpec
+    act_btd: PartitionSpec
+    act_btf: PartitionSpec
+    act_btnh: PartitionSpec
+
+    @staticmethod
+    def no_sharding():
+        return TextShardingCfg(
+            q_weight=P(None, None),
+            kv_weight=P(None, None),
+            o_weight=P(None, None),
+            mlp_gate_up_kernel=P(None, None),
+            mlp_down_kernel=P(None, None),
+            rms_norm=P(None),
+            embed_kernel=P(None, None),
+            cache=P(None, None, None, None),
+            act_btd=P(None, None, None),
+            act_btf=P(None, None, None),
+            act_btnh=P(None, None, None, None),
+        )
+
+    @staticmethod
+    def default(use_fsdp: bool, use_tp: bool):
+        fsdp = "fsdp" if use_fsdp else None
+        tp = "tp" if use_tp else None
+        return TextShardingCfg(
+            q_weight=P(fsdp, tp),
+            kv_weight=P(fsdp, tp),
+            o_weight=P(tp, fsdp),
+            mlp_gate_up_kernel=P(fsdp, tp),
+            mlp_down_kernel=P(tp, fsdp),
+            rms_norm=P(tp),
+            embed_kernel=P(tp, fsdp),
+            cache=P(fsdp, None, tp, None),
+            act_btd=P(fsdp, None, tp),
+            act_btf=P(fsdp, None, tp),
+            act_btnh=P(fsdp, None, tp, None),
+        )
+
+
+def shard(x, spec: PartitionSpec):
+    """Reshard tensor according to partition spec if mesh is available."""
+    mesh = get_abstract_mesh()
+    if not mesh.empty and len(mesh.axis_names) > 0:
+        return reshard(x, spec)
+    return x
 
 
 @dataclass(frozen=True)
@@ -28,13 +131,15 @@ class Qwen3VLVisionConfig:
     hidden_act: str = "gelu"
     layer_norm_eps: float = 1e-6
     rope_theta: float = 10000.0
+    shd_cfg: VisionShardingCfg = VisionShardingCfg.no_sharding()
 
     @property
     def head_dim(self) -> int:
         return self.hidden_size // self.num_heads
 
     @classmethod
-    def qwen3vl_2b(cls):
+    def qwen3vl_2b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        shd = VisionShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else VisionShardingCfg.no_sharding()
         return cls(
             depth=24,
             hidden_size=1024,
@@ -42,10 +147,12 @@ class Qwen3VLVisionConfig:
             num_heads=16,
             out_hidden_size=2048,
             deepstack_visual_indexes=(5, 11, 17),
+            shd_cfg=shd,
         )
 
     @classmethod
-    def qwen3vl_4b(cls):
+    def qwen3vl_4b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        shd = VisionShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else VisionShardingCfg.no_sharding()
         return cls(
             depth=24,
             hidden_size=1024,
@@ -53,10 +160,12 @@ class Qwen3VLVisionConfig:
             num_heads=16,
             out_hidden_size=2560,
             deepstack_visual_indexes=(5, 11, 17),
+            shd_cfg=shd,
         )
 
     @classmethod
-    def qwen3vl_8b(cls):
+    def qwen3vl_8b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        shd = VisionShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else VisionShardingCfg.no_sharding()
         return cls(
             depth=27,
             hidden_size=1152,
@@ -64,10 +173,12 @@ class Qwen3VLVisionConfig:
             num_heads=16,
             out_hidden_size=4096,
             deepstack_visual_indexes=(8, 16, 24),
+            shd_cfg=shd,
         )
 
     @classmethod
-    def qwen3vl_32b(cls):
+    def qwen3vl_32b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        shd = VisionShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else VisionShardingCfg.no_sharding()
         return cls(
             depth=27,
             hidden_size=1152,
@@ -75,6 +186,7 @@ class Qwen3VLVisionConfig:
             num_heads=16,
             out_hidden_size=5120,
             deepstack_visual_indexes=(8, 16, 24),
+            shd_cfg=shd,
         )
 
 
@@ -95,9 +207,11 @@ class Qwen3VLTextConfig:
     mrope_section: tuple = (24, 20, 20)  # T, H, W partitions of head_dim
     attention_bias: bool = False
     tie_word_embeddings: bool = True
+    shd_cfg: TextShardingCfg = TextShardingCfg.no_sharding()
 
     @classmethod
-    def qwen3vl_2b(cls):
+    def qwen3vl_2b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        shd = TextShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingCfg.no_sharding()
         return cls(
             hidden_size=2048,
             intermediate_size=6144,
@@ -105,10 +219,12 @@ class Qwen3VLTextConfig:
             num_attention_heads=16,
             num_key_value_heads=8,
             tie_word_embeddings=True,
+            shd_cfg=shd,
         )
 
     @classmethod
-    def qwen3vl_4b(cls):
+    def qwen3vl_4b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        shd = TextShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingCfg.no_sharding()
         return cls(
             hidden_size=2560,
             intermediate_size=9728,
@@ -116,10 +232,12 @@ class Qwen3VLTextConfig:
             num_attention_heads=32,
             num_key_value_heads=8,
             tie_word_embeddings=True,
+            shd_cfg=shd,
         )
 
     @classmethod
-    def qwen3vl_8b(cls):
+    def qwen3vl_8b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        shd = TextShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingCfg.no_sharding()
         return cls(
             hidden_size=4096,
             intermediate_size=12288,
@@ -127,10 +245,12 @@ class Qwen3VLTextConfig:
             num_attention_heads=32,
             num_key_value_heads=8,
             tie_word_embeddings=False,
+            shd_cfg=shd,
         )
 
     @classmethod
-    def qwen3vl_32b(cls):
+    def qwen3vl_32b(cls, use_fsdp: bool = False, use_tp: bool = False):
+        shd = TextShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingCfg.no_sharding()
         return cls(
             hidden_size=5120,
             intermediate_size=25600,
@@ -138,6 +258,7 @@ class Qwen3VLTextConfig:
             num_attention_heads=64,
             num_key_value_heads=8,
             tie_word_embeddings=False,
+            shd_cfg=shd,
         )
 
 
@@ -153,34 +274,34 @@ class Qwen3VLConfig:
     vision_end_token_id: int = 151653
 
     @classmethod
-    def qwen3vl_2b(cls):
+    def qwen3vl_2b(cls, use_fsdp: bool = False, use_tp: bool = False):
         """Qwen3-VL 2B configuration."""
         return cls(
-            vision_config=Qwen3VLVisionConfig.qwen3vl_2b(),
-            text_config=Qwen3VLTextConfig.qwen3vl_2b(),
+            vision_config=Qwen3VLVisionConfig.qwen3vl_2b(use_fsdp, use_tp),
+            text_config=Qwen3VLTextConfig.qwen3vl_2b(use_fsdp, use_tp),
         )
 
     @classmethod
-    def qwen3vl_4b(cls):
+    def qwen3vl_4b(cls, use_fsdp: bool = False, use_tp: bool = False):
         """Qwen3-VL 4B configuration."""
         return cls(
-            vision_config=Qwen3VLVisionConfig.qwen3vl_4b(),
-            text_config=Qwen3VLTextConfig.qwen3vl_4b(),
+            vision_config=Qwen3VLVisionConfig.qwen3vl_4b(use_fsdp, use_tp),
+            text_config=Qwen3VLTextConfig.qwen3vl_4b(use_fsdp, use_tp),
         )
 
     @classmethod
-    def qwen3vl_8b(cls):
+    def qwen3vl_8b(cls, use_fsdp: bool = False, use_tp: bool = False):
         """Qwen3-VL 8B configuration."""
         return cls(
-            vision_config=Qwen3VLVisionConfig.qwen3vl_8b(),
-            text_config=Qwen3VLTextConfig.qwen3vl_8b(),
+            vision_config=Qwen3VLVisionConfig.qwen3vl_8b(use_fsdp, use_tp),
+            text_config=Qwen3VLTextConfig.qwen3vl_8b(use_fsdp, use_tp),
         )
 
     @classmethod
-    def qwen3vl_32b(cls):
+    def qwen3vl_32b(cls, use_fsdp: bool = False, use_tp: bool = False):
         return cls(
-            vision_config=Qwen3VLVisionConfig.qwen3vl_32b(),
-            text_config=Qwen3VLTextConfig.qwen3vl_32b(),
+            vision_config=Qwen3VLVisionConfig.qwen3vl_32b(use_fsdp, use_tp),
+            text_config=Qwen3VLTextConfig.qwen3vl_32b(use_fsdp, use_tp),
         )
 
 
@@ -232,11 +353,13 @@ class Qwen3VLVisionMLP(nnx.Module):
     """Vision encoder MLP with GELU activation."""
 
     def __init__(self, config: Qwen3VLVisionConfig, *, rngs: nnx.Rngs):
+        self.shd_cfg = config.shd_cfg
         self.linear_fc1 = nnx.Linear(config.hidden_size, config.intermediate_size, use_bias=True, rngs=rngs)
         self.linear_fc2 = nnx.Linear(config.intermediate_size, config.hidden_size, use_bias=True, rngs=rngs)
 
     def __call__(self, x: Array) -> Array:
         x = self.linear_fc1(x)
+        x = shard(x, self.shd_cfg.activation)
         x = nnx.gelu(x, approximate=True)
         x = self.linear_fc2(x)
         return x
@@ -246,6 +369,7 @@ class Qwen3VLVisionAttention(nnx.Module):
     """Vision encoder multi-head attention with RoPE."""
 
     def __init__(self, config: Qwen3VLVisionConfig, *, rngs: nnx.Rngs):
+        self.shd_cfg = config.shd_cfg
         self.num_heads = config.num_heads
         self.head_dim = config.head_dim
         hidden_size = config.hidden_size
@@ -278,7 +402,7 @@ class Qwen3VLVisionAttention(nnx.Module):
         attn_weights = jnp.matmul(q, k.transpose(0, 2, 1)) * self.scale
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)
         out = jnp.matmul(attn_weights, v).transpose(1, 0, 2).reshape(seq_len, -1)
-        return self.proj(out)
+        return shard(self.proj(out), self.shd_cfg.activation)
 
 
 class Qwen3VLVisionBlock(nnx.Module):
@@ -306,6 +430,7 @@ class Qwen3VLPatchMerger(nnx.Module):
 
     def __init__(self, config: Qwen3VLVisionConfig, use_postshuffle_norm: bool = False, *, rngs: nnx.Rngs):
         self.config = config
+        self.shd_cfg = config.shd_cfg
         merge_factor = config.spatial_merge_size**2
         hidden_merged = config.hidden_size * merge_factor
         norm_dim = hidden_merged if use_postshuffle_norm else config.hidden_size
@@ -323,6 +448,7 @@ class Qwen3VLPatchMerger(nnx.Module):
         if self.use_postshuffle_norm:
             x = self.norm(x)
         x = self.linear_fc1(x)
+        x = shard(x, self.shd_cfg.activation)
         x = nnx.gelu(x)
         x = self.linear_fc2(x)
         return x
@@ -333,6 +459,7 @@ class Qwen3VLVisionModel(nnx.Module):
 
     def __init__(self, config: Qwen3VLVisionConfig, *, rngs: nnx.Rngs):
         self.config = config
+        self.shd_cfg = config.shd_cfg
         self.patch_embed = Qwen3VLPatchEmbed(config, rngs=rngs)
         self.pos_embed = nnx.Embed(
             num_embeddings=config.num_position_embeddings, features=config.hidden_size, rngs=rngs
@@ -489,8 +616,9 @@ class LayerCache(nnx.Module):
 
     def __init__(self, config: Qwen3VLTextConfig, batch_size: int, cache_size: int, dtype: jnp.dtype = jnp.bfloat16):
         cache_shape = (batch_size, cache_size, config.num_key_value_heads, config.head_dim)
-        self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
-        self.v_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
+        shd = config.shd_cfg
+        self.k_cache = nnx.Cache(shard(jnp.zeros(cache_shape, dtype=dtype), shd.cache))
+        self.v_cache = nnx.Cache(shard(jnp.zeros(cache_shape, dtype=dtype), shd.cache))
         self.size = cache_size
         self.cur_ind = nnx.Variable(jnp.zeros((), dtype=jnp.int32))
 
@@ -513,12 +641,15 @@ class Qwen3VLMLP(nnx.Module):
     """SiLU-gated MLP for text decoder."""
 
     def __init__(self, config: Qwen3VLTextConfig, *, rngs: nnx.Rngs):
+        self.shd_cfg = config.shd_cfg
         self.gate_proj = nnx.Linear(config.hidden_size, config.intermediate_size, use_bias=False, rngs=rngs)
         self.up_proj = nnx.Linear(config.hidden_size, config.intermediate_size, use_bias=False, rngs=rngs)
         self.down_proj = nnx.Linear(config.intermediate_size, config.hidden_size, use_bias=False, rngs=rngs)
 
     def __call__(self, x: Array) -> Array:
-        return self.down_proj(nnx.silu(self.gate_proj(x)) * self.up_proj(x))
+        activations = nnx.silu(self.gate_proj(x)) * self.up_proj(x)
+        activations = shard(activations, self.shd_cfg.act_btf)
+        return self.down_proj(activations)
 
 
 def _generate_rope(positions: Array, head_dim: int, rope_theta: float) -> Tuple[Array, Array]:
@@ -551,6 +682,7 @@ class Qwen3VLAttention(nnx.Module):
 
     def __init__(self, config: Qwen3VLTextConfig, layer_idx: int, *, rngs: nnx.Rngs):
         self.config = config
+        self.shd_cfg = config.shd_cfg
         self.layer_idx = layer_idx
         self.num_heads = config.num_attention_heads
         self.num_kv_heads = config.num_key_value_heads
@@ -576,9 +708,13 @@ class Qwen3VLAttention(nnx.Module):
     def __call__(self, x: Array, cache: LayerCache, sin: Array, cos: Array, mask: Array | None) -> Array:
         batch, seq_len, _ = x.shape
 
-        q = self.q_norm(self.q_proj(x).reshape(batch, seq_len, self.num_heads, self.head_dim))
-        k = self.k_norm(self.k_proj(x).reshape(batch, seq_len, self.num_kv_heads, self.head_dim))
-        v = self.v_proj(x).reshape(batch, seq_len, self.num_kv_heads, self.head_dim)
+        q = shard(
+            self.q_norm(self.q_proj(x).reshape(batch, seq_len, self.num_heads, self.head_dim)), self.shd_cfg.act_btnh
+        )
+        k = shard(
+            self.k_norm(self.k_proj(x).reshape(batch, seq_len, self.num_kv_heads, self.head_dim)), self.shd_cfg.act_btnh
+        )
+        v = shard(self.v_proj(x).reshape(batch, seq_len, self.num_kv_heads, self.head_dim), self.shd_cfg.act_btnh)
 
         q = _apply_rope(q, sin, cos)
         k = _apply_rope(k, sin, cos)
@@ -605,7 +741,7 @@ class Qwen3VLAttention(nnx.Module):
         attn_out = jnp.matmul(attn_weights, v).transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
         cache.cur_ind[...] = cache.cur_ind[...] + seq_len
-        return self.o_proj(attn_out)
+        return shard(self.o_proj(attn_out), self.shd_cfg.act_btd)
 
 
 class Qwen3VLDecoderLayer(nnx.Module):
@@ -628,12 +764,13 @@ class Qwen3VLTextModel(nnx.Module):
 
     def __init__(self, config: Qwen3VLTextConfig, *, rngs: nnx.Rngs):
         self.config = config
+        self.shd_cfg = config.shd_cfg
         self.embed_tokens = nnx.Embed(num_embeddings=config.vocab_size, features=config.hidden_size, rngs=rngs)
         self.layers = nnx.List([Qwen3VLDecoderLayer(config, i, rngs=rngs) for i in range(config.num_hidden_layers)])
         self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps, rngs=rngs)
 
     def __call__(self, inputs_embeds: Array, cache: Cache, sin: Array, cos: Array, mask: Array | None) -> Array:
-        hidden_states = inputs_embeds
+        hidden_states = shard(inputs_embeds, self.shd_cfg.act_btd)
         for i, layer in enumerate(self.layers):
             hidden_states = layer(hidden_states, cache[i], sin, cos, mask)
         return self.norm(hidden_states)
