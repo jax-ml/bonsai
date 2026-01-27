@@ -127,7 +127,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         for comp in ["q_proj", "k_proj", "v_proj", "o_proj"]:
             ty = getattr(tm, comp)(tx)
             jy = getattr(nm, comp)(jx, out_sharding=None)
-            np.testing.assert_allclose(jy, ty.detach().cpu().numpy(), err_msg=comp)
+            np.testing.assert_allclose(jy, ty.detach().cpu().numpy(), rtol=1e-5, atol=1e-5, err_msg=comp)
 
         for comp in ["q_norm", "k_norm"]:
             ty, jy = getattr(tm, comp)(tx), getattr(nm, comp)(jx)

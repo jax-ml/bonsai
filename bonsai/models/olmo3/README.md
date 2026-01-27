@@ -1,4 +1,4 @@
-# Gemma3 in JAX
+# Olmo3 in JAX
 
 This directory contains a pure JAX implementation of the [Olmo3 model](https://allenai.org/olmo), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API. 
 
