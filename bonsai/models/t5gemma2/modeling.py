@@ -365,14 +365,14 @@ class T5Gemma2FeedForward(nnx.Module):
         else:
             gating_shape = (2, features, hidden_dim)
 
-        self.gating_einsum = Gemma3Einsum(
+        self.gating_einsum = T5Gemma2Einsum(
             shape=gating_shape,
             kernel_init=kernel_init,
             dtype=dtype,
             rngs=rngs,
         )
 
-        self.linear = Gemma3Einsum(
+        self.linear = T5Gemma2Einsum(
             shape=(hidden_dim, features),
             kernel_init=kernel_init,
             dtype=dtype,
@@ -530,29 +530,32 @@ def make_merged_attention_mask(
 def make_decode_mode_self_mask(
     batch_size: int,
     query_len: int,
-    cache_len: int,
+    max_cache_len: int,
+    current_cache_len: int,
 ) -> Bool[Array, "B 1 Q K"]:
     """Creates self-attention mask for decode mode (with KV cache).
 
     During decode mode, the query attends to all previously cached keys.
-    Since we're generating tokens sequentially and causality is already
-    enforced by the order of generation, all cached positions are valid.
+    We mask out positions that haven't been written to yet (>= current_cache_len).
 
     Args:
         batch_size: Batch size.
         query_len: Number of query positions (typically 1 for decode mode).
-        cache_len: Total length of cached keys (cache_index + query_len).
+        max_cache_len: Total allocated size of the cache.
+        current_cache_len: Current valid length of the cache.
 
     Returns:
-        Mask of shape [B, 1, query_len, cache_len] with all True.
+        Mask of shape [B, 1, query_len, max_cache_len].
     """
-    return jnp.ones((batch_size, 1, query_len, cache_len), dtype=jnp.bool_)
+    k_pos = jnp.arange(max_cache_len)
+    mask = k_pos < current_cache_len
+    return jnp.broadcast_to(mask[None, None, None, :], (batch_size, 1, query_len, max_cache_len))
 
 
 def make_decode_mode_sliding_mask(
     batch_size: int,
     query_pos: int,
-    cache_len: int,
+    max_cache_len: int,
     sliding_window: int,
 ) -> Bool[Array, "B 1 1 K"]:
     """Creates sliding window mask for decode mode (with KV cache).
@@ -563,20 +566,20 @@ def make_decode_mode_sliding_mask(
     Args:
         batch_size: Batch size.
         query_pos: Position of the current query (typically cache_index).
-        cache_len: Total length of cached keys.
+        max_cache_len: Total allocated size of the cache.
         sliding_window: Size of the sliding window.
 
     Returns:
-        Mask of shape [B, 1, 1, cache_len] with True for valid positions.
+        Mask of shape [B, 1, 1, max_cache_len].
     """
-    # Key positions: 0, 1, 2, ..., cache_len-1
-    k_positions = jnp.arange(cache_len)
+    # Key positions: 0, 1, 2, ..., max_cache_len-1
+    k_positions = jnp.arange(max_cache_len)
     # Within sliding window: |query_pos - k_pos| < sliding_window
     in_window = jnp.abs(query_pos - k_positions) < sliding_window
     # Also must be causal (k_pos <= query_pos)
     is_causal = k_positions <= query_pos
     mask = in_window & is_causal
-    return jnp.broadcast_to(mask[None, None, None, :], (batch_size, 1, 1, cache_len))
+    return jnp.broadcast_to(mask[None, None, None, :], (batch_size, 1, 1, max_cache_len))
 
 
 # =============================================================================
@@ -695,7 +698,7 @@ class T5Gemma2VisionMLP(nnx.Module):
         deterministic: bool | None = None,
     ) -> Float[Array, "B L D"]:
         x = self.dense1(x)
-        x = nnx.gelu(x)
+        x = jax.nn.gelu(x)
         x = self.dropout(x, deterministic=deterministic)
         return self.dense2(x)
 
@@ -741,7 +744,7 @@ class T5Gemma2VisionEncoderBlock(nnx.Module):
             rngs=rngs,
         )
 
-        self.mlp = Gemma3VisionMLP(
+        self.mlp = T5Gemma2VisionMLP(
             width=width,
             mlp_dim=mlp_dim,
             dropout=dropout,
@@ -836,7 +839,7 @@ class T5Gemma2VisionExit(nnx.Module):
         assert not cur_width % output_width, f"{cur_width=} {output_width=}"
         window = cur_width // output_width
         window_shape = (window, window)
-        x = nnx.avg_pool(x, window_shape=window_shape, strides=window_shape)
+        x = nnx.avg_pool(x, window_shape, strides=window_shape, padding="VALID")
         batch_size, height, width, embed_dim = x.shape
         return jnp.reshape(x, (batch_size, height * width, embed_dim))
 
@@ -850,7 +853,7 @@ class T5Gemma2VisionSoftTokenizer(nnx.Module):
 
     def __init__(
         self,
-        config: VisionEncoderConfig,
+        config: T5Gemma2VisionConfig,
         *,
         dtype: jnp.dtype = jnp.float32,
         rngs: nnx.Rngs,
@@ -882,7 +885,7 @@ class T5Gemma2VisionSoftTokenizer(nnx.Module):
 
         self.dropout = nnx.Dropout(rate=config.dropout, rngs=rngs)
 
-        self.transformer = Gemma3VisionEncoder(
+        self.transformer = T5Gemma2VisionEncoder(
             width=config.width,
             depth=config.depth,
             mlp_dim=config.mlp_dim,
@@ -892,7 +895,7 @@ class T5Gemma2VisionSoftTokenizer(nnx.Module):
             rngs=rngs,
         )
 
-        self.vision_exit = Gemma3VisionExit(output_length=256, rngs=rngs)
+        self.vision_exit = T5Gemma2VisionExit(output_length=256, rngs=rngs)
 
     def __call__(
         self,
@@ -972,7 +975,7 @@ class T5Gemma2VisionEmbedder(nnx.Module):
     def __init__(
         self,
         *,
-        vision_config: VisionEncoderConfig,
+        vision_config: T5Gemma2VisionConfig,
         embed_dim: int,
         freeze_params: bool = True,
         dtype: jnp.dtype = jnp.float32,
@@ -1010,81 +1013,6 @@ class T5Gemma2VisionEmbedder(nnx.Module):
 # =============================================================================
 # Multimodal Utilities
 # =============================================================================
-def _get_new_text_positions(*, offset_on: np.ndarray, offset_by: int) -> np.ndarray:
-    """Create the positions of the new tokens."""
-    offset = np.cumsum(offset_on, axis=-1) * offset_by
-    new_positions = np.arange(offset_on.shape[-1]) + offset
-    new_positions -= offset_by * offset_on
-    return new_positions
-
-
-def _insert_sequence(
-    tokens: np.ndarray,
-    *,
-    at: int,
-    sequence: list[int],
-    max_num_images: int,
-) -> np.ndarray:
-    """Inserts a sequence of tokens at all occurrences of a specific token."""
-    original_dim = tokens.ndim
-    if original_dim == 1:
-        tokens = tokens[None, :]
-
-    batch_size, length = tokens.shape
-    mm_tokens_to_insert = np.array(sequence)
-    offset_by = len(mm_tokens_to_insert) - 1
-    length_with_mm = length + max_num_images * offset_by
-    mm_start = tokens == at
-
-    new_tokens = np.zeros((batch_size, length_with_mm), dtype=np.int64)
-    new_text_pos = _get_new_text_positions(offset_on=mm_start, offset_by=offset_by)
-    np.put_along_axis(new_tokens, new_text_pos, tokens, axis=1)
-
-    batch_indices_to_zero, _ = np.where(mm_start)
-    new_pos_to_zero = new_text_pos[mm_start]
-    if batch_indices_to_zero.size > 0:
-        new_tokens[batch_indices_to_zero, new_pos_to_zero] = 0
-
-    batch_indices, seq_indices = np.nonzero(mm_start)
-
-    if batch_indices.size > 0:
-        intra_batch_img_idx = np.cumsum(mm_start, axis=1)[mm_start] - 1
-        final_img_start_pos = seq_indices + intra_batch_img_idx * offset_by
-        indices_to_insert = final_img_start_pos[:, None] + np.arange(
-            len(mm_tokens_to_insert),
-        )
-        new_tokens[batch_indices[:, None], indices_to_insert] = mm_tokens_to_insert
-
-    if original_dim == 1:
-        new_tokens = np.squeeze(new_tokens)
-    return new_tokens
-
-
-def add_extra_tokens_for_images(
-    tokens: np.ndarray | list,
-    *,
-    max_num_images: int = 1,
-) -> np.ndarray:
-    """Add extra image tokens to text tokens."""
-
-    mm_tokens = [
-        NEW_LINE_TOKEN,
-        START_OF_IMAGE_TOKEN,
-        *[IMAGE_PLACEHOLDER_TOKEN] * NUM_PLACEHOLDER_TOKENS_PER_IMAGE,
-        END_OF_IMAGE_TOKEN,
-        NEW_LINE_TOKEN,
-    ]
-    if not isinstance(tokens, np.ndarray):
-        tokens = np.asarray(tokens)
-
-    return _insert_sequence(
-        at=START_OF_IMAGE_TOKEN,
-        sequence=mm_tokens,
-        tokens=tokens,
-        max_num_images=max_num_images,
-    )
-
-
 def merge_mm_embeddings(
     text_embeddings: jnp.ndarray,
     vision_embeddings: jnp.ndarray,
@@ -1802,29 +1730,9 @@ class T5Gemma2MergedAttention(nnx.Module):
             self.cached_self_key[...] = self_key_updated
             self.cached_self_value[...] = self_value_updated
 
-            # Slice out the valid portion of self-attention cache
-            # Use dynamic_slice to get [0:cur_index+seq_len]
-            new_cache_len = cur_index + seq_len
-            self_key = jax.lax.dynamic_slice(
-                self_key_updated,
-                (0, 0, 0, 0),
-                (
-                    self_key_updated.shape[0],
-                    new_cache_len,
-                    self.num_kv_heads,
-                    self.head_dim,
-                ),
-            )
-            self_value = jax.lax.dynamic_slice(
-                self_value_updated,
-                (0, 0, 0, 0),
-                (
-                    self_value_updated.shape[0],
-                    new_cache_len,
-                    self.num_kv_heads,
-                    self.head_dim,
-                ),
-            )
+            # Use the full updated cache (static shape) for JIT compatibility
+            self_key = self_key_updated
+            self_value = self_value_updated
 
             # Cross-attention: compute and cache on first call (when index is 0)
             # After that, reuse cached values
@@ -2191,15 +2099,23 @@ class T5Gemma2Decoder(nnx.Module):
         if decode:
             # Decode mode: create masks accounting for cached sequence length
             cache_index = self.get_cache_index()
-            cache_len = cache_index + dec_seq_len  # Total self-attention key length
+            # Get max_decode_length (static) from the first block's cache
+            max_decode_len = self.blocks[0].attn.cached_self_key.shape[1]
+            # Current valid length (dynamic)
+            current_len = cache_index + dec_seq_len
 
             # Full attention: new tokens can attend to all cached + encoder
-            full_decoder_mask = make_decode_mode_self_mask(batch_size, dec_seq_len, cache_len)
+            full_decoder_mask = make_decode_mode_self_mask(
+                batch_size,
+                dec_seq_len,
+                max_decode_len,
+                current_len,
+            )
             # Sliding attention: limited to sliding window
             sliding_decoder_mask = make_decode_mode_sliding_mask(
                 batch_size,
                 cache_index,  # Current query position
-                cache_len,
+                max_decode_len,
                 self.config.sliding_window,
             )
 
