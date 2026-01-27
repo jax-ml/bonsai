@@ -11,14 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+from __future__ import annotations
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 from flax import nnx
 from flax.nnx.module import first_from
 from jaxtyping import Array, Bool, Float, Int
@@ -36,15 +35,19 @@ class AttentionType(Enum):
 
 # Attention pattern: 5 local sliding + 1 global
 _ATTN_PATTERN = (
-    AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING,
-    AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.GLOBAL,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.GLOBAL,
 )
 
 
 def _make_layer_types(num_layers: int) -> tuple[AttentionType, ...]:
     """Generate attention types for all layers using the standard pattern."""
     n = len(_ATTN_PATTERN)
-    return (_ATTN_PATTERN * (num_layers // n) + _ATTN_PATTERN[: num_layers % n])
+    return _ATTN_PATTERN * (num_layers // n) + _ATTN_PATTERN[: num_layers % n]
 
 
 @dataclass(frozen=True)
@@ -248,13 +251,13 @@ def _get_rope_scale_factor(
 
 
 def apply_rope(
-    inputs: Float[Array, "B L N H"],
-    positions: Float[Array, "B L"],
+    inputs: Float[Array, "B L N H"],  # noqa: F722
+    positions: Float[Array, "B L"],  # noqa: F722
     *,
     base_frequency: int,
     scale_factor: float = 1.0,
     rope_proportion: float = 1.0,
-) -> Float[Array, "B L N H"]:
+) -> Float[Array, "B L N H"]:  # noqa: F722
     """Applies Rotary Position Embeddings (RoPE).
 
     Args:
@@ -323,18 +326,20 @@ class T5Gemma2RMSNorm(nnx.Module):
         self,
         features: int,
         *,
+        epsilon: float = 1e-6,
         scale_init: nnx.Initializer = ZEROS_INIT,
         dtype: jnp.dtype = jnp.float32,
         rngs: nnx.Rngs,
     ):
+        self.epsilon = epsilon
         self.scale = nnx.Param(scale_init(rngs.params(), (features,), dtype))
 
-    def __call__(self, x: Float[Array, "B L D"]) -> Float[Array, "B L D"]:
+    def __call__(self, x: Float[Array, "B L D"]) -> Float[Array, "B L D"]:  # noqa: F722
         var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
 
         # Jax.lax.rsqrt is used because it returns different floats than
         # jnp.reciprocal(jnp.sqrt(var + 1e-06))
-        normed_inputs = x * jax.lax.rsqrt(var + 1e-06)
+        normed_inputs = x * jax.lax.rsqrt(var + self.epsilon)
 
         # normed_inputs is a rank-K tensor, K > 1 (K is typically 2 or 3). scale is
         # a rank-1 tensor. To avoid implicit rank-promotion, reshape scale to
@@ -379,7 +384,7 @@ class T5Gemma2FeedForward(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, x: Float[Array, "B L D"]) -> Float[Array, "B L D"]:
+    def __call__(self, x: Float[Array, "B L D"]) -> Float[Array, "B L D"]:  # noqa: F722
         """Applies feed-forward transformation.
 
         Args:
@@ -400,8 +405,8 @@ class T5Gemma2FeedForward(nnx.Module):
 
 
 def make_bidirectional_mask(
-    input_mask: Bool[Array, "B L"],
-) -> Bool[Array, "B 1 L L"]:
+    input_mask: Bool[Array, "B L"],  # noqa: F722
+) -> Bool[Array, "B 1 L L"]:  # noqa: F722
     """Creates a bidirectional attention mask for encoder.
 
     Args:
@@ -416,8 +421,8 @@ def make_bidirectional_mask(
 
 
 def make_causal_mask(
-    input_mask: Bool[Array, "B L"],
-) -> Bool[Array, "B 1 L L"]:
+    input_mask: Bool[Array, "B L"],  # noqa: F722
+) -> Bool[Array, "B 1 L L"]:  # noqa: F722
     """Creates a causal attention mask for decoder.
 
     Args:
@@ -435,11 +440,11 @@ def make_causal_mask(
 
 
 def make_sliding_window_mask(
-    positions: Int[Array, "B L"],
+    positions: Int[Array, "B L"],  # noqa: F722
     sliding_window: int,
     *,
     bidirectional: bool = False,
-) -> Bool[Array, "B 1 L L"]:
+) -> Bool[Array, "B 1 L L"]:  # noqa: F722
     """Creates a sliding window mask.
 
     Args:
@@ -475,10 +480,10 @@ def make_sliding_window_mask(
 
 
 def make_sliding_window_causal_mask(
-    input_mask: Bool[Array, "B L"],
-    positions: Int[Array, "B L"],
+    input_mask: Bool[Array, "B L"],  # noqa: F722
+    positions: Int[Array, "B L"],  # noqa: F722
     sliding_window: int,
-) -> Bool[Array, "B 1 L L"]:
+) -> Bool[Array, "B 1 L L"]:  # noqa: F722
     """Creates a causal mask with sliding window for decoder.
 
     Combines causal mask (lower triangular) with sliding window constraint.
@@ -502,9 +507,9 @@ def make_sliding_window_causal_mask(
 
 
 def make_merged_attention_mask(
-    decoder_mask: Bool[Array, "B 1 L_dec L_dec"],
-    encoder_mask: Bool[Array, "B 1 1 L_enc"],
-) -> Bool[Array, "B 1 L_dec L_combined"]:
+    decoder_mask: Bool[Array, "B 1 L_dec L_dec"],  # noqa: F722
+    encoder_mask: Bool[Array, "B 1 1 L_enc"],  # noqa: F722
+) -> Bool[Array, "B 1 L_dec L_combined"]:  # noqa: F722
     """Creates merged attention mask for decoder's merged attention.
 
     Concatenates the decoder self-attention mask with the cross-attention
@@ -532,7 +537,7 @@ def make_decode_mode_self_mask(
     query_len: int,
     max_cache_len: int,
     current_cache_len: int,
-) -> Bool[Array, "B 1 Q K"]:
+) -> Bool[Array, "B 1 Q K"]:  # noqa: F722
     """Creates self-attention mask for decode mode (with KV cache).
 
     During decode mode, the query attends to all previously cached keys.
@@ -557,7 +562,7 @@ def make_decode_mode_sliding_mask(
     query_pos: int,
     max_cache_len: int,
     sliding_window: int,
-) -> Bool[Array, "B 1 1 K"]:
+) -> Bool[Array, "B 1 1 K"]:  # noqa: F722
     """Creates sliding window mask for decode mode (with KV cache).
 
     During decode mode with sliding window, the query can only attend to
@@ -619,7 +624,7 @@ class T5Gemma2ScaledWordEmbedding(nnx.Module):
             ZEROS_INIT(rngs.params(), (embed_dim,), dtype),
         )
 
-    def __call__(self, input_ids: Int[Array, "B L"]) -> Float[Array, "B L D"]:
+    def __call__(self, input_ids: Int[Array, "B L"]) -> Float[Array, "B L D"]:  # noqa: F722
         """Embed input tokens with scaling.
 
         Args:
@@ -648,7 +653,7 @@ def _posemb_sincos_2d(
     width: int,
     temperature: float = 10_000.0,
     dtype: jnp.dtype = jnp.float32,
-) -> Float[Array, "1 M D"]:
+) -> Float[Array, "1 M D"]:  # noqa: F722
     """Sinusoidal 2D position embeddings (MoCo v3 style)."""
     y, x = jnp.mgrid[:h, :w]
 
@@ -693,10 +698,10 @@ class T5Gemma2VisionMLP(nnx.Module):
 
     def __call__(
         self,
-        x: Float[Array, "B L D"],
+        x: Float[Array, "B L D"],  # noqa: F722
         *,
         deterministic: bool | None = None,
-    ) -> Float[Array, "B L D"]:
+    ) -> Float[Array, "B L D"]:  # noqa: F722
         x = self.dense1(x)
         x = jax.nn.gelu(x)
         x = self.dropout(x, deterministic=deterministic)
@@ -754,10 +759,10 @@ class T5Gemma2VisionEncoderBlock(nnx.Module):
 
     def __call__(
         self,
-        x: Float[Array, "B L D"],
+        x: Float[Array, "B L D"],  # noqa: F722
         *,
         deterministic: bool | None = None,
-    ) -> Float[Array, "B L D"]:
+    ) -> Float[Array, "B L D"]:  # noqa: F722
         y = self.layer_norm1(x)
         y = self.mha(y, deterministic=deterministic)
         y = self.dropout1(y, deterministic=deterministic)
@@ -899,10 +904,10 @@ class T5Gemma2VisionSoftTokenizer(nnx.Module):
 
     def __call__(
         self,
-        images: Float[Array, "B N H W C"],
+        images: Float[Array, "B N H W C"],  # noqa: F722
         *,
         deterministic: bool | None = None,
-    ) -> Float[Array, "B N P D"]:
+    ) -> Float[Array, "B N P D"]:  # noqa: F722
         if len(images.shape) == 4:
             images = images[:, None, :]
         b, n, h, w, c = images.shape
@@ -964,7 +969,7 @@ class T5Gemma2VisionSoftTokensEmbedder(nnx.Module):
             rngs=rngs,
         )
 
-    def __call__(self, x: Float[Array, "B N P Dv"]) -> Float[Array, "B N P De"]:
+    def __call__(self, x: Float[Array, "B N P Dv"]) -> Float[Array, "B N P De"]:  # noqa: F722
         x = self.mm_soft_embedding_norm(x)
         return self.mm_input_projection("...tm,md->...td", x)
 
@@ -998,10 +1003,10 @@ class T5Gemma2VisionEmbedder(nnx.Module):
 
     def __call__(
         self,
-        images: Float[Array, "B N H W C"],
+        images: Float[Array, "B N H W C"],  # noqa: F722
         *,
         deterministic: bool | None = None,
-    ) -> Float[Array, "B N P De"]:
+    ) -> Float[Array, "B N P De"]:  # noqa: F722
         soft_tokens = self.soft_tokenizer(images, deterministic=deterministic)
 
         if self.freeze_params:
@@ -1067,6 +1072,7 @@ class T5Gemma2EncoderAttention(nnx.Module):
         *,
         rope_base_frequency: int = 10_000,
         rope_scale_factor: float = 1.0,
+        rms_norm_eps: float = 1e-6,
         attn_logits_soft_cap: float | None = None,
         sliding_window_size: int | None = None,
         use_qk_norm: bool = False,
@@ -1083,6 +1089,7 @@ class T5Gemma2EncoderAttention(nnx.Module):
         self.query_pre_attn_scalar = query_pre_attn_scalar
         self.rope_base_frequency = rope_base_frequency
         self.rope_scale_factor = rope_scale_factor
+        self.rms_norm_eps = rms_norm_eps
         self.attn_logits_soft_cap = attn_logits_soft_cap
         self.sliding_window_size = sliding_window_size
         self.use_qk_norm = use_qk_norm
@@ -1122,12 +1129,14 @@ class T5Gemma2EncoderAttention(nnx.Module):
         if use_qk_norm:
             self._query_norm = T5Gemma2RMSNorm(
                 head_dim,
+                epsilon=rms_norm_eps,
                 dtype=dtype,
                 scale_init=scale_init,
                 rngs=rngs,
             )
             self._key_norm = T5Gemma2RMSNorm(
                 head_dim,
+                epsilon=rms_norm_eps,
                 dtype=dtype,
                 scale_init=scale_init,
                 rngs=rngs,
@@ -1143,10 +1152,10 @@ class T5Gemma2EncoderAttention(nnx.Module):
 
     def __call__(
         self,
-        x: Float[Array, "B L D"],
-        segment_pos: Float[Array, "B L"],
-        attn_mask: Float[Array, "B L L"],
-    ) -> Float[Array, "B L D"]:
+        x: Float[Array, "B L D"],  # noqa: F722
+        segment_pos: Float[Array, "B L"],  # noqa: F722
+        attn_mask: Float[Array, "B L L"],  # noqa: F722
+    ) -> Float[Array, "B L D"]:  # noqa: F722
         """Applies bidirectional multi-head attention.
 
         Args:
@@ -1222,9 +1231,9 @@ class T5Gemma2EncoderAttention(nnx.Module):
 
         # Compute attention output
         if self.use_gqa:
-            b, t, kg, h = probs.shape
+            b, t, kg, s = probs.shape
             probs = probs.reshape(
-                (b, t, self.num_kv_heads, int(kg / self.num_kv_heads), h),
+                (b, t, self.num_kv_heads, int(kg / self.num_kv_heads), s),
             )
             encoded = jnp.einsum("BTKGS,BSKH->BTKGH", probs, value_proj)
             b, t, k, g, h = encoded.shape
@@ -1257,6 +1266,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
         transpose_gating_einsum: bool,
         rope_base_frequency: int = 10_000,
         rope_scale_factor: float = 1.0,
+        rms_norm_eps: float = 1e-6,
         attn_logits_soft_cap: float | None = None,
         sliding_window_size: int | None = None,
         use_qk_norm: bool = False,
@@ -1270,6 +1280,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
 
         self.pre_attention_norm = T5Gemma2RMSNorm(
             embed_dim,
+            epsilon=rms_norm_eps,
             dtype=dtype,
             scale_init=scale_init,
             rngs=rngs,
@@ -1284,6 +1295,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
             query_pre_attn_scalar=query_pre_attn_scalar,
             rope_base_frequency=rope_base_frequency,
             rope_scale_factor=rope_scale_factor,
+            rms_norm_eps=rms_norm_eps,
             attn_logits_soft_cap=attn_logits_soft_cap,
             sliding_window_size=sliding_window_size,
             use_qk_norm=use_qk_norm,
@@ -1295,6 +1307,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
         if use_post_attn_norm:
             self.post_attention_norm = T5Gemma2RMSNorm(
                 embed_dim,
+                epsilon=rms_norm_eps,
                 dtype=dtype,
                 scale_init=scale_init,
                 rngs=rngs,
@@ -1302,6 +1315,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
 
         self.pre_ffw_norm = T5Gemma2RMSNorm(
             embed_dim,
+            epsilon=rms_norm_eps,
             dtype=dtype,
             scale_init=scale_init,
             rngs=rngs,
@@ -1319,6 +1333,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
         if use_post_ffw_norm:
             self.post_ffw_norm = T5Gemma2RMSNorm(
                 embed_dim,
+                epsilon=rms_norm_eps,
                 dtype=dtype,
                 scale_init=scale_init,
                 rngs=rngs,
@@ -1326,10 +1341,10 @@ class T5Gemma2EncoderBlock(nnx.Module):
 
     def __call__(
         self,
-        x: Float[Array, "B L D"],
-        segment_pos: Int[Array, "B L"],
-        attn_mask: Bool[Array, "B L L"],
-    ) -> Float[Array, "B L D"]:
+        x: Float[Array, "B L D"],  # noqa: F722
+        segment_pos: Int[Array, "B L"],  # noqa: F722
+        attn_mask: Bool[Array, "B L L"],  # noqa: F722
+    ) -> Float[Array, "B L D"]:  # noqa: F722
         """Apply encoder layer.
 
         Args:
@@ -1424,6 +1439,7 @@ class T5Gemma2Encoder(nnx.Module):
                         text_config,
                         attention_types[i],
                     ),
+                    rms_norm_eps=text_config.rms_norm_eps,
                     attn_logits_soft_cap=text_config.attn_logit_softcapping,
                     sliding_window_size=(
                         text_config.sliding_window if attention_types[i] == AttentionType.LOCAL_SLIDING else None
@@ -1437,24 +1453,29 @@ class T5Gemma2Encoder(nnx.Module):
         )
 
         # Final normalization
-        self.norm = T5Gemma2RMSNorm(text_config.embed_dim, dtype=dtype, rngs=rngs)
+        self.norm = T5Gemma2RMSNorm(
+            text_config.embed_dim,
+            epsilon=text_config.rms_norm_eps,
+            dtype=dtype,
+            rngs=rngs,
+        )
 
     def __call__(
         self,
-        tokens: Int[Array, "B L"],
-        attention_mask: Bool[Array, "B L"] | None = None,
-        position_ids: Int[Array, "B L"] | None = None,
-        images: Float[Array, "B N H W C"] | None = None,
+        tokens: Int[Array, "B L"],  # noqa: F722
+        attention_mask: Bool[Array, "B L"] | None = None,  # noqa: F722
+        position_ids: Int[Array, "B L"] | None = None,  # noqa: F722
+        images: Float[Array, "B N H W C"] | None = None,  # noqa: F722
         *,
         deterministic: bool = True,
-    ) -> Float[Array, "B L D"]:
+    ) -> Float[Array, "B L D"]:  # noqa: F722
         """Forward pass of the encoder.
 
         Args:
-            input_ids: Input token IDs [B, L].
+            tokens: Input token IDs [B, L].
             attention_mask: Attention mask [B, L].
             position_ids: Position indices [B, L].
-            pixel_values: Optional input images [B, N, H, W, C] where N is images per batch.
+            images: Optional input images [B, N, H, W, C] where N is images per batch.
             deterministic: Whether to run in deterministic mode.
 
         Returns:
@@ -1532,6 +1553,7 @@ class T5Gemma2MergedAttention(nnx.Module):
         *,
         rope_base_frequency: int = 10_000,
         rope_scale_factor: float = 1.0,
+        rms_norm_eps: float = 1e-6,
         attn_logits_soft_cap: float | None = None,
         use_qk_norm: bool = True,
         kernel_init: nnx.Initializer = NORMAL_INIT,
@@ -1547,6 +1569,7 @@ class T5Gemma2MergedAttention(nnx.Module):
         self.query_pre_attn_scalar = query_pre_attn_scalar
         self.rope_base_frequency = rope_base_frequency
         self.rope_scale_factor = rope_scale_factor
+        self.rms_norm_eps = rms_norm_eps
         self.attn_logits_soft_cap = attn_logits_soft_cap
         self.use_qk_norm = use_qk_norm
         self.decode = decode
@@ -1583,12 +1606,14 @@ class T5Gemma2MergedAttention(nnx.Module):
         if use_qk_norm:
             self.q_norm = T5Gemma2RMSNorm(
                 head_dim,
+                epsilon=rms_norm_eps,
                 dtype=dtype,
                 scale_init=scale_init,
                 rngs=rngs,
             )
             self.k_norm = T5Gemma2RMSNorm(
                 head_dim,
+                epsilon=rms_norm_eps,
                 dtype=dtype,
                 scale_init=scale_init,
                 rngs=rngs,
@@ -1647,13 +1672,13 @@ class T5Gemma2MergedAttention(nnx.Module):
 
     def __call__(
         self,
-        hidden_states: Float[Array, "B L_dec D"],
-        encoder_hidden_states: Float[Array, "B L_enc D"],
-        position_ids: Int[Array, "B L_dec"],
-        merged_attention_mask: Bool[Array, "B 1 L_dec L_combined"] | None = None,
+        hidden_states: Float[Array, "B L_dec D"],  # noqa: F722
+        encoder_hidden_states: Float[Array, "B L_enc D"],  # noqa: F722
+        position_ids: Int[Array, "B L_dec"],  # noqa: F722
+        merged_attention_mask: Bool[Array, "B 1 L_dec L_combined"] | None = None,  # noqa: F722
         *,
         decode: bool | None = None,
-    ) -> Float[Array, "B L_dec D"]:
+    ) -> Float[Array, "B L_dec D"]:  # noqa: F722
         """Apply merged self-attention and cross-attention.
 
         Args:
@@ -1824,6 +1849,7 @@ class T5Gemma2DecoderBlock(nnx.Module):
         query_pre_attn_scalar: float,
         rope_base_frequency: int = 10_000,
         rope_scale_factor: float = 1.0,
+        rms_norm_eps: float = 1e-6,
         attn_logits_soft_cap: float | None = None,
         use_qk_norm: bool = True,
         kernel_init: nnx.Initializer = NORMAL_INIT,
@@ -1839,6 +1865,7 @@ class T5Gemma2DecoderBlock(nnx.Module):
         # Pre-attention norm
         self.pre_attention_norm = T5Gemma2RMSNorm(
             embed_dim,
+            epsilon=rms_norm_eps,
             dtype=dtype,
             scale_init=scale_init,
             rngs=rngs,
@@ -1853,6 +1880,7 @@ class T5Gemma2DecoderBlock(nnx.Module):
             query_pre_attn_scalar=query_pre_attn_scalar,
             rope_base_frequency=rope_base_frequency,
             rope_scale_factor=rope_scale_factor,
+            rms_norm_eps=rms_norm_eps,
             attn_logits_soft_cap=attn_logits_soft_cap,
             use_qk_norm=use_qk_norm,
             kernel_init=kernel_init,
@@ -1866,6 +1894,7 @@ class T5Gemma2DecoderBlock(nnx.Module):
         if use_post_attn_norm:
             self.post_attention_norm = T5Gemma2RMSNorm(
                 embed_dim,
+                epsilon=rms_norm_eps,
                 dtype=dtype,
                 scale_init=scale_init,
                 rngs=rngs,
@@ -1874,6 +1903,7 @@ class T5Gemma2DecoderBlock(nnx.Module):
         # Pre-FFW norm
         self.pre_ffw_norm = T5Gemma2RMSNorm(
             embed_dim,
+            epsilon=rms_norm_eps,
             dtype=dtype,
             scale_init=scale_init,
             rngs=rngs,
@@ -1893,6 +1923,7 @@ class T5Gemma2DecoderBlock(nnx.Module):
         if use_post_ffw_norm:
             self.post_ffw_norm = T5Gemma2RMSNorm(
                 embed_dim,
+                epsilon=rms_norm_eps,
                 dtype=dtype,
                 scale_init=scale_init,
                 rngs=rngs,
@@ -1900,13 +1931,13 @@ class T5Gemma2DecoderBlock(nnx.Module):
 
     def __call__(
         self,
-        x: Float[Array, "B L_dec D"],
-        encoder_hidden_states: Float[Array, "B L_enc D"],
-        segment_pos: Int[Array, "B L_dec"],
-        attn_mask: Bool[Array, "B 1 L_dec L_combined"] | None = None,
+        x: Float[Array, "B L_dec D"],  # noqa: F722
+        encoder_hidden_states: Float[Array, "B L_enc D"],  # noqa: F722
+        segment_pos: Int[Array, "B L_dec"],  # noqa: F722
+        attn_mask: Bool[Array, "B 1 L_dec L_combined"] | None = None,  # noqa: F722
         *,
         decode: bool | None = None,
-    ) -> Float[Array, "B L_dec D"]:
+    ) -> Float[Array, "B L_dec D"]:  # noqa: F722
         """Apply decoder layer.
 
         Args:
@@ -1994,6 +2025,7 @@ class T5Gemma2Decoder(nnx.Module):
                     query_pre_attn_scalar=config.query_pre_attn_scalar,
                     rope_base_frequency=_get_rope_base_frequency(config, attention_types[i]),
                     rope_scale_factor=_get_rope_scale_factor(config, attention_types[i]),
+                    rms_norm_eps=config.rms_norm_eps,
                     attn_logits_soft_cap=config.attn_logit_softcapping,
                     use_qk_norm=True,
                     decode=decode,
@@ -2005,7 +2037,12 @@ class T5Gemma2Decoder(nnx.Module):
         )
 
         # Final normalization
-        self.norm = T5Gemma2RMSNorm(config.embed_dim, dtype=dtype, rngs=rngs)
+        self.norm = T5Gemma2RMSNorm(
+            config.embed_dim,
+            epsilon=config.rms_norm_eps,
+            dtype=dtype,
+            rngs=rngs,
+        )
 
     def init_cache(
         self,
@@ -2044,14 +2081,14 @@ class T5Gemma2Decoder(nnx.Module):
 
     def __call__(
         self,
-        input_ids: Int[Array, "B L_dec"],
-        encoder_hidden_states: Float[Array, "B L_enc D"],
-        attention_mask: Bool[Array, "B L_dec"] | None = None,
-        encoder_attention_mask: Bool[Array, "B L_enc"] | None = None,
-        position_ids: Int[Array, "B L_dec"] | None = None,
+        input_ids: Int[Array, "B L_dec"],  # noqa: F722
+        encoder_hidden_states: Float[Array, "B L_enc D"],  # noqa: F722
+        attention_mask: Bool[Array, "B L_dec"] | None = None,  # noqa: F722
+        encoder_attention_mask: Bool[Array, "B L_enc"] | None = None,  # noqa: F722
+        position_ids: Int[Array, "B L_dec"] | None = None,  # noqa: F722
         *,
         decode: bool | None = None,
-    ) -> Float[Array, "B L_dec D"]:
+    ) -> Float[Array, "B L_dec D"]:  # noqa: F722
         """Forward pass of the decoder.
 
         Args:
@@ -2239,18 +2276,18 @@ class T5Gemma2(nnx.Module):
 
     def __call__(
         self,
-        input_ids: Int[Array, "B L_enc"],
-        decoder_input_ids: Int[Array, "B L_dec"],
-        attention_mask: Bool[Array, "B L_enc"] | None = None,
-        decoder_attention_mask: Bool[Array, "B L_dec"] | None = None,
-        position_ids: Int[Array, "B L_enc"] | None = None,
-        decoder_position_ids: Int[Array, "B L_dec"] | None = None,
-        pixel_values: Float[Array, "B N H W C"] | None = None,
-        encoder_outputs: Float[Array, "B L_enc D"] | None = None,
+        input_ids: Int[Array, "B L_enc"],  # noqa: F722
+        decoder_input_ids: Int[Array, "B L_dec"],  # noqa: F722
+        attention_mask: Bool[Array, "B L_enc"] | None = None,  # noqa: F722
+        decoder_attention_mask: Bool[Array, "B L_dec"] | None = None,  # noqa: F722
+        position_ids: Int[Array, "B L_enc"] | None = None,  # noqa: F722
+        decoder_position_ids: Int[Array, "B L_dec"] | None = None,  # noqa: F722
+        pixel_values: Float[Array, "B N H W C"] | None = None,  # noqa: F722
+        encoder_outputs: Float[Array, "B L_enc D"] | None = None,  # noqa: F722
         *,
         decode: bool | None = None,
         deterministic: bool = True,
-    ) -> tuple[Float[Array, "B L_dec D"], Float[Array, "B L_enc D"]]:
+    ) -> tuple[Float[Array, "B L_dec D"], Float[Array, "B L_enc D"]]:  # noqa: F722
         """Forward pass of the full model.
 
         Args:

@@ -270,6 +270,7 @@ def greedy_generate(
     # Start with BOS token
     decoder_input_ids = jnp.full((batch_size, 1), BOS_TOKEN, dtype=jnp.int32)
     generated_ids = []
+    next_token = None  # Track the last generated token for cached decoding
 
     for step in range(max_new_tokens):
         if use_cache:
@@ -403,9 +404,7 @@ def run_multimodal_demo():
         print(f"Prompt: {text}")
 
         # Create multimodal input
-        input_ids, pixel_values = create_multimodal_input(
-            tokenizer, text, image_path=image_url
-        )
+        input_ids, pixel_values = create_multimodal_input(tokenizer, text, image_path=image_url)
 
         print(f"Input IDs shape: {input_ids.shape}")
         if pixel_values is not None:

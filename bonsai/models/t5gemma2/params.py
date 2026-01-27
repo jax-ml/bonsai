@@ -335,9 +335,7 @@ def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
             if not reshape_first and reshape is not None:
                 tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
-            raise ValueError(
-                f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}"
-            )
+            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
         if sharding_dict is not None:
             state_dict[key] = jax.device_put(tensor, sharding_dict[key])
         else:
@@ -367,9 +365,7 @@ def create_model_from_safe_tensors(
     model = model_lib.T5Gemma2(cfg, rngs=nnx.Rngs(params=0, dropout=0))
     graph_def, state = nnx.split(model)
     state_dict = state.to_pure_dict()
-    sharding = (
-        nnx.get_named_sharding(state, mesh).to_pure_dict() if mesh is not None else None
-    )
+    sharding = nnx.get_named_sharding(state, mesh).to_pure_dict() if mesh is not None else None
 
     key_mapping, vis_cfg = _get_key_and_transform_mapping(cfg)
     conversion_errors = []
@@ -434,63 +430,41 @@ def create_model_from_safe_tensors(
                     continue
 
                 # Special handling for vision attention weights
-                if (
-                    "mha.query.kernel" in jax_key
-                    or "mha.key.kernel" in jax_key
-                    or "mha.value.kernel" in jax_key
-                ):
+                if "mha.query.kernel" in jax_key or "mha.key.kernel" in jax_key or "mha.value.kernel" in jax_key:
                     # q/k/v: (num_heads * head_dim, in_features) -> (in_features, num_heads, head_dim)
                     tensor = tensor.T  # transpose
                     in_features = tensor.shape[0]
                     tensor = tensor.reshape(in_features, vit_num_heads, vit_head_dim)
                     keys = [_stoi(k) for k in jax_key.split(".")]
                     try:
-                        _assign_weights(
-                            keys, tensor, state_dict, torch_key, None, sharding
-                        )
+                        _assign_weights(keys, tensor, state_dict, torch_key, None, sharding)
                     except Exception as e:
                         full_jax_key = ".".join([str(k) for k in keys])
-                        conversion_errors.append(
-                            f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}"
-                        )
+                        conversion_errors.append(f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}")
                     continue
 
                 if "mha.out.kernel" in jax_key:
                     # out: (out_features, num_heads * head_dim) -> (num_heads, head_dim, out_features)
-                    tensor = (
-                        tensor.T
-                    )  # transpose to (num_heads * head_dim, out_features)
+                    tensor = tensor.T  # transpose to (num_heads * head_dim, out_features)
                     out_features = tensor.shape[1]
                     tensor = tensor.reshape(vit_num_heads, vit_head_dim, out_features)
                     keys = [_stoi(k) for k in jax_key.split(".")]
                     try:
-                        _assign_weights(
-                            keys, tensor, state_dict, torch_key, None, sharding
-                        )
+                        _assign_weights(keys, tensor, state_dict, torch_key, None, sharding)
                     except Exception as e:
                         full_jax_key = ".".join([str(k) for k in keys])
-                        conversion_errors.append(
-                            f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}"
-                        )
+                        conversion_errors.append(f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}")
                     continue
 
-                if (
-                    "mha.query.bias" in jax_key
-                    or "mha.key.bias" in jax_key
-                    or "mha.value.bias" in jax_key
-                ):
+                if "mha.query.bias" in jax_key or "mha.key.bias" in jax_key or "mha.value.bias" in jax_key:
                     # bias: (num_heads * head_dim,) -> (num_heads, head_dim)
                     tensor = tensor.reshape(vit_num_heads, vit_head_dim)
                     keys = [_stoi(k) for k in jax_key.split(".")]
                     try:
-                        _assign_weights(
-                            keys, tensor, state_dict, torch_key, None, sharding
-                        )
+                        _assign_weights(keys, tensor, state_dict, torch_key, None, sharding)
                     except Exception as e:
                         full_jax_key = ".".join([str(k) for k in keys])
-                        conversion_errors.append(
-                            f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}"
-                        )
+                        conversion_errors.append(f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}")
                     continue
 
                 # Special handling for position embedding (add batch dim)
@@ -498,26 +472,18 @@ def create_model_from_safe_tensors(
                     tensor = tensor[None, :, :]  # (4096, 1152) -> (1, 4096, 1152)
                     keys = [_stoi(k) for k in jax_key.split(".")]
                     try:
-                        _assign_weights(
-                            keys, tensor, state_dict, torch_key, None, sharding
-                        )
+                        _assign_weights(keys, tensor, state_dict, torch_key, None, sharding)
                     except Exception as e:
                         full_jax_key = ".".join([str(k) for k in keys])
-                        conversion_errors.append(
-                            f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}"
-                        )
+                        conversion_errors.append(f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}")
                     continue
 
                 keys = [_stoi(k) for k in jax_key.split(".")]
                 try:
-                    _assign_weights(
-                        keys, tensor, state_dict, torch_key, transform.value, sharding
-                    )
+                    _assign_weights(keys, tensor, state_dict, torch_key, transform.value, sharding)
                 except Exception as e:
                     full_jax_key = ".".join([str(k) for k in keys])
-                    conversion_errors.append(
-                        f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}"
-                    )
+                    conversion_errors.append(f"Failed '{torch_key}' -> '{full_jax_key}': {type(e).__name__}: {e}")
         gc.collect()
 
     # Now assign stacked parameters
@@ -531,21 +497,14 @@ def create_model_from_safe_tensors(
 
         keys = [_stoi(k) for k in base_key.split(".")]
         try:
-            _assign_weights(
-                keys, stacked, state_dict, f"stacked:{base_key}", None, sharding
-            )
+            _assign_weights(keys, stacked, state_dict, f"stacked:{base_key}", None, sharding)
         except Exception as e:
             full_jax_key = ".".join([str(k) for k in keys])
-            conversion_errors.append(
-                f"Failed stacked '{base_key}' -> '{full_jax_key}': {type(e).__name__}: {e}"
-            )
+            conversion_errors.append(f"Failed stacked '{base_key}' -> '{full_jax_key}': {type(e).__name__}: {e}")
 
     if conversion_errors:
         full_error_log = "\n".join(conversion_errors)
-        raise RuntimeError(
-            f"Encountered {len(conversion_errors)} weight conversion errors:\n{full_error_log}"
-        )
-
+        raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors:\n{full_error_log}")
 
     gc.collect()
     return nnx.merge(graph_def, state_dict)
