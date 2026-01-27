@@ -48,22 +48,22 @@ def _set_attention_modes(global_attn_freq: int, layers: int) -> list[AttentionMo
 
 @dataclass(slots=True, frozen=True)
 class VisionShardingCfg:
-    attn_kernel: PartitionSpec
-    attn_bias: PartitionSpec
-    attn_qk_activation: PartitionSpec
-    fc1_kernel: PartitionSpec
-    fc1_bias: PartitionSpec
-    fc2_kernel: PartitionSpec
-    fc2_bias: PartitionSpec
-    activation: PartitionSpec
-    layer_norm: PartitionSpec
-    emb_patch_kernel: PartitionSpec
-    emb_patch_bias: PartitionSpec
-    emb_pos_kernel: PartitionSpec
+    attn_kernel: PartitionSpec | None = None
+    attn_bias: PartitionSpec | None = None
+    attn_qk_activation: PartitionSpec | None = None
+    fc1_kernel: PartitionSpec | None = None
+    fc1_bias: PartitionSpec | None = None
+    fc2_kernel: PartitionSpec | None = None
+    fc2_bias: PartitionSpec | None = None
+    activation: PartitionSpec | None = None
+    layer_norm: PartitionSpec | None = None
+    emb_patch_kernel: PartitionSpec | None = None
+    emb_patch_bias: PartitionSpec | None = None
+    emb_pos_kernel: PartitionSpec | None = None
 
     @staticmethod
     def no_sharding():
-        return VisionShardingCfg.default(False, False)
+        return VisionShardingCfg()
 
     @staticmethod
     def default(use_fsdp: bool, use_tp: bool):
@@ -87,21 +87,21 @@ class VisionShardingCfg:
 
 @dataclass(slots=True, frozen=True)
 class TextShardingCfg:
-    attn_kernel: PartitionSpec
-    attn_bias: PartitionSpec
-    attn_qk_activation: PartitionSpec
-    down_kernel: PartitionSpec
-    down_bias: PartitionSpec
-    up_gate_kernel: PartitionSpec
-    up_gate_bias: PartitionSpec
-    activation: PartitionSpec
-    decoder_norm: PartitionSpec
-    cache: PartitionSpec
-    emb_kernel: PartitionSpec
+    attn_kernel: PartitionSpec | None = None
+    attn_bias: PartitionSpec | None = None
+    attn_qk_activation: PartitionSpec | None = None
+    down_kernel: PartitionSpec | None = None
+    down_bias: PartitionSpec | None = None
+    up_gate_kernel: PartitionSpec | None = None
+    up_gate_bias: PartitionSpec | None = None
+    activation: PartitionSpec | None = None
+    decoder_norm: PartitionSpec | None = None
+    cache: PartitionSpec | None = None
+    emb_kernel: PartitionSpec | None = None
 
     @staticmethod
     def no_sharding():
-        return TextShardingCfg.default(False, False)
+        return TextShardingCfg()
 
     @staticmethod
     def default(use_fsdp: bool, use_tp: bool):
@@ -124,8 +124,12 @@ class TextShardingCfg:
 
 @dataclass(slots=True, frozen=True)
 class ShardingCfg:
-    mmp_norm: PartitionSpec
-    mmp_weight: PartitionSpec
+    mmp_norm: PartitionSpec | None = None
+    mmp_weight: PartitionSpec | None = None
+
+    @staticmethod
+    def no_sharding():
+        return ShardingCfg()
 
     @staticmethod
     def default(use_tp: bool):
@@ -148,7 +152,16 @@ class VisionConfig:
     shd_cfg: VisionShardingCfg
 
     @classmethod
-    def gemma3_4b_it(cls, use_fsdp: bool, use_tp: bool):
+    def gemma3_4b_it(
+        cls,
+        use_fsdp: bool = False,
+        use_tp: bool = False,
+    ):
+        if not (use_fsdp and use_tp):
+            shd_cfg = VisionShardingCfg.no_sharding()
+        else:
+            shd_cfg = VisionShardingCfg.default(use_fsdp=use_fsdp, use_tp=use_tp)
+
         return cls(
             attention_dropout=0.0,
             hidden_size=1152,
@@ -160,7 +173,7 @@ class VisionConfig:
             num_hidden_layers=27,
             patch_size=14,
             vision_use_head=False,
-            shd_cfg=VisionShardingCfg.default(use_fsdp, use_tp),
+            shd_cfg=shd_cfg,
         )
 
 
@@ -187,7 +200,18 @@ class TextConfig:
     shd_cfg: TextShardingCfg
 
     @classmethod
-    def gemma3_4b_it(cls, use_fsdp: bool, use_tp: bool, *, norm_dtype: jnp.dtype):
+    def gemma3_4b_it(
+        cls,
+        use_fsdp: bool = False,
+        use_tp: bool = False,
+        *,
+        norm_dtype: jnp.dtype,
+    ):
+        if not (use_fsdp and use_tp):
+            shd_cfg = TextShardingCfg.no_sharding()
+        else:
+            shd_cfg = TextShardingCfg.default(use_fsdp=use_fsdp, use_tp=use_tp)
+
         num_hidden_layers = 34
         return cls(
             attention_bias=False,
@@ -208,7 +232,7 @@ class TextConfig:
             sliding_window=1024,
             vocab_size=262208,
             norm_dtype=norm_dtype,
-            shd_cfg=TextShardingCfg.default(use_fsdp, use_tp),
+            shd_cfg=shd_cfg,
         )
 
 
@@ -223,13 +247,14 @@ class ModelConfig:
 
     @classmethod
     def gemma3_4b_it(cls, use_fsdp: bool = False, use_tp: bool = False, *, norm_dtype: jnp.dtype):
+        shd_cfg = ShardingCfg.no_sharding() if use_tp is None else ShardingCfg.default(use_tp)
         return cls(
             vision_config=VisionConfig.gemma3_4b_it(use_fsdp, use_tp),
             text_config=TextConfig.gemma3_4b_it(use_fsdp, use_tp, norm_dtype=norm_dtype),
             mm_tokens_per_image=256,
             dtype="bfloat16",  # TODO: unused
             final_logit_softcapping=None,
-            shd_cfg=ShardingCfg.default(use_tp),
+            shd_cfg=shd_cfg,
         )
 
 
@@ -268,13 +293,13 @@ class ShardedEmbedding(nnx.Embed):
             raise ValueError("Input type must be an integer or unsigned integer.")
             # Use take because fancy indexing numpy arrays with JAX indices does not
             # work correctly.
-        (embedding,) = self.promote_dtype((self.embedding.value,), dtype=self.dtype, inexact=False)
+        (embedding,) = self.promote_dtype((self.embedding[...],), dtype=self.dtype, inexact=False)
         if self.num_embeddings == 1:
             return jnp.broadcast_to(embedding, (*inputs.shape, self.features))
         return embedding.at[inputs].get(out_sharding=out_sharding)
 
     def attend(self, query: Array, *, out_sharding) -> Array:
-        query, embedding = self.promote_dtype((query, self.embedding.value), dtype=self.dtype)
+        query, embedding = self.promote_dtype((query, self.embedding[...]), dtype=self.dtype)
         return jnp.dot(query, embedding.T, out_sharding=out_sharding)
 
 
@@ -319,8 +344,10 @@ class SiglipVisionEmbeddings(nnx.Module):
         ei = partial(default_embed_init, out_sharding=config.shd_cfg.emb_pos_kernel)
         self.position_embedding = ShardedEmbedding(self.num_patches, config.hidden_size, embedding_init=ei, rngs=rngs)
 
-        shd = P(config.shd_cfg.activation[0])
-        self.position_ids = jax.device_put(jnp.expand_dims(jnp.arange(self.num_patches), 0), shd)
+        self.position_ids = jnp.expand_dims(jnp.arange(self.num_patches), 0)
+        if config.shd_cfg.activation is not None:
+            shd = P(config.shd_cfg.activation[0])
+            self.position_ids = jax.device_put(self.position_ids, shd)
 
     def __call__(self, pixel_values: Array):
         patch_embeds = self.patch_embedding(pixel_values)
@@ -467,7 +494,8 @@ class LayerCache(nnx.Module):
         self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype, out_sharding=kv_shd))
         self.v_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype, out_sharding=kv_shd))
         self.size = self.k_cache.shape[1]
-        self.start_ind = nnx.Variable(-1 * jnp.ones((batch_size,), dtype=jnp.int32, out_sharding=P(kv_shd[0])))
+        start_ind_shd = None if kv_shd is None else P(kv_shd[0])
+        self.start_ind = nnx.Variable(-1 * jnp.ones((batch_size,), dtype=jnp.int32, out_sharding=start_ind_shd))
         self.cur_ind = nnx.Variable(jnp.zeros((), dtype=jnp.int32))
 
 
@@ -494,7 +522,7 @@ class Gemma3RMSNorm(nnx.Module):
         dtype = x.dtype
         xf32 = x.astype(jnp.float32)
         out = xf32 * jax.lax.rsqrt(jnp.square(xf32).mean(-1, keepdims=True) + self.eps)
-        out = out * (1.0 + self.scale.value.astype(jnp.float32))
+        out = out * (1.0 + self.scale[...].astype(jnp.float32))
         return out.astype(dtype)
 
 
@@ -600,8 +628,13 @@ class Gemma3Attention(nnx.Module):
             bias_sharding=shd.attn_bias,
             rngs=rngs,
         )
-        self.q_norm = Gemma3RMSNorm(config.head_dim, config.rms_norm_eps, dtype=config.norm_dtype, shd=P(), rngs=rngs)
-        self.k_norm = Gemma3RMSNorm(config.head_dim, config.rms_norm_eps, dtype=config.norm_dtype, shd=P(), rngs=rngs)
+        norm_shd = P() if shd.attn_kernel is not None else None
+        self.q_norm = Gemma3RMSNorm(
+            config.head_dim, config.rms_norm_eps, dtype=config.norm_dtype, shd=norm_shd, rngs=rngs
+        )
+        self.k_norm = Gemma3RMSNorm(
+            config.head_dim, config.rms_norm_eps, dtype=config.norm_dtype, shd=norm_shd, rngs=rngs
+        )
 
         self.rope_theta = config.rope_slide_theta if self.use_sliding else config.rope_full_theta
         self.factor = config.rope_slide_factor if self.use_sliding else config.rope_full_factor
@@ -619,24 +652,24 @@ class Gemma3Attention(nnx.Module):
 
         # Apply rope
         left_pads = count_left_pads(segment_ids)
-        cache.start_ind.value = jnp.where(cache.start_ind.value < 0, left_pads, cache.start_ind.value)
-        position_ids = compute_positions_from_segment_ids(segment_ids) + cache.cur_ind.value
+        cache.start_ind[...] = jnp.where(cache.start_ind[...] < 0, left_pads, cache.start_ind[...])
+        position_ids = compute_positions_from_segment_ids(segment_ids) + cache.cur_ind[...]
         sin, cos = _generate_pos_embeddings(position_ids, self.head_dim, self.rope_theta, factor=self.factor)
         q = apply_rope(q, sin, cos)
         k = apply_rope(k, sin, cos)
 
         # Update cache
-        slice_indices = (0, cache.cur_ind.value, 0, 0)
-        cache.k_cache.value = jax.lax.dynamic_update_slice(cache.k_cache.value, k, slice_indices)
-        cache.v_cache.value = jax.lax.dynamic_update_slice(cache.v_cache.value, v, slice_indices)
+        slice_indices = (0, cache.cur_ind[...], 0, 0)
+        cache.k_cache[...] = jax.lax.dynamic_update_slice(cache.k_cache[...], k, slice_indices)
+        cache.v_cache[...] = jax.lax.dynamic_update_slice(cache.v_cache[...], v, slice_indices)
 
-        k, v = repeat_kv(cache.k_cache.value, self.n_rep), repeat_kv(cache.v_cache.value, self.n_rep)
+        k, v = repeat_kv(cache.k_cache[...], self.n_rep), repeat_kv(cache.v_cache[...], self.n_rep)
         intermediate_shd = self.config.shd_cfg.attn_qk_activation
         qkv = sharded_attention(
             q, k, v, mask=mask, scale=self.scale, attn_logit_sharding=intermediate_shd, out_sharding=shd
         )
         t = x.shape[1]
-        cache.cur_ind.value = cache.cur_ind.value + t
+        cache.cur_ind[...] = cache.cur_ind[...] + t
         return self.o_proj(qkv.reshape(*x.shape[:-1], -1), out_sharding=shd)
 
 
@@ -737,7 +770,7 @@ class Gemma3MultiModalProjector(nnx.Module):
         x = x.reshape(b, t, -1).swapaxes(1, 2)
         x = self.mm_soft_emb_norm(x)
         x = jnp.matmul(
-            x, self.mm_input_projection_weight.value, out_sharding=self.config.vision_config.shd_cfg.activation
+            x, self.mm_input_projection_weight[...], out_sharding=self.config.vision_config.shd_cfg.activation
         )
         return x.astype(vision_outputs.dtype)
 
@@ -799,7 +832,7 @@ class Gemma3Model(nnx.Module):
         self, input_ids: Array, pixel_values: Array, cache: Cache, segment_ids: Array, token_type_ids: Array
     ) -> Array:
         assert input_ids.shape == token_type_ids.shape
-        shd = P(self.config.text_config.shd_cfg.activation[0])
+        shd = None if (shd_act := self.config.text_config.shd_cfg.activation) is None else P(shd_act[0])
         causal_mask = make_causal_mask(cache[0], token_type_ids, out_sharding=shd)
         sliding_mask = make_window_mask(cache[0], token_type_ids, slide_size=self.sliding_window_size, out_sharding=shd)
         inputs_embeds = self.embed_tokens(input_ids)
@@ -811,7 +844,6 @@ class Gemma3Model(nnx.Module):
             inputs_embeds = batched_merge_modalities(image_features, inputs_embeds, token_type_ids)
 
         out = self.language_model(inputs_embeds, cache, segment_ids, sliding_mask, causal_mask)
-        shd = P(self.config.text_config.shd_cfg.activation[0])
         out = self.embed_tokens.weight.attend(out, out_sharding=shd)
 
         if self.config.final_logit_softcapping is not None:
