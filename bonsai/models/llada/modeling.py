@@ -135,13 +135,12 @@ class ShardedEmbedding(nnx.Embed):
         # Modified from Flax NNX
         if not jnp.issubdtype(inputs.dtype, jnp.integer):
             raise ValueError("Input type must be an integer or unsigned integer.")
-        (embedding,) = self.promote_dtype((self.embedding.get_value(),), dtype=self.dtype, inexact=False)
+        (embedding,) = self.promote_dtype((self.embedding[...],), dtype=self.dtype, inexact=False)
         if self.num_embeddings == 1:
             return jnp.broadcast_to(embedding, (*inputs.shape, self.features))
         return embedding.at[inputs].get(out_sharding=out_sharding)
-
     def attend(self, query: Array, *, out_sharding) -> Array:
-        query, embedding = self.promote_dtype((query, self.embedding.get_value()), dtype=self.dtype)
+        query, embedding = self.promote_dtype((query, self.embedding[...],), dtype=self.dtype)
         return jnp.dot(query, embedding.T, out_sharding=out_sharding)
 
 
@@ -182,7 +181,7 @@ class RMSNorm(nnx.Module):
         dtype = x.dtype
         xf32 = x.astype(jnp.float32)
         out = xf32 * jax.lax.rsqrt(jnp.square(xf32).mean(-1, keepdims=True) + self.eps)
-        out = out * self.weight.get_value().astype(jnp.float32)
+        out = out * self.weight[...].astype(jnp.float32)
         return out.astype(dtype)
 
 
