@@ -23,11 +23,11 @@ from flax import nnx
 from flax.nnx.nn.linear import default_embed_init
 from jax import P
 
-# TODO: Would be better to rely on something not in jax._src
-from jax._src.nn.functions import _apply_masks
 from jax.sharding import PartitionSpec
 from jaxtyping import Array, DTypeLike
 from tqdm import trange
+
+LARGE_NEGATIVE = jnp.finfo(jnp.float32).min
 
 
 class ShardMode(Enum):
@@ -86,13 +86,16 @@ class ModelConfig:
     embedding_size: int
     mlp_hidden_size: int
     shd_cfg: ShardingConfig
+    return_hidden_states: bool
     block_group_size: int = 1
     rms_norm_eps: float = 1e-5
     attn_drop: float = 0.0
     emb_drop: float = 0.0
     resid_drop: float = 0.0
+    eos_idx: int = 126081
+    eot_idx: int = 126348
 
-    def llada_8b_it(use_fsdp: bool, use_tp: bool, dtype: DTypeLike = jnp.bfloat16):
+    def llada_8b_it(use_fsdp: bool, use_tp: bool, dtype: DTypeLike = jnp.bfloat16, return_hidden_states: bool = False):
         return ModelConfig(
             dtype=dtype,
             d_model=4096,
@@ -108,6 +111,7 @@ class ModelConfig:
             embedding_size=126464,
             mlp_hidden_size=12288,
             shd_cfg=ShardingConfig.default(use_fsdp, use_tp),
+            return_hidden_states=return_hidden_states,
         )
 
 
@@ -139,8 +143,15 @@ class ShardedEmbedding(nnx.Embed):
         if self.num_embeddings == 1:
             return jnp.broadcast_to(embedding, (*inputs.shape, self.features))
         return embedding.at[inputs].get(out_sharding=out_sharding)
+
     def attend(self, query: Array, *, out_sharding) -> Array:
-        query, embedding = self.promote_dtype((query, self.embedding[...],), dtype=self.dtype)
+        query, embedding = self.promote_dtype(
+            (
+                query,
+                self.embedding[...],
+            ),
+            dtype=self.dtype,
+        )
         return jnp.dot(query, embedding.T, out_sharding=out_sharding)
 
 
@@ -201,12 +212,11 @@ def sharded_attention(
     scale_val = (1.0 / jnp.sqrt(k.shape[-1])) if scale is None else scale
     logits *= jnp.array(scale_val, dtype=logits.dtype)
 
-    is_causal = False
-    local_window_size, q_seqlen, kv_seqlen = None, None, None
-    padded_logits = _apply_masks(logits, mask, is_causal, q_seqlen, kv_seqlen, local_window_size)
-
-    padded_logits = padded_logits.astype(jnp.float32)
-    probs = jax.nn.softmax(padded_logits, axis=-1).astype(k.dtype)
+    if mask is None:
+        probs = jax.nn.softmax(logits.astype(np.float32), axis=-1).astype(k.dtype)
+    else:
+        padded_logits = jnp.where(mask[:, None, :, :], logits.astype(np.float32), LARGE_NEGATIVE)
+        probs = jax.nn.softmax(padded_logits, axis=-1).astype(k.dtype)
 
     if rate is not None and rate > 0.0:
         keep_prob = 1.0 - rate
@@ -334,7 +344,7 @@ class LLaDAModel(nnx.Module):
         self.head_dim = self.blocks[0].head_dim
         self.rope_theta = cfg.rope_theta
 
-    def __call__(self, input_ids: Array, attention_mask: Array, key: Array) -> Array:
+    def __call__(self, input_ids: Array, attention_mask: Array, key: Array) -> tuple[Array, Array, list[Array]]:
         shd = self.config.shd_cfg.activation
         left_pads = count_left_pads(attention_mask)
         start_ind = left_pads.reshape((-1, 1))
@@ -342,21 +352,26 @@ class LLaDAModel(nnx.Module):
         sin, cos = _generate_pos_embeddings(position_ids, self.head_dim, self.rope_theta)
 
         if attention_mask is not None:
-            attention_mask = attention_mask[:, None, None, :]
+            attention_mask = attention_mask[:, None, :]
 
         x = self.wte(input_ids, out_sharding=shd)
 
         key, subkey = jax.random.split(key)
         x = self.emb_drop(x, rngs=subkey)
 
+        hiddden_states = []
         for b in self.blocks:
+            if self.config.return_hidden_states:
+                hiddden_states.append(x)
             x, key = b(x, sin, cos, attention_mask, key)
         x = self.ln_f(x)
+        if self.config.return_hidden_states:
+            hiddden_states.append(x)
         x = self.ff_out(x, out_sharding=shd)
-        return x, key
+        return x, key, hiddden_states
 
 
-def add_gumbel_noise(logits, temperature, key):
+def add_gumbel_noise(logits: Array, temperature: float, key: Array) -> Array:
     if temperature == 0:
         return logits
     noise = jax.random.uniform(key, logits.shape, jnp.float32)
@@ -370,7 +385,7 @@ def get_num_transfer_tokens(batch_size: int, block_length: int, steps_per_block:
     return np.full((batch_size, steps_per_block), base_steps_per_iter) + (np.arange(steps_per_block) < additional_steps)
 
 
-def forward(model, x, attn_mask, key):
+def forward(model: LLaDAModel, x: Array, attn_mask: Array, key: Array) -> tuple[Array, Array, list[Array]]:
     return model(input_ids=x, attention_mask=attn_mask, key=key)
 
 
@@ -412,16 +427,15 @@ def generate(
         If True, prevents eos and eot tokens from being generated.
     key
     """
-    shd = model.config.shd_cfg.activation
+    shd, cfg = model.config.shd_cfg.activation, model.config
     fsdp_enabled, tp_enabled = shd[0] is not None, shd[2] is not None
 
     # Functions to enable sharded computation or make it more efficient
     if fsdp_enabled:
-        argsort = jax.jit(
-            jax.shard_map(lambda x: jnp.argsort(x, axis=-1), in_specs=P(shd[0], None), out_specs=P(shd[0], None))
-        )
+        argsort = jax.shard_map(lambda x: jnp.argsort(x, axis=-1), in_specs=P(shd[0], None), out_specs=P(shd[0], None))
     else:
         argsort = lambda x: jnp.argsort(x, axis=-1)
+    rank_fn = jax.jit(lambda x: argsort(argsort(x)))
     if tp_enabled:
 
         @jax.jit
@@ -471,15 +485,15 @@ def generate(
                 attention_mask_ = (
                     jnp.concat([attention_mask, attention_mask], dim=0) if attention_mask is not None else None
                 )
-                logits = forward(model, x_, attention_mask_)
+                logits, key = forward(model, x_, attention_mask_, key)
                 logits, un_logits = jnp.split(logits, 2, axis=0)
-                logits: Array = un_logits + (cfg_scale + 1) * (logits - un_logits)
+                logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
             else:
-                logits, key = forward(model, x, attention_mask, key)
+                logits, key, _ = forward(model, x, attention_mask, key)
 
             if logits_eos_inf:
                 # Update eos logits to -inf so they are impossible
-                logits = logits.at[:, :, 126081].set(-jnp.inf)
+                logits, key, _ = logits.at[:, :, cfg.eos_idx].set(-jnp.inf)
 
             # Add noise to logits
             key, subkey = jax.random.split(key)
@@ -488,8 +502,8 @@ def generate(
 
             if confidence_eos_eot_inf:
                 # Update eos and eot logits so they are -inf
-                logits = logits.at[:, :, 126081].set(-jnp.inf)
-                logits = logits.at[:, :, 126348].set(-jnp.inf)
+                logits = logits.at[:, :, cfg.eos_idx].set(-jnp.inf)
+                logits = logits.at[:, :, cfg.eot_idx].set(-jnp.inf)
 
             # Compute remasking confidence for next step of diffusion
             if remasking == "low_confidence":
@@ -510,7 +524,7 @@ def generate(
             confidence = jnp.where(mask_index, x0_p, -jnp.inf)
 
             # Compute array ranks for topk mask
-            ranks = argsort(argsort(confidence))
+            ranks = rank_fn(confidence)
             rank_threshold = (confidence.shape[-1] - num_transfer_tokens[:, i])[:, None]
             topk_mask = ranks >= rank_threshold
 
