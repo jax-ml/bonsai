@@ -143,9 +143,14 @@ def _get_vision_key_mapping():
     }
 
 
-def _get_text_key_mapping():
-    """Mapping for text decoder weights."""
-    return {
+def _get_text_key_mapping(tie_word_embeddings: bool = True):
+    """Mapping for text decoder weights.
+
+    Args:
+        tie_word_embeddings: If True, lm_head.weight maps to embed_tokens.embedding.
+                            If False, lm_head.weight maps to lm_head.kernel.
+    """
+    mapping = {
         # Token embedding (note: PyTorch key is model.language_model.embed_tokens)
         r"^model\.language_model\.embed_tokens\.weight$": (
             "model.language_model.embed_tokens.embedding",
@@ -204,20 +209,35 @@ def _get_text_key_mapping():
             "model.language_model.norm.weight",
             Transform.DEFAULT,
         ),
-        # For tied embeddings models, lm_head.weight is saved but embed_tokens is not
-        # Map lm_head.weight to embed_tokens.embedding (they share the same weight)
-        r"^lm_head\.weight$": (
-            "model.language_model.embed_tokens.embedding",
-            Transform.EMBED,
-        ),
     }
 
+    # lm_head mapping depends on whether embeddings are tied
+    if tie_word_embeddings:
+        # For tied embeddings: lm_head.weight maps to embed_tokens.embedding
+        mapping[r"^lm_head\.weight$"] = (
+            "model.language_model.embed_tokens.embedding",
+            Transform.EMBED,
+        )
+    else:
+        # For untied embeddings: lm_head.weight maps to lm_head.kernel (ShardedLinear)
+        mapping[r"^lm_head\.weight$"] = (
+            "lm_head.kernel",
+            Transform.LINEAR,
+        )
 
-def _get_key_and_transform_mapping():
-    """Combined key mapping for all model components."""
+    return mapping
+
+
+def _get_key_and_transform_mapping(tie_word_embeddings: bool = True):
+    """Combined key mapping for all model components.
+
+    Args:
+        tie_word_embeddings: If True, lm_head.weight maps to embed_tokens.embedding.
+                            If False, lm_head.weight maps to lm_head.kernel.
+    """
     mapping = {}
     mapping.update(_get_vision_key_mapping())
-    mapping.update(_get_text_key_mapping())
+    mapping.update(_get_text_key_mapping(tie_word_embeddings))
     return mapping
 
 
@@ -327,8 +347,8 @@ def create_model_from_safe_tensors(
     # Get sharding if mesh provided
     sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
 
-    # Key mapping
-    key_mapping = _get_key_and_transform_mapping()
+    # Key mapping - depends on whether embeddings are tied
+    key_mapping = _get_key_and_transform_mapping(config.text_config.tie_word_embeddings)
 
     conversion_errors = []
     loaded_keys = set()

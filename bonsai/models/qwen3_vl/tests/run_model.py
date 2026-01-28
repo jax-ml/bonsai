@@ -48,8 +48,8 @@ def generate(model, cache, input_ids, max_new_tokens: int = 50):
         next_token = jnp.argmax(logits, axis=-1, keepdims=True)
         generated_tokens.append(next_token)
 
-        # Stop on EOS
-        if int(next_token[0, 0]) == EOS_TOKEN_ID:
+        # Stop on EOS - use numpy to avoid sharding issues with indexing
+        if int(np.array(next_token)[0, 0]) == EOS_TOKEN_ID:
             break
 
     decode_time = time.time() - start
@@ -59,7 +59,9 @@ def generate(model, cache, input_ids, max_new_tokens: int = 50):
     else:
         print(f"   Decode: {decode_time:.2f}s ({tokens_generated} tokens)")
 
-    return jnp.concatenate([input_ids] + generated_tokens, axis=1)
+    # Use numpy for concatenation to avoid sharding mismatches
+    all_tokens = [np.array(input_ids)] + [np.array(t) for t in generated_tokens]
+    return jnp.array(np.concatenate(all_tokens, axis=1))
 
 
 def generate_with_vision(
@@ -86,7 +88,8 @@ def generate_with_vision(
         next_token = jnp.argmax(logits, axis=-1, keepdims=True)
         generated_tokens.append(next_token)
 
-        if int(next_token[0, 0]) == EOS_TOKEN_ID:
+        # Stop on EOS - use numpy to avoid sharding issues with indexing
+        if int(np.array(next_token)[0, 0]) == EOS_TOKEN_ID:
             break
 
     decode_time = time.time() - start
@@ -94,7 +97,9 @@ def generate_with_vision(
     if decode_time > 0:
         print(f"   Decode: {decode_time:.2f}s ({tokens_generated} tokens, {tokens_generated / decode_time:.1f} tok/s)")
 
-    return jnp.concatenate([input_ids] + generated_tokens, axis=1)
+    # Use numpy for concatenation to avoid sharding mismatches
+    all_tokens = [np.array(input_ids)] + [np.array(t) for t in generated_tokens]
+    return jnp.array(np.concatenate(all_tokens, axis=1))
 
 
 def main():
@@ -282,13 +287,12 @@ def main():
         # Initialize cache
         batch_vision = MESH_SHAPE[0] if USE_SHARDING else 1
         if USE_SHARDING and input_ids_vision.shape[0] < batch_vision:
+            # Only pad input_ids and token_type_ids - they have batch dimension
+            # pixel_values and image_grid_thw do NOT have batch dimension
+            # (they're (num_patches, features) and (num_images, 3) respectively)
             input_ids_vision = jnp.concatenate(
                 [input_ids_vision, jnp.zeros((batch_vision - 1, input_ids_vision.shape[1]), dtype=jnp.int32)], axis=0
             )
-            pixel_values = jnp.concatenate(
-                [pixel_values, jnp.zeros((batch_vision - 1, *pixel_values.shape[1:]), dtype=pixel_values.dtype)], axis=0
-            )
-            image_grid_thw = jnp.concatenate([image_grid_thw, image_grid_thw], axis=0)[:batch_vision]
             token_type_ids = jnp.concatenate(
                 [token_type_ids, jnp.zeros((batch_vision - 1, token_type_ids.shape[1]), dtype=jnp.int32)], axis=0
             )

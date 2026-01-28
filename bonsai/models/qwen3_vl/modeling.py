@@ -115,7 +115,11 @@ def shard(x, spec: PartitionSpec):
 
 # --- Sharded Layer Components (Gemma3 Pattern) --- #
 class ShardedLinear(nnx.Module):
-    """Linear layer with explicit sharding on matmul output."""
+    """Linear layer with explicit sharding on matmul output.
+
+    Unlike standard Linear, sharding is applied only at call time via out_sharding,
+    not during initialization. This allows model creation without an active mesh.
+    """
 
     def __init__(
         self,
@@ -123,14 +127,13 @@ class ShardedLinear(nnx.Module):
         out_dim: int,
         *,
         use_bias: bool = True,
-        kernel_sharding: PartitionSpec,
+        kernel_sharding: PartitionSpec = None,  # Stored but not used in init
         dtype=None,
         rngs: nnx.Rngs,
     ):
+        # Initialize without sharding - sharding happens at call time
         kernel_initializer = jax.nn.initializers.lecun_normal()
-        self.kernel = nnx.Param(
-            kernel_initializer(rngs.params(), (in_dim, out_dim), dtype=dtype, out_sharding=kernel_sharding)
-        )
+        self.kernel = nnx.Param(kernel_initializer(rngs.params(), (in_dim, out_dim), dtype=dtype))
         self.use_bias = use_bias
         if use_bias:
             self.bias = nnx.Param(jnp.zeros((out_dim,), dtype=dtype))
@@ -138,7 +141,13 @@ class ShardedLinear(nnx.Module):
             self.bias = None
 
     def __call__(self, x, *, out_sharding: PartitionSpec):
-        result = jnp.matmul(x, self.kernel[...], out_sharding=out_sharding)
+        # Apply sharding on output - handles both mesh and no-mesh contexts
+        mesh = get_abstract_mesh()
+        if mesh.empty or len(mesh.axis_names) == 0:
+            # No mesh - skip sharding
+            result = jnp.matmul(x, self.kernel[...])
+        else:
+            result = jnp.matmul(x, self.kernel[...], out_sharding=out_sharding)
         if self.use_bias and self.bias is not None:
             result = result + self.bias[...]
         return result
@@ -153,11 +162,18 @@ class ShardedEmbedding(nnx.Embed):
         (embedding,) = self.promote_dtype((self.embedding[...],), dtype=self.dtype, inexact=False)
         if self.num_embeddings == 1:
             return jnp.broadcast_to(embedding, (*inputs.shape, self.features))
+        # Apply sharding on output - handles both mesh and no-mesh contexts
+        mesh = get_abstract_mesh()
+        if mesh.empty or len(mesh.axis_names) == 0:
+            return embedding[inputs]
         return embedding.at[inputs].get(out_sharding=out_sharding)
 
     def attend(self, query: Array, *, out_sharding: PartitionSpec) -> Array:
         """Compute logits by matrix multiply with embedding weights."""
         query, embedding = self.promote_dtype((query, self.embedding[...]), dtype=self.dtype)
+        mesh = get_abstract_mesh()
+        if mesh.empty or len(mesh.axis_names) == 0:
+            return jnp.matmul(query, embedding.T)
         return jnp.matmul(query, embedding.T, out_sharding=out_sharding)
 
 
@@ -378,6 +394,7 @@ class Qwen3VLPatchEmbed(nnx.Module):
             out_features=config.hidden_size,
             kernel_size=kernel,
             strides=kernel,
+            padding="VALID",  # No padding - matches PyTorch Conv3d default
             use_bias=True,
             rngs=rngs,
         )
@@ -418,9 +435,10 @@ class Qwen3VLVisionMLP(nnx.Module):
         )
 
     def __call__(self, x: Array) -> Array:
-        x = self.linear_fc1(x, out_sharding=self.shd_cfg.activation)
+        # Vision operates on (seq, hidden) without batch - no sharding benefit
+        x = self.linear_fc1(x, out_sharding=P(None, None))
         x = nnx.gelu(x, approximate=True)
-        return self.linear_fc2(x, out_sharding=self.shd_cfg.activation)
+        return self.linear_fc2(x, out_sharding=P(None, None))
 
 
 class Qwen3VLVisionAttention(nnx.Module):
@@ -466,7 +484,7 @@ class Qwen3VLVisionAttention(nnx.Module):
         attn_weights = jnp.matmul(q, k.transpose(0, 2, 1)) * self.scale
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)
         out = jnp.matmul(attn_weights, v).transpose(1, 0, 2).reshape(seq_len, -1)
-        return self.proj(out, out_sharding=self.shd_cfg.activation)
+        return self.proj(out, out_sharding=P(None, None))
 
 
 class Qwen3VLVisionBlock(nnx.Module):
@@ -512,12 +530,14 @@ class Qwen3VLPatchMerger(nnx.Module):
             x = self.norm(x)
         merge_factor = self.config.spatial_merge_size**2
         n_patches = x.shape[0] // merge_factor
+        # Remove sharding before reshape (vision ops don't benefit from sharding on seq dim)
+        x = shard(x, P(None, None))
         x = x.reshape(n_patches, -1)
         if self.use_postshuffle_norm:
             x = self.norm(x)
-        x = self.linear_fc1(x, out_sharding=self.shd_cfg.activation)
+        x = self.linear_fc1(x, out_sharding=P(None, None))
         x = nnx.gelu(x)
-        return self.linear_fc2(x, out_sharding=self.shd_cfg.activation)
+        return self.linear_fc2(x, out_sharding=P(None, None))
 
 
 class Qwen3VLVisionModel(nnx.Module):
@@ -951,7 +971,12 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
             vision_embeds_batched = jnp.broadcast_to(
                 vision_embeds[None], (batch, vision_embeds.shape[0], vision_embeds.shape[1])
             )
-            inputs_embeds = batched_merge_modalities(vision_embeds_batched, inputs_embeds, token_type_ids)
+            # Unshard inputs before vmap (vmap requires uniform sharding on mapped axis)
+            inputs_embeds_unsharded = shard(inputs_embeds, P(None, None, None))
+            token_type_ids_unsharded = shard(token_type_ids, P(None, None))
+            merged = batched_merge_modalities(vision_embeds_batched, inputs_embeds_unsharded, token_type_ids_unsharded)
+            # Reshard output
+            inputs_embeds = shard(merged, shd.act_btd)
 
         hidden_states = self.model.language_model(inputs_embeds, cache, sin, cos, mask)
 
