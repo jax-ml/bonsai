@@ -151,12 +151,21 @@ def main():
 
     input_ids = jnp.array(inputs["input_ids"].numpy())
     batch_size, seq_len = input_ids.shape
-    print(f"\n3. Input: {seq_len} tokens")
 
-    # Warm up JIT
+    # When sharding, batch size must be >= fsdp for divisibility
+    if USE_SHARDING and batch_size < MESH_SHAPE[0]:
+        print(f"WARNING: batch_size={batch_size} < fsdp={MESH_SHAPE[0]}, padding batch")
+        pad_size = MESH_SHAPE[0] - batch_size
+        input_ids = jnp.concatenate([input_ids, jnp.zeros((pad_size, seq_len), dtype=jnp.int32)], axis=0)
+        batch_size = MESH_SHAPE[0]
+
+    print(f"\n3. Input: {seq_len} tokens (batch_size={batch_size})")
+
+    # Warm up JIT - use minimum batch size that works with sharding
     print("\n4. Warming up JIT (first run is slow)...")
-    warm_input = jnp.zeros((1, 1), dtype=jnp.int32)
-    warm_cache = modeling.init_cache(flax_config, 1, 1, 10)
+    warm_batch = MESH_SHAPE[0] if USE_SHARDING else 1
+    warm_input = jnp.zeros((warm_batch, 1), dtype=jnp.int32)
+    warm_cache = modeling.init_cache(flax_config, warm_batch, 1, 10)
     _ = modeling.forward(flax_model, warm_cache, warm_input)
     print("   JIT warm-up complete")
 
@@ -201,10 +210,15 @@ def main():
     )
 
     input_ids2 = jnp.array(inputs2["input_ids"].numpy())
+    batch2 = MESH_SHAPE[0] if USE_SHARDING else 1
+    if USE_SHARDING and input_ids2.shape[0] < batch2:
+        input_ids2 = jnp.concatenate(
+            [input_ids2, jnp.zeros((batch2 - 1, input_ids2.shape[1]), dtype=jnp.int32)], axis=0
+        )
     seq_len2 = input_ids2.shape[1]
     print(f"\nInput: {seq_len2} tokens")
 
-    cache2 = modeling.init_cache(flax_config, 1, seq_len2, generate_steps=100)
+    cache2 = modeling.init_cache(flax_config, batch2, seq_len2, generate_steps=100)
     generated_ids2 = generate(flax_model, cache2, input_ids2, max_new_tokens=60)
 
     generated_ids_trimmed2 = generated_ids2[:, seq_len2:]
@@ -266,7 +280,19 @@ def main():
         print(f"   Image tokens in sequence: {int(token_type_ids.sum())}")
 
         # Initialize cache
-        cache_vision = modeling.init_cache(flax_config, 1, seq_len_vision, generate_steps=200)
+        batch_vision = MESH_SHAPE[0] if USE_SHARDING else 1
+        if USE_SHARDING and input_ids_vision.shape[0] < batch_vision:
+            input_ids_vision = jnp.concatenate(
+                [input_ids_vision, jnp.zeros((batch_vision - 1, input_ids_vision.shape[1]), dtype=jnp.int32)], axis=0
+            )
+            pixel_values = jnp.concatenate(
+                [pixel_values, jnp.zeros((batch_vision - 1, *pixel_values.shape[1:]), dtype=pixel_values.dtype)], axis=0
+            )
+            image_grid_thw = jnp.concatenate([image_grid_thw, image_grid_thw], axis=0)[:batch_vision]
+            token_type_ids = jnp.concatenate(
+                [token_type_ids, jnp.zeros((batch_vision - 1, token_type_ids.shape[1]), dtype=jnp.int32)], axis=0
+            )
+        cache_vision = modeling.init_cache(flax_config, batch_vision, seq_len_vision, generate_steps=200)
 
         print("\n4. Generating with vision...")
         generated_ids_vision = generate_with_vision(

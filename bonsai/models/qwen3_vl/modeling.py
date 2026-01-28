@@ -113,6 +113,54 @@ def shard(x, spec: PartitionSpec):
     return x
 
 
+# --- Sharded Layer Components (Gemma3 Pattern) --- #
+class ShardedLinear(nnx.Module):
+    """Linear layer with explicit sharding on matmul output."""
+
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        *,
+        use_bias: bool = True,
+        kernel_sharding: PartitionSpec,
+        dtype=None,
+        rngs: nnx.Rngs,
+    ):
+        kernel_initializer = jax.nn.initializers.lecun_normal()
+        self.kernel = nnx.Param(
+            kernel_initializer(rngs.params(), (in_dim, out_dim), dtype=dtype, out_sharding=kernel_sharding)
+        )
+        self.use_bias = use_bias
+        if use_bias:
+            self.bias = nnx.Param(jnp.zeros((out_dim,), dtype=dtype))
+        else:
+            self.bias = None
+
+    def __call__(self, x, *, out_sharding: PartitionSpec):
+        result = jnp.matmul(x, self.kernel[...], out_sharding=out_sharding)
+        if self.use_bias and self.bias is not None:
+            result = result + self.bias[...]
+        return result
+
+
+class ShardedEmbedding(nnx.Embed):
+    """Embedding layer with explicit sharding on gather output."""
+
+    def __call__(self, inputs: Array, *, out_sharding: PartitionSpec) -> Array:
+        if not jnp.issubdtype(inputs.dtype, jnp.integer):
+            raise ValueError("Input type must be an integer or unsigned integer.")
+        (embedding,) = self.promote_dtype((self.embedding[...],), dtype=self.dtype, inexact=False)
+        if self.num_embeddings == 1:
+            return jnp.broadcast_to(embedding, (*inputs.shape, self.features))
+        return embedding.at[inputs].get(out_sharding=out_sharding)
+
+    def attend(self, query: Array, *, out_sharding: PartitionSpec) -> Array:
+        """Compute logits by matrix multiply with embedding weights."""
+        query, embedding = self.promote_dtype((query, self.embedding[...]), dtype=self.dtype)
+        return jnp.matmul(query, embedding.T, out_sharding=out_sharding)
+
+
 @dataclass(frozen=True)
 class Qwen3VLVisionConfig:
     """Vision encoder configuration for Qwen3-VL."""
@@ -354,15 +402,25 @@ class Qwen3VLVisionMLP(nnx.Module):
 
     def __init__(self, config: Qwen3VLVisionConfig, *, rngs: nnx.Rngs):
         self.shd_cfg = config.shd_cfg
-        self.linear_fc1 = nnx.Linear(config.hidden_size, config.intermediate_size, use_bias=True, rngs=rngs)
-        self.linear_fc2 = nnx.Linear(config.intermediate_size, config.hidden_size, use_bias=True, rngs=rngs)
+        self.linear_fc1 = ShardedLinear(
+            config.hidden_size,
+            config.intermediate_size,
+            use_bias=True,
+            kernel_sharding=self.shd_cfg.mlp_fc1_kernel,
+            rngs=rngs,
+        )
+        self.linear_fc2 = ShardedLinear(
+            config.intermediate_size,
+            config.hidden_size,
+            use_bias=True,
+            kernel_sharding=self.shd_cfg.mlp_fc2_kernel,
+            rngs=rngs,
+        )
 
     def __call__(self, x: Array) -> Array:
-        x = self.linear_fc1(x)
-        x = shard(x, self.shd_cfg.activation)
+        x = self.linear_fc1(x, out_sharding=self.shd_cfg.activation)
         x = nnx.gelu(x, approximate=True)
-        x = self.linear_fc2(x)
-        return x
+        return self.linear_fc2(x, out_sharding=self.shd_cfg.activation)
 
 
 class Qwen3VLVisionAttention(nnx.Module):
@@ -373,8 +431,12 @@ class Qwen3VLVisionAttention(nnx.Module):
         self.num_heads = config.num_heads
         self.head_dim = config.head_dim
         hidden_size = config.hidden_size
-        self.qkv = nnx.Linear(hidden_size, 3 * hidden_size, use_bias=True, rngs=rngs)
-        self.proj = nnx.Linear(hidden_size, hidden_size, use_bias=True, rngs=rngs)
+        self.qkv = ShardedLinear(
+            hidden_size, 3 * hidden_size, use_bias=True, kernel_sharding=self.shd_cfg.attn_qkv_kernel, rngs=rngs
+        )
+        self.proj = ShardedLinear(
+            hidden_size, hidden_size, use_bias=True, kernel_sharding=self.shd_cfg.attn_proj_kernel, rngs=rngs
+        )
         self.scale = self.head_dim**-0.5
 
     def apply_rope(self, cos: Array, sin: Array, q: Array, k: Array):
@@ -393,7 +455,9 @@ class Qwen3VLVisionAttention(nnx.Module):
     def __call__(self, hidden_states: Array, position_embeddings: Tuple[Array, Array]) -> Array:
         seq_len = hidden_states.shape[0]
         cos, sin = position_embeddings  # (seq_len, head_dim)
-        qkv = self.qkv(hidden_states).reshape(seq_len, 3, self.num_heads, self.head_dim)
+        # Use no sharding for QKV since we reshape immediately after
+        qkv_out = self.qkv(hidden_states, out_sharding=P(None, None))
+        qkv = qkv_out.reshape(seq_len, 3, self.num_heads, self.head_dim)
         q, k, v = qkv[:, 0], qkv[:, 1], qkv[:, 2]  # (seq, heads, head_dim)
 
         q, k = self.apply_rope(cos, sin, q, k)
@@ -402,7 +466,7 @@ class Qwen3VLVisionAttention(nnx.Module):
         attn_weights = jnp.matmul(q, k.transpose(0, 2, 1)) * self.scale
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)
         out = jnp.matmul(attn_weights, v).transpose(1, 0, 2).reshape(seq_len, -1)
-        return shard(self.proj(out), self.shd_cfg.activation)
+        return self.proj(out, out_sharding=self.shd_cfg.activation)
 
 
 class Qwen3VLVisionBlock(nnx.Module):
@@ -436,8 +500,12 @@ class Qwen3VLPatchMerger(nnx.Module):
         norm_dim = hidden_merged if use_postshuffle_norm else config.hidden_size
         self.norm = nnx.LayerNorm(norm_dim, epsilon=config.layer_norm_eps, rngs=rngs)
         self.use_postshuffle_norm = use_postshuffle_norm
-        self.linear_fc1 = nnx.Linear(hidden_merged, hidden_merged, use_bias=True, rngs=rngs)
-        self.linear_fc2 = nnx.Linear(hidden_merged, config.out_hidden_size, use_bias=True, rngs=rngs)
+        self.linear_fc1 = ShardedLinear(
+            hidden_merged, hidden_merged, use_bias=True, kernel_sharding=self.shd_cfg.mlp_fc1_kernel, rngs=rngs
+        )
+        self.linear_fc2 = ShardedLinear(
+            hidden_merged, config.out_hidden_size, use_bias=True, kernel_sharding=self.shd_cfg.mlp_fc2_kernel, rngs=rngs
+        )
 
     def __call__(self, x: Array) -> Array:
         if not self.use_postshuffle_norm:
@@ -447,11 +515,9 @@ class Qwen3VLPatchMerger(nnx.Module):
         x = x.reshape(n_patches, -1)
         if self.use_postshuffle_norm:
             x = self.norm(x)
-        x = self.linear_fc1(x)
-        x = shard(x, self.shd_cfg.activation)
+        x = self.linear_fc1(x, out_sharding=self.shd_cfg.activation)
         x = nnx.gelu(x)
-        x = self.linear_fc2(x)
-        return x
+        return self.linear_fc2(x, out_sharding=self.shd_cfg.activation)
 
 
 class Qwen3VLVisionModel(nnx.Module):
@@ -642,14 +708,33 @@ class Qwen3VLMLP(nnx.Module):
 
     def __init__(self, config: Qwen3VLTextConfig, *, rngs: nnx.Rngs):
         self.shd_cfg = config.shd_cfg
-        self.gate_proj = nnx.Linear(config.hidden_size, config.intermediate_size, use_bias=False, rngs=rngs)
-        self.up_proj = nnx.Linear(config.hidden_size, config.intermediate_size, use_bias=False, rngs=rngs)
-        self.down_proj = nnx.Linear(config.intermediate_size, config.hidden_size, use_bias=False, rngs=rngs)
+        self.gate_proj = ShardedLinear(
+            config.hidden_size,
+            config.intermediate_size,
+            use_bias=False,
+            kernel_sharding=self.shd_cfg.mlp_gate_up_kernel,
+            rngs=rngs,
+        )
+        self.up_proj = ShardedLinear(
+            config.hidden_size,
+            config.intermediate_size,
+            use_bias=False,
+            kernel_sharding=self.shd_cfg.mlp_gate_up_kernel,
+            rngs=rngs,
+        )
+        self.down_proj = ShardedLinear(
+            config.intermediate_size,
+            config.hidden_size,
+            use_bias=False,
+            kernel_sharding=self.shd_cfg.mlp_down_kernel,
+            rngs=rngs,
+        )
 
     def __call__(self, x: Array) -> Array:
-        activations = nnx.silu(self.gate_proj(x)) * self.up_proj(x)
-        activations = shard(activations, self.shd_cfg.act_btf)
-        return self.down_proj(activations)
+        gate = self.gate_proj(x, out_sharding=self.shd_cfg.act_btf)
+        up = self.up_proj(x, out_sharding=self.shd_cfg.act_btf)
+        activations = nnx.silu(gate) * up
+        return self.down_proj(activations, out_sharding=self.shd_cfg.act_btd)
 
 
 def _generate_rope(positions: Array, head_dim: int, rope_theta: float) -> Tuple[Array, Array]:
@@ -670,11 +755,15 @@ def _apply_rope(x: Array, sin: Array, cos: Array) -> Array:
 
 
 def repeat_kv(hidden_states: Array, n_rep: int) -> Array:
-    """Repeat KV heads for GQA."""
+    """Repeat KV heads for GQA using reshape+tile for sharding compatibility."""
     if n_rep == 1:
         return hidden_states
     b, t, kv_heads, head_dim = hidden_states.shape
-    return jnp.repeat(hidden_states, n_rep, axis=2)
+    # Reshape to add a dimension, tile, then reshape back
+    # This avoids jnp.repeat which requires out_sharding under mesh context
+    hidden_states = hidden_states[:, :, :, None, :]  # (b, t, kv_heads, 1, head_dim)
+    hidden_states = jnp.tile(hidden_states, (1, 1, 1, n_rep, 1))  # (b, t, kv_heads, n_rep, head_dim)
+    return hidden_states.reshape(b, t, kv_heads * n_rep, head_dim)
 
 
 class Qwen3VLAttention(nnx.Module):
@@ -690,17 +779,33 @@ class Qwen3VLAttention(nnx.Module):
         self.n_rep = self.num_heads // self.num_kv_heads
         self.scale = self.head_dim**-0.5
 
-        self.q_proj = nnx.Linear(
-            config.hidden_size, self.num_heads * self.head_dim, use_bias=config.attention_bias, rngs=rngs
+        self.q_proj = ShardedLinear(
+            config.hidden_size,
+            self.num_heads * self.head_dim,
+            use_bias=config.attention_bias,
+            kernel_sharding=self.shd_cfg.q_weight,
+            rngs=rngs,
         )
-        self.k_proj = nnx.Linear(
-            config.hidden_size, self.num_kv_heads * self.head_dim, use_bias=config.attention_bias, rngs=rngs
+        self.k_proj = ShardedLinear(
+            config.hidden_size,
+            self.num_kv_heads * self.head_dim,
+            use_bias=config.attention_bias,
+            kernel_sharding=self.shd_cfg.kv_weight,
+            rngs=rngs,
         )
-        self.v_proj = nnx.Linear(
-            config.hidden_size, self.num_kv_heads * self.head_dim, use_bias=config.attention_bias, rngs=rngs
+        self.v_proj = ShardedLinear(
+            config.hidden_size,
+            self.num_kv_heads * self.head_dim,
+            use_bias=config.attention_bias,
+            kernel_sharding=self.shd_cfg.kv_weight,
+            rngs=rngs,
         )
-        self.o_proj = nnx.Linear(
-            self.num_heads * self.head_dim, config.hidden_size, use_bias=config.attention_bias, rngs=rngs
+        self.o_proj = ShardedLinear(
+            self.num_heads * self.head_dim,
+            config.hidden_size,
+            use_bias=config.attention_bias,
+            kernel_sharding=self.shd_cfg.o_weight,
+            rngs=rngs,
         )
         self.q_norm = RMSNorm(self.head_dim, config.rms_norm_eps, rngs=rngs)
         self.k_norm = RMSNorm(self.head_dim, config.rms_norm_eps, rngs=rngs)
@@ -708,13 +813,13 @@ class Qwen3VLAttention(nnx.Module):
     def __call__(self, x: Array, cache: LayerCache, sin: Array, cos: Array, mask: Array | None) -> Array:
         batch, seq_len, _ = x.shape
 
-        q = shard(
-            self.q_norm(self.q_proj(x).reshape(batch, seq_len, self.num_heads, self.head_dim)), self.shd_cfg.act_btnh
-        )
-        k = shard(
-            self.k_norm(self.k_proj(x).reshape(batch, seq_len, self.num_kv_heads, self.head_dim)), self.shd_cfg.act_btnh
-        )
-        v = shard(self.v_proj(x).reshape(batch, seq_len, self.num_kv_heads, self.head_dim), self.shd_cfg.act_btnh)
+        q_out = self.q_proj(x, out_sharding=self.shd_cfg.act_btd)
+        k_out = self.k_proj(x, out_sharding=self.shd_cfg.act_btd)
+        v_out = self.v_proj(x, out_sharding=self.shd_cfg.act_btd)
+
+        q = self.q_norm(q_out.reshape(batch, seq_len, self.num_heads, self.head_dim))
+        k = self.k_norm(k_out.reshape(batch, seq_len, self.num_kv_heads, self.head_dim))
+        v = v_out.reshape(batch, seq_len, self.num_kv_heads, self.head_dim)
 
         q = _apply_rope(q, sin, cos)
         k = _apply_rope(k, sin, cos)
@@ -741,7 +846,7 @@ class Qwen3VLAttention(nnx.Module):
         attn_out = jnp.matmul(attn_weights, v).transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
         cache.cur_ind[...] = cache.cur_ind[...] + seq_len
-        return shard(self.o_proj(attn_out), self.shd_cfg.act_btd)
+        return self.o_proj(attn_out, out_sharding=self.shd_cfg.act_btd)
 
 
 class Qwen3VLDecoderLayer(nnx.Module):
@@ -765,12 +870,12 @@ class Qwen3VLTextModel(nnx.Module):
     def __init__(self, config: Qwen3VLTextConfig, *, rngs: nnx.Rngs):
         self.config = config
         self.shd_cfg = config.shd_cfg
-        self.embed_tokens = nnx.Embed(num_embeddings=config.vocab_size, features=config.hidden_size, rngs=rngs)
+        self.embed_tokens = ShardedEmbedding(num_embeddings=config.vocab_size, features=config.hidden_size, rngs=rngs)
         self.layers = nnx.List([Qwen3VLDecoderLayer(config, i, rngs=rngs) for i in range(config.num_hidden_layers)])
         self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps, rngs=rngs)
 
     def __call__(self, inputs_embeds: Array, cache: Cache, sin: Array, cos: Array, mask: Array | None) -> Array:
-        hidden_states = shard(inputs_embeds, self.shd_cfg.act_btd)
+        hidden_states = inputs_embeds  # Already sharded when passed in
         for i, layer in enumerate(self.layers):
             hidden_states = layer(hidden_states, cache[i], sin, cos, mask)
         return self.norm(hidden_states)
@@ -808,8 +913,12 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
         if config.text_config.tie_word_embeddings:
             self.lm_head = None
         else:
-            self.lm_head = nnx.Linear(
-                config.text_config.hidden_size, config.text_config.vocab_size, use_bias=False, rngs=rngs
+            self.lm_head = ShardedLinear(
+                config.text_config.hidden_size,
+                config.text_config.vocab_size,
+                use_bias=False,
+                kernel_sharding=config.text_config.shd_cfg.embed_kernel,
+                rngs=rngs,
             )
 
     def __call__(
@@ -822,6 +931,7 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
     ) -> Array:
         """Forward pass with KV-cache."""
         batch, seq_len = input_ids.shape
+        shd = self.config.text_config.shd_cfg
 
         # Generate position embeddings
         positions = jnp.arange(seq_len)[None, :] + cache[0].cur_ind[...]
@@ -831,8 +941,8 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
         # Create causal mask
         mask = make_causal_mask(cache[0], seq_len)
 
-        # Get text embeddings
-        inputs_embeds = self.model.language_model.embed_tokens(input_ids)
+        # Get text embeddings using ShardedEmbedding with explicit out_sharding
+        inputs_embeds = self.model.language_model.embed_tokens(input_ids, out_sharding=shd.act_btd)
 
         # Merge vision if provided
         if pixel_values is not None and image_grid_thw is not None and token_type_ids is not None:
@@ -845,11 +955,13 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
 
         hidden_states = self.model.language_model(inputs_embeds, cache, sin, cos, mask)
 
+        # Compute logits
+        logits_sharding = P(shd.act_btd[0], None, None)  # (batch, seq, vocab)
         if self.lm_head is not None:
-            logits = self.lm_head(hidden_states)
+            logits = self.lm_head(hidden_states, out_sharding=logits_sharding)
         else:
-            embedding = self.model.language_model.embed_tokens.embedding[...]
-            logits = jnp.matmul(hidden_states, embedding.T)
+            # Use attend() method for tied embeddings
+            logits = self.model.language_model.embed_tokens.attend(hidden_states, out_sharding=logits_sharding)
 
         return logits
 
