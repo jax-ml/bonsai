@@ -126,7 +126,7 @@ class TestForwardPass(absltest.TestCase):
 
         with torch.inference_mode():
             pt_out = pt_embed(pt_ids)
-        flax_out = flax_embed(input_ids)
+        flax_out = flax_embed(input_ids, out_sharding=model_lib.P(None, None, None))
 
         np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-7, atol=1e-7)
 
@@ -158,7 +158,10 @@ class TestForwardPass(absltest.TestCase):
 
         with torch.inference_mode():
             pt_out = pt_mlp(tx)
-        flax_out = flax_mlp(jx)
+        # Reshape to (batch * seq, hidden) for ShardedLinear, then reshape back
+        jx_flat = jx.reshape(-1, hidden_size)
+        flax_out_flat = flax_mlp(jx_flat)
+        flax_out = flax_out_flat.reshape(self.batch_size, self.seq_len, -1)
 
         np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-7, atol=1e-7)
 
@@ -234,7 +237,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         # Compare QKV projection output
         with torch.inference_mode():
             pt_qkv = pt_attn.qkv(tx).numpy()
-        flax_qkv = np.array(flax_attn.qkv(jx))
+        flax_qkv = np.array(flax_attn.qkv(jx, out_sharding=model_lib.P(None, None)))
 
         np.testing.assert_allclose(flax_qkv, pt_qkv, rtol=1e-6, atol=1e-6)
 
@@ -308,7 +311,9 @@ class TestPretrained2B(absltest.TestCase):
 
         with torch.inference_mode():
             pt_out = self.pt_model.model.language_model.embed_tokens(input_ids_pt).numpy()
-        flax_out = np.array(self.flax_model.model.language_model.embed_tokens(input_ids_jax))
+        flax_out = np.array(
+            self.flax_model.model.language_model.embed_tokens(input_ids_jax, out_sharding=model_lib.P(None, None, None))
+        )
 
         np.testing.assert_allclose(flax_out, pt_out, rtol=1e-6, atol=1e-6)
 
@@ -352,7 +357,9 @@ class TestPretrained2B(absltest.TestCase):
         batch, seq_len = input_ids_jax.shape
         cache = model_lib.init_cache(self.flax_config, batch, seq_len, 10)
 
-        flax_embeds = self.flax_model.model.language_model.embed_tokens(input_ids_jax)
+        flax_embeds = self.flax_model.model.language_model.embed_tokens(
+            input_ids_jax, out_sharding=model_lib.P(None, None, None)
+        )
 
         # Generate position embeddings
         positions = jnp.arange(seq_len)[None, :]
