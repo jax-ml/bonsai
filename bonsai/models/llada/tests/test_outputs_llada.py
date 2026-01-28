@@ -60,6 +60,7 @@ def create_llada_for_testing(use_shd: bool) -> tuple[Any, torch.nn.Module, model
         embedding_size=126464 // factor,
         mlp_hidden_size=12288 // factor,
         shd_cfg=modeling.ShardingConfig.default(use_shd, use_shd),
+        return_hidden_states=False,
     )
     bonsai_model = modeling.LLaDAModel(bonsai_config, rngs=nnx.Rngs(0))
 

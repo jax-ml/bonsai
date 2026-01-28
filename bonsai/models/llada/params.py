@@ -130,4 +130,7 @@ def create_llada_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, m
                     )
         gc.collect()
 
+    if len(conversion_errors) > 0:
+        raise ValueError("\n".join(conversion_errors))
+
     return nnx.merge(graph_def, jax_state)

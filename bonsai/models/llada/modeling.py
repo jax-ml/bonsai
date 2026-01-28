@@ -481,11 +481,11 @@ def generate(
             if cfg_scale > 0.0:
                 # Batch inputs to run model twice
                 un_x = x.at[prompt_index].set(mask_id)
-                x_ = jnp.concat([x, un_x], dim=0)
+                x_ = jnp.concat([x, un_x], axis=0)
                 attention_mask_ = (
-                    jnp.concat([attention_mask, attention_mask], dim=0) if attention_mask is not None else None
+                    jnp.concat([attention_mask, attention_mask], axis=0) if attention_mask is not None else None
                 )
-                logits, key = forward(model, x_, attention_mask_, key)
+                logits, key, _ = forward(model, x_, attention_mask_, key)
                 logits, un_logits = jnp.split(logits, 2, axis=0)
                 logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
             else:
@@ -493,7 +493,7 @@ def generate(
 
             if logits_eos_inf:
                 # Update eos logits to -inf so they are impossible
-                logits, key, _ = logits.at[:, :, cfg.eos_idx].set(-jnp.inf)
+                logits = logits.at[:, :, cfg.eos_idx].set(-jnp.inf)
 
             # Add noise to logits
             key, subkey = jax.random.split(key)
