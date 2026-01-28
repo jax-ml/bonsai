@@ -437,7 +437,8 @@ class Qwen3VLVisionMLP(nnx.Module):
     def __call__(self, x: Array) -> Array:
         # Vision operates on (seq, hidden) without batch - no sharding benefit
         x = self.linear_fc1(x, out_sharding=P(None, None))
-        x = nnx.gelu(x, approximate=True)
+        # Compute activation in float32 for precision (matches PyTorch GELU tanh approximation)
+        x = nnx.gelu(x.astype(jnp.float32), approximate=True).astype(x.dtype)
         return self.linear_fc2(x, out_sharding=P(None, None))
 
 
@@ -458,17 +459,13 @@ class Qwen3VLVisionAttention(nnx.Module):
         self.scale = self.head_dim**-0.5
 
     def apply_rope(self, cos: Array, sin: Array, q: Array, k: Array):
-        # Apply RoPE - split cos/sin into halves for the half-rotation
-        half_dim = self.head_dim // 2
-        cos1, cos2 = cos[:, None, :half_dim], cos[:, None, half_dim:]  # (seq, head_dim//2)
-        sin1, sin2 = sin[:, None, :half_dim], sin[:, None, half_dim:]
-
-        q1, q2 = q[..., :half_dim], q[..., half_dim:]  # (seq, heads, half_dim)
-        q = jnp.concatenate([q1 * cos1 - q2 * sin1, q2 * cos2 + q1 * sin2], axis=-1)
-        k1, k2 = k[..., :half_dim], k[..., half_dim:]
-        k = jnp.concatenate([k1 * cos1 - k2 * sin1, k2 * cos2 + k1 * sin2], axis=-1)
-
-        return (q, k)
+        """Apply RoPE using shared function."""
+        # cos/sin: (seq, head_dim) -> (seq, 1, head_dim) for broadcasting with (seq, heads, head_dim)
+        cos = cos[:, None, :]
+        sin = sin[:, None, :]
+        q = apply_rotary_pos_emb(q, cos, sin)
+        k = apply_rotary_pos_emb(k, cos, sin)
+        return q, k
 
     def __call__(self, hidden_states: Array, position_embeddings: Tuple[Array, Array]) -> Array:
         seq_len = hidden_states.shape[0]
@@ -767,11 +764,34 @@ def _generate_rope(positions: Array, head_dim: int, rope_theta: float) -> Tuple[
     return jnp.sin(sinusoid_inp), jnp.cos(sinusoid_inp)
 
 
+def rotate_half(x: Array) -> Array:
+    """Rotate half the hidden dims of the input: (-x2, x1)."""
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return jnp.concatenate([-x2, x1], axis=-1)
+
+
+def apply_rotary_pos_emb(x: Array, cos: Array, sin: Array) -> Array:
+    """Apply rotary position embeddings using rotate_half pattern.
+
+    This is the standard RoPE formula: (x * cos) + (rotate_half(x) * sin)
+    Works for both vision (seq, heads, dim) and text (batch, seq, heads, dim).
+    """
+    x_f32 = x.astype(jnp.float32)
+    return ((x_f32 * cos) + (rotate_half(x_f32) * sin)).astype(x.dtype)
+
+
 def _apply_rope(x: Array, sin: Array, cos: Array) -> Array:
-    """Apply rotary position embeddings."""
-    x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
+    """Apply rotary position embeddings for text model.
+
+    Note: sin/cos have shape (batch, seq, head_dim//2) and need broadcasting.
+    """
+    # Expand sin/cos for heads dimension: (batch, seq, 1, head_dim//2)
     sin, cos = sin[:, :, None, :], cos[:, :, None, :]
-    return jnp.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1).astype(x.dtype)
+    # Duplicate to full head_dim for rotate_half pattern
+    cos_full = jnp.concatenate([cos, cos], axis=-1)
+    sin_full = jnp.concatenate([sin, sin], axis=-1)
+    return apply_rotary_pos_emb(x, cos_full, sin_full)
 
 
 def repeat_kv(hidden_states: Array, n_rep: int) -> Array:

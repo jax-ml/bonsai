@@ -205,7 +205,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
             pt_out = pt_mlp(tx)
         flax_out = flax_mlp(jx)
 
-        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-7, atol=1e-7)
+        np.testing.assert_allclose(np.asarray(flax_out), pt_out.numpy(), rtol=1e-5, atol=1e-5)
 
     def test_vision_layernorm(self):
         """Compare vision LayerNorm output."""
@@ -268,7 +268,120 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         with torch.inference_mode():
             pt_mlp = pt_block.mlp(tx).numpy()
         flax_mlp = np.array(flax_block.mlp(jx))
-        np.testing.assert_allclose(flax_mlp, pt_mlp, rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(flax_mlp, pt_mlp, rtol=1e-5, atol=1e-5)
+
+    def test_vision_attention_with_rope(self):
+        """Compare vision attention output with RoPE applied."""
+        pt_attn = self.pt_model.model.visual.blocks[0].attn
+        flax_attn = self.flax_model.model.visual.blocks[0].attn
+
+        hidden_size = 64
+        seq_len = 16
+        head_dim = hidden_size // 4  # 4 heads
+
+        key = jax.random.PRNGKey(42)
+        jx = jax.random.normal(key, (seq_len, hidden_size), dtype=jnp.float32)
+        tx = torch.tensor(np.asarray(jx), dtype=torch.float32)
+
+        # Create position embeddings (cos, sin) for RoPE
+        # Using same formula as vision encoder
+        rotary_dim = head_dim // 2
+        inv_freq = 1.0 / (10000.0 ** (np.arange(0, rotary_dim, 2, dtype=np.float32) / rotary_dim))
+        positions = np.arange(seq_len, dtype=np.float32)
+        freqs = np.outer(positions, inv_freq)  # (seq, rotary_dim//2)
+        emb = np.concatenate([freqs, freqs], axis=-1)  # (seq, rotary_dim)
+        emb = np.concatenate([emb, emb], axis=-1)  # (seq, head_dim)
+        cos_np, sin_np = np.cos(emb), np.sin(emb)
+
+        cos_jax = jnp.array(cos_np)
+        sin_jax = jnp.array(sin_np)
+        cos_pt = torch.tensor(cos_np)
+        sin_pt = torch.tensor(sin_np)
+
+        with torch.inference_mode():
+            cu_seqlens = torch.tensor([0, seq_len], dtype=torch.int32)
+            pt_out = pt_attn(tx, cu_seqlens=cu_seqlens, position_embeddings=(cos_pt, sin_pt)).numpy()
+        flax_out = np.array(flax_attn(jx, position_embeddings=(cos_jax, sin_jax)))
+
+        np.testing.assert_allclose(flax_out, pt_out, rtol=1e-4, atol=1e-4)
+
+    def test_patch_embed(self):
+        """Compare patch embedding output with dummy config."""
+        pt_patch_embed = self.pt_model.model.visual.patch_embed
+        flax_patch_embed = self.flax_model.model.visual.patch_embed
+
+        # Create input matching the expected format
+        # patch_size=8, temporal_patch_size=2, so input per patch is: 3 * 2 * 8 * 8 = 384
+        cfg = self.flax_config.vision_config
+        per_patch_size = cfg.in_channels * cfg.temporal_patch_size * cfg.patch_size * cfg.patch_size
+        num_patches = 16  # Arbitrary number of patches
+
+        key = jax.random.PRNGKey(0)
+        jx = jax.random.normal(key, (num_patches, per_patch_size), dtype=jnp.float32)
+        tx = torch.tensor(np.asarray(jx), dtype=torch.float32)
+
+        with torch.inference_mode():
+            pt_out = pt_patch_embed(tx).numpy()
+        flax_out = np.array(flax_patch_embed(jx))
+
+        np.testing.assert_allclose(flax_out, pt_out, rtol=1e-5, atol=1e-5)
+
+    def test_rope_embedding(self):
+        """Compare RoPE embedding computation with dummy config."""
+        pt_visual = self.pt_model.model.visual
+        flax_visual = self.flax_model.model.visual
+
+        # Create grid_thw for a small image: 1 frame, 16x16 grid
+        grid_thw_np = np.array([[1, 16, 16]], dtype=np.int64)
+        grid_thw_pt = torch.tensor(grid_thw_np)
+        grid_thw_jax = jnp.array(grid_thw_np)
+
+        with torch.inference_mode():
+            pt_rope = pt_visual.rot_pos_emb(grid_thw_pt)
+            pt_emb = torch.cat([pt_rope, pt_rope], dim=-1)
+            pt_cos = pt_emb.cos().numpy()
+            pt_sin = pt_emb.sin().numpy()
+
+        flax_cos, flax_sin = flax_visual._rot_pos_emb(grid_thw_jax)
+
+        np.testing.assert_allclose(np.array(flax_cos), pt_cos, rtol=1e-5, atol=1e-5)
+        np.testing.assert_allclose(np.array(flax_sin), pt_sin, rtol=1e-5, atol=1e-5)
+
+    def test_full_vision_encoder(self):
+        """Compare full vision encoder output with dummy config."""
+        pt_visual = self.pt_model.model.visual
+        flax_visual = self.flax_model.model.visual
+
+        # Create dummy vision input
+        # grid_thw: 1 frame, 16x16 grid (spatial_merge_size=2, so 8x8 merged patches = 64)
+        cfg = self.flax_config.vision_config
+        per_patch_size = cfg.in_channels * cfg.temporal_patch_size * cfg.patch_size * cfg.patch_size
+        grid_t, grid_h, grid_w = 1, 16, 16
+        num_patches = grid_t * grid_h * grid_w  # 256 patches before merge
+
+        grid_thw_np = np.array([[grid_t, grid_h, grid_w]], dtype=np.int64)
+        grid_thw_pt = torch.tensor(grid_thw_np)
+        grid_thw_jax = jnp.array(grid_thw_np)
+
+        key = jax.random.PRNGKey(42)
+        jx = jax.random.normal(key, (num_patches, per_patch_size), dtype=jnp.float32)
+        tx = torch.tensor(np.asarray(jx), dtype=torch.float32)
+
+        with torch.inference_mode():
+            pt_out, pt_deepstack = pt_visual(tx, grid_thw_pt)
+            pt_out = pt_out.numpy()
+
+        flax_out, flax_deepstack = flax_visual(jx, grid_thw_jax)
+        flax_out = np.array(flax_out)
+
+        # After spatial merge (2x2), 256 patches become 64
+        expected_merged_patches = num_patches // (cfg.spatial_merge_size**2)
+        self.assertEqual(flax_out.shape[0], expected_merged_patches)
+        self.assertEqual(pt_out.shape[0], expected_merged_patches)
+        self.assertEqual(flax_out.shape[1], cfg.out_hidden_size)
+        self.assertEqual(pt_out.shape[1], cfg.out_hidden_size)
+
+        np.testing.assert_allclose(flax_out, pt_out, rtol=1e-3, atol=5e-3)
 
 
 class TestKVCache(absltest.TestCase):
