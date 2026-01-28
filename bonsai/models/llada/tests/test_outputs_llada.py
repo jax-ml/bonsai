@@ -80,11 +80,8 @@ class TestModuleForwardPasses(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        model_name = "GSAI-ML/LLaDA-8B-Instruct"
-
         cls.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(cls.mesh)
-        cls.processor = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, dtype=torch.float32)
         cls.baseline_config, cls.baseline_model, cls.bonsai_config, cls.bonsai_model = create_llada_for_testing(False)
 
         torch.manual_seed(42)
@@ -199,7 +196,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         n_inputs = {k: jnp.array(v.detach().cpu().numpy()) for k, v in t_inputs.items()}
         n_inputs["attention_mask"] = n_inputs["attention_mask"] > -1
 
-        ty, ny = tm(**t_inputs).logits, nm(**n_inputs, key=jax.random.key(0))
+        ty, ny = tm(**t_inputs, use_cache=False).logits, nm(**n_inputs, key=jax.random.key(0))
         np.testing.assert_allclose(ny[0], ty.detach().cpu().numpy(), rtol=1e-6, atol=1e-6)
 
 
@@ -249,7 +246,6 @@ class TestGenerationSmall(absltest.TestCase):
             confidence_eos_eot_inf=False,
             key=jax.random.key(0),
         )
-        self.processor.batch_decode(out[:, input_ids.shape[1] :], skip_special_tokens=True)
 
 
 if __name__ == "__main__":

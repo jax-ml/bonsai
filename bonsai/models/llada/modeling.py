@@ -95,6 +95,7 @@ class ModelConfig:
     eos_idx: int = 126081
     eot_idx: int = 126348
 
+    @staticmethod
     def llada_8b_it(use_fsdp: bool, use_tp: bool, dtype: DTypeLike = jnp.bfloat16, return_hidden_states: bool = False):
         return ModelConfig(
             dtype=dtype,
@@ -359,16 +360,16 @@ class LLaDAModel(nnx.Module):
         key, subkey = jax.random.split(key)
         x = self.emb_drop(x, rngs=subkey)
 
-        hiddden_states = []
+        hidden_states = []
         for b in self.blocks:
             if self.config.return_hidden_states:
-                hiddden_states.append(x)
+                hidden_states.append(x)
             x, key = b(x, sin, cos, attention_mask, key)
         x = self.ln_f(x)
         if self.config.return_hidden_states:
-            hiddden_states.append(x)
+            hidden_states.append(x)
         x = self.ff_out(x, out_sharding=shd)
-        return x, key, hiddden_states
+        return x, key, hidden_states
 
 
 def add_gumbel_noise(logits: Array, temperature: float, key: Array) -> Array:
