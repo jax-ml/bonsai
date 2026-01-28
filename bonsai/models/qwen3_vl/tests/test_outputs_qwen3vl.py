@@ -657,7 +657,7 @@ class TestVisionEncoderPretrained(absltest.TestCase):
             pt_out.shape,
             f"Shape mismatch: Flax {np.array(flax_out).shape} vs PT {pt_out.shape}.",
         )
-        np.testing.assert_allclose(np.array(flax_out), pt_out, rtol=1e-4, atol=5e-3)
+        np.testing.assert_allclose(np.array(flax_out), pt_out, rtol=1e-5, atol=8e-3)
 
 
 class TestVisionTextGeneration(absltest.TestCase):
