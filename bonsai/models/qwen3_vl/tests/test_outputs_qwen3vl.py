@@ -370,8 +370,11 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         with torch.inference_mode():
             pt_result = pt_visual(tx, grid_thw_pt)
             # Handle both tuple and BaseModelOutputWithDeepstackFeatures
+            # HF now returns pre-merger output in last_hidden_state, so we apply merger manually
             if hasattr(pt_result, "last_hidden_state"):
-                pt_out = pt_result.last_hidden_state.numpy()
+                pt_hidden = pt_result.last_hidden_state
+                # Apply merger to get merged output matching Flax
+                pt_out = pt_visual.merger(pt_hidden).numpy()
             else:
                 pt_out = pt_result[0].numpy()
 
@@ -641,39 +644,18 @@ class TestVisionEncoderPretrained(absltest.TestCase):
         with torch.inference_mode():
             pt_result = self.pt_model.model.visual(pixel_values_pt, grid_thw_pt)
             # Handle both tuple and BaseModelOutputWithDeepstackFeatures
+            # HF now returns pre-merger output in last_hidden_state, so we apply merger manually
             if hasattr(pt_result, "last_hidden_state"):
-                pt_out = pt_result.last_hidden_state.numpy()
-                print("PT result is BaseModelOutputWithDeepstackFeatures")
-                print(f"  last_hidden_state shape: {pt_result.last_hidden_state.shape}")
-                if hasattr(pt_result, "hidden_states") and pt_result.hidden_states is not None:
-                    print(f"  hidden_states available: {len(pt_result.hidden_states)} layers")
-                if hasattr(pt_result, "deepstack_features") and pt_result.deepstack_features is not None:
-                    print(f"  deepstack_features: {len(pt_result.deepstack_features)} features")
+                pt_hidden = pt_result.last_hidden_state
+                pt_out = self.pt_model.model.visual.merger(pt_hidden).numpy()
             else:
                 pt_out = pt_result[0].numpy()
-                print(f"PT result is tuple of length {len(pt_result)}")
         flax_out, _ = self.flax_model.model.visual(pixel_values_jax, grid_thw_jax)
 
-        # Debug: print shapes and config for investigation
-        print(f"\nFlax output shape: {np.array(flax_out).shape}")
-        print(f"PT output shape: {pt_out.shape}")
-        print(
-            f"Flax config: hidden_size={self.flax_config.vision_config.hidden_size}, "
-            f"out_hidden_size={self.flax_config.vision_config.out_hidden_size}, "
-            f"spatial_merge_size={self.flax_config.vision_config.spatial_merge_size}"
-        )
-        print(
-            f"PT config: hidden_size={self.pt_model.config.vision_config.hidden_size}, "
-            f"out_hidden_size={self.pt_model.config.vision_config.out_hidden_size}, "
-            f"spatial_merge_size={self.pt_model.config.vision_config.spatial_merge_size}"
-        )
-
-        # Shape check - different model versions may have different spatial merge behavior
         self.assertEqual(
             np.array(flax_out).shape,
             pt_out.shape,
-            f"Shape mismatch: Flax {np.array(flax_out).shape} vs PT {pt_out.shape}. "
-            "Check if HF model version matches expected config.",
+            f"Shape mismatch: Flax {np.array(flax_out).shape} vs PT {pt_out.shape}.",
         )
         np.testing.assert_allclose(np.array(flax_out), pt_out, rtol=1e-4, atol=5e-3)
 

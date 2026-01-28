@@ -437,8 +437,7 @@ class Qwen3VLVisionMLP(nnx.Module):
     def __call__(self, x: Array) -> Array:
         # Vision operates on (seq, hidden) without batch - no sharding benefit
         x = self.linear_fc1(x, out_sharding=P(None, None))
-        # Compute activation in float32 for precision (matches PyTorch GELU tanh approximation)
-        x = nnx.gelu(x.astype(jnp.float32), approximate=True).astype(x.dtype)
+        x = nnx.gelu(x, approximate=True)
         return self.linear_fc2(x, out_sharding=P(None, None))
 
 
@@ -777,8 +776,7 @@ def apply_rotary_pos_emb(x: Array, cos: Array, sin: Array) -> Array:
     This is the standard RoPE formula: (x * cos) + (rotate_half(x) * sin)
     Works for both vision (seq, heads, dim) and text (batch, seq, heads, dim).
     """
-    x_f32 = x.astype(jnp.float32)
-    return ((x_f32 * cos) + (rotate_half(x_f32) * sin)).astype(x.dtype)
+    return (x * cos) + (rotate_half(x) * sin)
 
 
 def _apply_rope(x: Array, sin: Array, cos: Array) -> Array:
