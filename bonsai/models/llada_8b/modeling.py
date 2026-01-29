@@ -295,8 +295,9 @@ class RotaryEmbedding(nnx.Module):
         # Slice fp32 sin/cos tables to the current length
         T_q, T_k = q_.shape[-3], k_.shape[-3]
         self._ensure_table()
-        sin = self.pos_sin[...][:, :T_k, :, :]
-        cos = self.pos_cos[...][:, :T_k, :, :]
+        sin = self.pos_sin[:, :T_k, :, :]
+        cos = self.pos_cos[:, :T_k, :, :]
+
 
         sin_q, cos_q = sin[:, T_k - T_q : T_k, :, :], cos[:, T_k - T_q : T_k, :, :]
 
