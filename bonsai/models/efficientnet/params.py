@@ -140,7 +140,7 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
                 f"pre-trained weight has {weight_np.shape}."
             )
 
-        param_to_update.value = jnp.array(weight_np)
+        param_to_update[...] = jnp.array(weight_np)
 
     return model
 
