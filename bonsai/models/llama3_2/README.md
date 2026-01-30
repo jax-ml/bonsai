@@ -2,7 +2,7 @@
 
 This directory contains a pure JAX implementation of the
 [Llama 3.2 language model](https://huggingface.co/meta-llama),
-using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
+using the [Flax NNX](https://flax.readthedocs.io/en/stable/index.html) API.
 
 Note: You need a Hugging Face access token to download model weights.
 Set an environment variable `HF_TOKEN` before running any scripts that fetch checkpoints.
