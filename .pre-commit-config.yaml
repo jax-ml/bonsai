@@ -24,3 +24,4 @@ repos:
   - id: jupytext
     args: [--sync]
     files: bonsai/models/
+

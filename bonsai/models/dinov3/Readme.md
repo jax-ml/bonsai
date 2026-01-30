@@ -17,4 +17,4 @@ This directory contains a pure jax implementation of the [Dinov3 collection of V
 | [ViT-L](https://huggingface.co/facebook/dinov3-vitl16-pretrain-sat493m) | 0.3B | **✅ Supported** |
 | [ViT-7B](https://huggingface.co/facebook/dinov3-vit7b16-pretrain-sat493m) | 7B |**Needs sharding** |
 
-* Note: Hf login and approval required. 
+* Note: Hf login and approval required.
