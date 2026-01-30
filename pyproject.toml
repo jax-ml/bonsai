@@ -45,6 +45,7 @@ test-env = [
   "timm",
   "h5py",
   "diffusers[flax]",
+  "keras_hub",
 ]
 
 testing = [
@@ -107,3 +108,4 @@ indent-style = "space"
 [tool.jupytext]
 formats = "ipynb,md:myst"
 cell_metadata_filter = "-all"
+

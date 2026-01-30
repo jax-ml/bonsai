@@ -156,7 +156,7 @@ def create_model_from_h5(
 
     densenet = nnx.eval_shape(lambda: model_lib.DenseNet(cfg, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(densenet)
-    state_dict = abs_state.to_pure_dict()
+    state_dict = nnx.to_pure_dict(abs_state)
 
     mapping = _get_key_and_transform_mapping(cfg)
     for st_key, tensor in tensor_dict.items():
@@ -167,7 +167,7 @@ def create_model_from_h5(
         _assign_weights(keys, tensor, state_dict, st_key, transform)
 
     if mesh is not None:
-        sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
+        sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh))
         state_dict = jax.device_put(state_dict, sharding)
     else:
         state_dict = jax.device_put(state_dict, jax.devices()[0])

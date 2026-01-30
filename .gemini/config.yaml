@@ -1,0 +1,7 @@
+version: 1
+enabled_features:
+  auto_review:
+    enabled: false
+    drafts: false
+  review_pull_request: false
+  post_review_summary: false

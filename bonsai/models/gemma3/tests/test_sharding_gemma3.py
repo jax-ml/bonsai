@@ -1,30 +1,20 @@
-import os
 import unittest
 
 import jax
 import jax.numpy as jnp
 import numpy as np
-import torch
 from absl.testing import absltest
 from flax import nnx
 from jax import P
 from jax.sharding import AxisType
-from transformers import AutoProcessor
 
 from bonsai.models.gemma3 import modeling
-from bonsai.models.gemma3.tests.test_outputs_gemma3 import check_hf_token
 
 
-@unittest.skipIf(check_hf_token(), "Skipping TestSharding due to HF_TOKEN failure.")
 class TestSharding(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.model_name: str = "google/gemma-3-4b-it"
-        access_token = os.environ["HF_TOKEN"]
-        cls.processor = AutoProcessor.from_pretrained(cls.model_name, token=access_token, use_fast=False)
-        cls.torch_device = "cpu"
-
         fsdp, tp = modeling.ShardMode.FSDP.value, modeling.ShardMode.TP.value
 
         cls.mesh = jax.make_mesh(((1, 1)), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
@@ -33,39 +23,16 @@ class TestSharding(absltest.TestCase):
         cls.bonsai_config = modeling.ModelConfig.gemma3_4b_it(True, True, norm_dtype=jnp.float32)
         cls.bonsai_model = modeling.Gemma3Model(cls.bonsai_config, rngs=nnx.Rngs(0))
 
-    def _make_torch_input(self):
-        messages = [
-            {"role": "system", "content": [{"type": "text", "text": "You are a helpful assistant."}]},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "image": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg",
-                    },
-                    {"type": "text", "text": "Describe this image in detail."},
-                ],
-            },
-        ]
-
-        out = self.processor.apply_chat_template(
-            messages, add_generation_prompt=True, tokenize=True, return_dict=True, return_tensors="pt"
-        )
-        out["pixel_values"] = out["pixel_values"].to(dtype=torch.float32)
-
-        return {k: v.to(device=self.torch_device) for k, v in out.items()}
-
     def test_full(self):
         nm = self.bonsai_model
         fsdp = modeling.ShardMode.FSDP.value
 
-        t_inputs = self._make_torch_input()
-
-        n_img = jnp.array(
-            np.permute_dims(t_inputs["pixel_values"].detach().cpu().numpy(), (0, 2, 3, 1)), out_sharding=P(fsdp)
-        )
-        n_text = jnp.array(t_inputs["input_ids"].detach().cpu().numpy(), out_sharding=P(fsdp))
-        n_tti = jnp.array(t_inputs["token_type_ids"].detach().cpu().numpy(), out_sharding=P(fsdp))
+        key = jax.random.key(0)
+        n_img = jax.random.uniform(key, (1, 896, 896, 3), dtype=jnp.float32, minval=-1, maxval=1, out_sharding=P(fsdp))
+        n_text = jnp.arange(1781, out_sharding=P(fsdp)).reshape(1, -1)
+        token_type_ids = np.zeros((1, 1781), dtype=int)
+        token_type_ids[12:268] = 1
+        n_tti = jax.device_put(token_type_ids, device=P(fsdp))
 
         batch_size, num_tokens = n_text.shape
         segment_ids = jnp.ones((batch_size, num_tokens), out_sharding=P(fsdp))

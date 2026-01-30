@@ -154,7 +154,7 @@ def create_convnext_from_pretrained(
 
     model = model_lib.ConvNeXt(cfg=cfg, rngs=nnx.Rngs(params=0))
     graph_def, abs_state = nnx.split(model)
-    jax_state = abs_state.to_pure_dict()
+    jax_state = nnx.to_pure_dict(abs_state)
 
     mapping = _get_key_and_transform_mapping()
 
@@ -176,7 +176,7 @@ def create_convnext_from_pretrained(
         raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
 
     if mesh is not None:
-        sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
+        sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh))
         jax_state = jax.device_put(jax_state, sharding)
     else:
         jax_state = jax.device_put(jax_state, jax.devices()[0])

@@ -19,7 +19,7 @@ The following models are part of Bonsai. We have included the current model stat
 4. 🟡 In progress
 5. ⏳ Coming soon (has open PR)
 
-These are listed based on status and then alphabetically. 
+These are listed based on status and then alphabetically.
 
 
 | Model                                         | Type                 | Status | Details |

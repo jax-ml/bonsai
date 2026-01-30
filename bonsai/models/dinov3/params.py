@@ -109,9 +109,9 @@ def create_model_from_safe_tensors(
 
     dinov3 = nnx.eval_shape(lambda: Dinov3ViTModel(cfg, rngs=nnx.Rngs(0)))
     graph_def, abs_state = nnx.split(dinov3)
-    state_dict = abs_state.to_pure_dict()
+    state_dict = nnx.to_pure_dict(abs_state)
     # Only use sharding if mesh is provided
-    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
+    sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh)) if mesh is not None else None
 
     key_mapping = _get_key_and_transform_mapping()
 

@@ -147,7 +147,7 @@ def create_vit_from_pretrained(file_dir: str, config: model_lib.ModelConfig):
 
     vit = model_lib.ViTClassificationModel(config, rngs=nnx.Rngs(0))
     graph_def, abs_state = nnx.split(vit)
-    jax_state = abs_state.to_pure_dict()
+    jax_state = nnx.to_pure_dict(abs_state)
 
     mapping = _get_key_and_transform_mapping(config)
     conversion_errors = []

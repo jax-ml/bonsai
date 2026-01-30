@@ -1,6 +1,6 @@
 ## DenseNet-121 in JAX
 
-This directory contains a pure JAX implementation of the [DenseNet-121](https://huggingface.co/keras/densenet_121_imagenet) model, using the Flax NNX API. 
+This directory contains a pure JAX implementation of the [DenseNet-121](https://huggingface.co/keras/densenet_121_imagenet) model, using the Flax NNX API.
 
 ## Model Configuration Support Status
 

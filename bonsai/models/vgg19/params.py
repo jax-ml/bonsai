@@ -148,7 +148,7 @@ def create_model_from_h5(
 
     vgg = nnx.eval_shape(lambda: model_lib.VGG(cfg, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(vgg)
-    state_dict = abs_state.to_pure_dict()
+    state_dict = nnx.to_pure_dict(abs_state)
 
     mapping = _get_key_and_transform_mapping(cfg)
     conversion_errors = []
@@ -168,7 +168,7 @@ def create_model_from_h5(
         raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
 
     if mesh is not None:
-        sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict()
+        sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh))
         state_dict = jax.device_put(state_dict, sharding)
     else:
         state_dict = jax.device_put(state_dict, jax.devices()[0])
