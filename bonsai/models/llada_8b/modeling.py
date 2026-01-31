@@ -230,9 +230,9 @@ class LayerNorm(LayerNormBase):
         x = (x - mean) / jnp.sqrt(var + self.eps)
         if self.scale is not None:
             if self.bias is not None:
-                x = x * self.scale[...] + self.bias[...]
+                x = x * self.scale.value + self.bias.value
             else:
-                x = x * self.scale[...]
+                x = x * self.scale.value
         return x
 
 
@@ -249,9 +249,9 @@ class RMSNorm(LayerNormBase):
         x = x * jax.lax.rsqrt(var + self.eps)
         if self.scale is not None:
             if self.bias is not None:
-                x = x * self.scale[...] + self.bias[...]
+                x = x * self.scale.value + self.bias.value
             else:
-                x = x * self.scale[...]
+                x = x * self.scale.value
         return x.astype(og_dtype)
 
 
@@ -268,9 +268,9 @@ class GemmaRMSNorm(LayerNormBase):
         y = x * jax.lax.rsqrt(var + self.eps)
         if self.scale is not None:
             if self.bias is not None:
-                y = y * (1.0 + self.scale[...]) + self.bias[...]
+                y = y * (1.0 + self.scale.value) + self.bias.value
             else:
-                y = y * (1.0 + self.scale[...])
+                y = y * (1.0 + self.scale.value)
         return y.astype(og_dtype)
 
 
@@ -295,9 +295,8 @@ class RotaryEmbedding(nnx.Module):
         # Slice fp32 sin/cos tables to the current length
         T_q, T_k = q_.shape[-3], k_.shape[-3]
         self._ensure_table()
-        sin = self.pos_sin[:, :T_k, :, :]
-        cos = self.pos_cos[:, :T_k, :, :]
-
+        sin = self.pos_sin.value[:, :T_k, :, :]
+        cos = self.pos_cos.value[:, :T_k, :, :]
 
         sin_q, cos_q = sin[:, T_k - T_q : T_k, :, :], cos[:, T_k - T_q : T_k, :, :]
 
