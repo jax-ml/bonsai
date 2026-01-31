@@ -318,10 +318,10 @@ class Attention(nnx.Module):
         attn_logits = jnp.einsum("BTKGH,BSKH->BTSKG", query_proj_gqa, cache.k_cache[...]) * self.scale
 
         # Masking and Softmax
-        q_pos = cache.cur_ind[...] + jnp.arange(t, dtype=jnp.int32)[None, :] - cache.start_ind[...][:, None]
+        q_pos = cache.cur_ind[...] + jnp.arange(t, dtype=jnp.int32)[None, :] - cache.start_ind[:, None]
         ts = jnp.arange(cache.size, dtype=jnp.int32)  # (cache.size,)
-        kv_segment_ids = (ts[None, :] >= cache.start_ind[...][:, None]) & (ts[None, :] < cache.cur_ind[...] + t)
-        k_pos = ts[None, :] - cache.start_ind[...][:, None]  # (b, cache.size)
+        kv_segment_ids = (ts[None, :] >= cache.start_ind[:, None]) & (ts[None, :] < cache.cur_ind[...] + t)
+        k_pos = ts[None, :] - cache.start_ind[:, None]  # (b, cache.size)
         causal_mask = k_pos[:, None, :] <= q_pos[:, :, None]
         segment_mask = kv_segment_ids[:, None, :] == segment_ids[:, :, None]
         final_mask = causal_mask & segment_mask  # (B, T, S)
