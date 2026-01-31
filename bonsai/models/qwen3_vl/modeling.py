@@ -437,9 +437,9 @@ class Qwen3VLVisionMLP(nnx.Module):
 
     def __call__(self, x: Array) -> Array:
         # Vision operates on (seq, hidden) without batch - no sharding benefit
-        x = self.linear_fc1(x, out_sharding=self.shd_cfg.mlp_fc1_kernel)
+        x = self.linear_fc1(x, out_sharding=P(None, None))
         x = nnx.gelu(x, approximate=True)
-        return self.linear_fc2(x, out_sharding=self.shd_cfg.mlp_fc2_kernel)
+        return self.linear_fc2(x, out_sharding=P(None, None))
 
 
 class Qwen3VLVisionAttention(nnx.Module):
