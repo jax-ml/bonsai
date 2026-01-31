@@ -195,7 +195,6 @@ class Qwen3VLVisionConfig:
     hidden_act: str = "gelu"
     layer_norm_eps: float = 1e-6
     rope_theta: float = 10000.0
-    use_postshuffle_norm: bool = False
     shd_cfg: VisionShardingCfg = VisionShardingCfg.no_sharding()
 
     @property
@@ -507,14 +506,14 @@ class Qwen3VLVisionBlock(nnx.Module):
 class Qwen3VLPatchMerger(nnx.Module):
     """Merge spatial patches after vision encoding."""
 
-    def __init__(self, config: Qwen3VLVisionConfig, *, rngs: nnx.Rngs):
+    def __init__(self, config: Qwen3VLVisionConfig, use_postshuffle_norm: bool = False, *, rngs: nnx.Rngs):
         self.config = config
         self.shd_cfg = config.shd_cfg
-        self.use_postshuffle_norm = self.config.use_postshuffle_norm
         merge_factor = config.spatial_merge_size**2
         hidden_merged = config.hidden_size * merge_factor
-        norm_dim = hidden_merged if self.use_postshuffle_norm else config.hidden_size
+        norm_dim = hidden_merged if use_postshuffle_norm else config.hidden_size
         self.norm = nnx.LayerNorm(norm_dim, epsilon=config.layer_norm_eps, rngs=rngs)
+        self.use_postshuffle_norm = use_postshuffle_norm
         self.linear_fc1 = ShardedLinear(
             hidden_merged, hidden_merged, use_bias=True, kernel_sharding=self.shd_cfg.mlp_fc1_kernel, rngs=rngs
         )
@@ -549,10 +548,13 @@ class Qwen3VLVisionModel(nnx.Module):
         )
         self.num_grid_per_side = int(config.num_position_embeddings**0.5)
         self.blocks = nnx.List([Qwen3VLVisionBlock(config, rngs=rngs) for _ in range(config.depth)])
-        self.merger = Qwen3VLPatchMerger(config, rngs=rngs)
+        self.merger = Qwen3VLPatchMerger(config, use_postshuffle_norm=False, rngs=rngs)
         self.deepstack_visual_indexes = config.deepstack_visual_indexes
         self.deepstack_merger_list = nnx.List(
-            [Qwen3VLPatchMerger(config, rngs=rngs) for _ in range(len(config.deepstack_visual_indexes))]
+            [
+                Qwen3VLPatchMerger(config, use_postshuffle_norm=True, rngs=rngs)
+                for _ in range(len(config.deepstack_visual_indexes))
+            ]
         )
 
     def _fast_pos_embed_interpolate(self, grid_thw: Array) -> Array:
@@ -875,7 +877,7 @@ class Qwen3VLAttention(nnx.Module):
         k = k.transpose(0, 2, 1, 3)
         v = v.transpose(0, 2, 1, 3)
 
-        attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2), out_sharding=self.shd_cfg.act_btnh) * self.scale
+        attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2)) * self.scale
         if mask is not None:
             attn_weights = jnp.where(mask, attn_weights, _K_MASK)
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)
@@ -1023,7 +1025,6 @@ def forward(model: Qwen3VLForConditionalGeneration, cache: Cache, input_ids: Arr
     return logits[:, -1, :], cache
 
 
-@jax.jit
 def forward_vision(
     model: Qwen3VLForConditionalGeneration,
     cache: Cache,
