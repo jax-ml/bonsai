@@ -877,7 +877,7 @@ class Qwen3VLAttention(nnx.Module):
         k = k.transpose(0, 2, 1, 3)
         v = v.transpose(0, 2, 1, 3)
 
-        attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2), out_sharding=self.shd_cfg.act_btnh) * self.scale
+        attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2), out_sharding=self.shd_cfg.act_btd) * self.scale
         if mask is not None:
             attn_weights = jnp.where(mask, attn_weights, _K_MASK)
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)

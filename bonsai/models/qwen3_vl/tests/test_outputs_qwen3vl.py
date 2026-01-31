@@ -1,6 +1,7 @@
 import os
 import shutil
 import tempfile
+import gc
 
 import jax
 import jax.numpy as jnp
@@ -422,6 +423,10 @@ class TestPretrained2B(absltest.TestCase):
         cls.flax_model = params.create_model_from_safe_tensors(cls.model_path, cls.flax_config)
         cls.processor = AutoProcessor.from_pretrained(cls.model_path)
 
+    def tearDown(self):
+        gc.collect()
+        super().tearDown()
+
     def test_embedding_output(self):
         """Check embedding outputs match."""
         text = "Hello"
@@ -572,6 +577,10 @@ class TestVisionEncoderPretrained(absltest.TestCase):
             messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"
         )
 
+    def tearDown(self):
+        gc.collect()
+        super().tearDown()
+
     def test_patch_embed_output(self):
         """Check patch embedding output matches."""
         inputs = self._create_dummy_image_input()
@@ -673,6 +682,10 @@ class TestVisionTextGeneration(absltest.TestCase):
         cls.flax_config = model_lib.Qwen3VLConfig.qwen3vl_2b()
         cls.flax_model = params.create_model_from_safe_tensors(cls.model_path, cls.flax_config)
         cls.processor = AutoProcessor.from_pretrained(cls.model_path)
+
+    def tearDown(self):
+        gc.collect()
+        super().tearDown()
 
     def test_vision_forward_with_numeric_check(self):
         """Test vision forward pass with numeric verification."""
