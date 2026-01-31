@@ -1,7 +1,10 @@
 import os
 import shutil
 import tempfile
-import gc
+import gc  # Added for memory management
+
+# 1. CRITICAL: Prevent JAX from pre-allocating all memory, allowing PyTorch to coexist
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax
 import jax.numpy as jnp
@@ -18,6 +21,51 @@ from bonsai.models.qwen3_vl import params
 
 # Set highest precision for testing
 jax.config.update("jax_default_matmul_precision", "highest")
+
+
+class PretrainedModelMixin:
+    """
+    Singleton Mixin to load the heavy pretrained model exactly once for the entire
+    test suite, rather than reloading it for every test class.
+    """
+
+    _models_loaded = False
+    model_path = None
+    pt_model = None
+    flax_config = None
+    flax_model = None
+    processor = None
+
+    @classmethod
+    def load_models_once(cls):
+        """Loads models if they haven't been loaded yet."""
+        if cls._models_loaded:
+            return
+
+        print("\n[Mixin] Loading Qwen3-VL-2B models (Shared instance)...")
+        MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+
+        # Download and Load
+        cls.model_path = snapshot_download(MODEL_ID)
+        cls.pt_model = Qwen3VLForConditionalGeneration.from_pretrained(cls.model_path, dtype=torch.float32).eval()
+
+        cls.flax_config = model_lib.Qwen3VLConfig.qwen3vl_2b()
+        cls.flax_model = params.create_model_from_safe_tensors(cls.model_path, cls.flax_config)
+        cls.processor = AutoProcessor.from_pretrained(cls.model_path)
+
+        cls._models_loaded = True
+        print("[Mixin] Models loaded successfully.\n")
+
+    def tearDown(self):
+        """
+        Aggressive cleanup after every individual test method to
+        prevent intermediate tensors from piling up.
+        """
+        super().tearDown()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        jax.clear_caches()
+        gc.collect()
 
 
 def get_test_config_torch() -> Qwen3VLConfig:
@@ -114,6 +162,7 @@ class TestForwardPass(absltest.TestCase):
     def tearDown(self):
         # Recursively remove the temporary directory and all its contents
         shutil.rmtree(self.test_dir)
+        gc.collect()  # Explicit GC
         super().tearDown()
 
     def test_text_embeddings(self):
@@ -188,8 +237,8 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         self.pt_model.eval()
 
     def tearDown(self):
-        # Recursively remove the temporary directory and all its contents
         shutil.rmtree(self.test_dir)
+        gc.collect()
         super().tearDown()
 
     def test_vision_mlp(self):
@@ -409,23 +458,16 @@ class TestKVCache(absltest.TestCase):
             self.assertEqual(k_shape[3], config.text_config.head_dim)
 
 
-class TestPretrained2B(absltest.TestCase):
-    """Test pretrained Qwen3-VL-2B model."""
+# --- UPDATED CLASSES USING MIXIN ---
 
-    MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+
+class TestPretrained2B(PretrainedModelMixin, absltest.TestCase):
+    """Test pretrained Qwen3-VL-2B model. Inherits from Mixin to share model."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.model_path = snapshot_download(cls.MODEL_ID)
-        cls.pt_model = Qwen3VLForConditionalGeneration.from_pretrained(cls.model_path, dtype=torch.float32).eval()
-        cls.flax_config = model_lib.Qwen3VLConfig.qwen3vl_2b()
-        cls.flax_model = params.create_model_from_safe_tensors(cls.model_path, cls.flax_config)
-        cls.processor = AutoProcessor.from_pretrained(cls.model_path)
-
-    def tearDown(self):
-        gc.collect()
-        super().tearDown()
+        cls.load_models_once()
 
     def test_embedding_output(self):
         """Check embedding outputs match."""
@@ -535,7 +577,7 @@ class TestPretrained2B(absltest.TestCase):
 
         # Decode step
         next_token_flax = jnp.argmax(flax_logits, axis=-1, keepdims=True)
-        next_token_pt = torch.tensor(np.array(next_token_flax), dtype=torch.long)
+        # next_token_pt = torch.tensor(np.array(next_token_flax), dtype=torch.long)
 
         flax_logits2, cache = model_lib.forward(self.flax_model, cache, next_token_flax)
 
@@ -547,19 +589,13 @@ class TestPretrained2B(absltest.TestCase):
         self.assertFalse(np.any(np.isinf(np.array(flax_logits2))))
 
 
-class TestVisionEncoderPretrained(absltest.TestCase):
-    """Test vision encoder with pretrained weights."""
-
-    MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
+    """Test vision encoder with pretrained weights. Inherits from Mixin."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.model_path = snapshot_download(cls.MODEL_ID)
-        cls.pt_model = Qwen3VLForConditionalGeneration.from_pretrained(cls.model_path, dtype=torch.float32).eval()
-        cls.flax_config = model_lib.Qwen3VLConfig.qwen3vl_2b()
-        cls.flax_model = params.create_model_from_safe_tensors(cls.model_path, cls.flax_config)
-        cls.processor = AutoProcessor.from_pretrained(cls.model_path)
+        cls.load_models_once()
 
     def _create_dummy_image_input(self):
         """Create dummy image input for testing."""
@@ -576,10 +612,6 @@ class TestVisionEncoderPretrained(absltest.TestCase):
         return self.processor.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"
         )
-
-    def tearDown(self):
-        gc.collect()
-        super().tearDown()
 
     def test_patch_embed_output(self):
         """Check patch embedding output matches."""
@@ -669,23 +701,13 @@ class TestVisionEncoderPretrained(absltest.TestCase):
         np.testing.assert_allclose(np.array(flax_out), pt_out, rtol=1e-5, atol=8e-3)
 
 
-class TestVisionTextGeneration(absltest.TestCase):
-    """Test vision + text generation with pretrained model."""
-
-    MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
+class TestVisionTextGeneration(PretrainedModelMixin, absltest.TestCase):
+    """Test vision + text generation with pretrained model. Inherits from Mixin."""
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.model_path = snapshot_download(cls.MODEL_ID)
-        cls.pt_model = Qwen3VLForConditionalGeneration.from_pretrained(cls.model_path, dtype=torch.float32).eval()
-        cls.flax_config = model_lib.Qwen3VLConfig.qwen3vl_2b()
-        cls.flax_model = params.create_model_from_safe_tensors(cls.model_path, cls.flax_config)
-        cls.processor = AutoProcessor.from_pretrained(cls.model_path)
-
-    def tearDown(self):
-        gc.collect()
-        super().tearDown()
+        cls.load_models_once()
 
     def test_vision_forward_with_numeric_check(self):
         """Test vision forward pass with numeric verification."""

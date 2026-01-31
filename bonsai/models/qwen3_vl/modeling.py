@@ -877,7 +877,10 @@ class Qwen3VLAttention(nnx.Module):
         k = k.transpose(0, 2, 1, 3)
         v = v.transpose(0, 2, 1, 3)
 
-        attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2), out_sharding=self.shd_cfg.act_btd) * self.scale
+        if jax._src.config.abstract_mesh_context_manager.value is not None:
+            attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2), out_sharding=self.shd_cfg.act_btd) * self.scale
+        else:
+            attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2)) * self.scale
         if mask is not None:
             attn_weights = jnp.where(mask, attn_weights, _K_MASK)
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)
@@ -1025,7 +1028,6 @@ def forward(model: Qwen3VLForConditionalGeneration, cache: Cache, input_ids: Arr
     return logits[:, -1, :], cache
 
 
-@jax.jit
 def forward_vision(
     model: Qwen3VLForConditionalGeneration,
     cache: Cache,
