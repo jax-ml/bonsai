@@ -343,7 +343,7 @@ def count_right_pads_from_mask(attn_mask: Array) -> Array:
 
 
 def compute_positions_from_segment_ids(seg_ids: Array) -> Array:
-    """Compute position ids from segment ids."""
+    """Compute position ids from segment ids with support for packed sequences."""
     seg_ids = seg_ids.astype(jnp.int32)
     pad_sentinel = 2**30
 
