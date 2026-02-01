@@ -26,11 +26,17 @@ Hugging Face UI for the specific model you want to use.
 ## Running this model
 
 ```sh
-# Base model
-python3 -m bonsai.models.llama3_2.tests.run_model_base
-
-# Instruct model
+# Instruct model (default: 1B)
 python3 -m bonsai.models.llama3_2.tests.run_model
+
+# Base model (1B)
+python3 -m bonsai.models.llama3_2.tests.run_model --base
+
+# Base model (3B)
+python3 -m bonsai.models.llama3_2.tests.run_model --size 3B --base
+
+# Instruct model (3B)
+python3 -m bonsai.models.llama3_2.tests.run_model --size 3B
 ```
 
 ## Output parity tests
