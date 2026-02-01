@@ -1,6 +1,6 @@
 # Qwen3 in JAX
 
-This directory contains a pure JAX implementation of the [Qwen3 language model](https://qwenlm.github.io/blog/qwen3/), using the [Flax NNX](https://flax.readthedocs.io/en/v0.8.3/experimental/nnx/index.html) API.
+This directory contains a pure JAX implementation of the [Qwen3 language model](https://qwenlm.github.io/blog/qwen3/), using the [Flax NNX](https://flax.readthedocs.io/en/stable/index.html) API.
 
 
 ## Model Configuration Support Status
