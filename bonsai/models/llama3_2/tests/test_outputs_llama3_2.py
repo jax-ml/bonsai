@@ -193,6 +193,44 @@ class TestOutputsLlama32(absltest.TestCase):
             check_dtype=True,
         )
 
+    def test_attention_mask_blocks_padding(self):
+        nm = self.llama_model.layers[0].self_attn
+        batch_size = 2
+        token_len = self.num_input_tokens
+        hidden_size = self.llama_config.hidden_size
+
+        key = jax.random.key(0)
+        x = jax.random.normal(key, (batch_size, token_len, hidden_size), dtype=jnp.float32)
+        segment_ids = jnp.ones((batch_size, token_len), dtype=jnp.int32)
+        segment_ids = segment_ids.at[0, :2].set(0)
+        segment_ids = segment_ids.at[1, :1].set(0)
+        pad_mask = (segment_ids == 0)[..., None].astype(x.dtype)
+        x_alt = x + pad_mask * 5.0
+
+        y = nm(x, segment_ids, attn_mask=None, cache=None)
+        y_alt = nm(x_alt, segment_ids, attn_mask=None, cache=None)
+
+        valid_mask = np.array(segment_ids == 1)[..., None].astype(np.float32)
+        y_masked = np.array(y) * valid_mask
+        y_alt_masked = np.array(y_alt) * valid_mask
+        np.testing.assert_allclose(y_masked, y_alt_masked, rtol=1e-5, atol=1e-5)
+
+    def test_attention_mask_blocks_future_tokens(self):
+        nm = self.llama_model.layers[0].self_attn
+        batch_size = 2
+        token_len = self.num_input_tokens
+        hidden_size = self.llama_config.hidden_size
+
+        key = jax.random.key(1)
+        x = jax.random.normal(key, (batch_size, token_len, hidden_size), dtype=jnp.float32)
+        segment_ids = jnp.ones((batch_size, token_len), dtype=jnp.int32)
+        x_alt = x.at[:, -1, :].add(5.0)
+
+        y = nm(x, segment_ids, attn_mask=None, cache=None)
+        y_alt = nm(x_alt, segment_ids, attn_mask=None, cache=None)
+
+        np.testing.assert_allclose(np.array(y)[:, :-1, :], np.array(y_alt)[:, :-1, :], rtol=1e-5, atol=1e-5)
+
     def test_mlp(self):
         nm = self.llama_model.layers[0].mlp
         tm = self.torch_model.model.layers[0].mlp.to(torch.float32)
