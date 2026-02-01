@@ -20,7 +20,7 @@ from enum import Enum
 
 import jax
 from jax import P
-from jax.sharding import PartitionSpec
+from jax.sharding import PartitionSpec, get_abstract_mesh, reshard
 import jax.numpy as jnp
 from jaxtyping import Array, ArrayLike
 from flax import nnx
@@ -86,6 +86,12 @@ class LlamaShardCfg:
             lm_head=P(None, tp),
         )
 
+
+def shard(x: jnp.ndarray, s: PartitionSpec):
+    mesh = get_abstract_mesh()
+    if not mesh.empty and len(mesh.axis_names) > 0:
+        return reshard(x, s)
+    return x
 
 @dataclasses.dataclass(frozen=True)
 class RopeScalingConfig:
@@ -485,6 +491,9 @@ class LlamaAttention(nnx.Module):
             cache_dtype = cache.k_cache[...].dtype
             k = k.astype(cache_dtype)
             v = v.astype(cache_dtype)
+            cache_shd = self.config.shd_cfg.cache
+            k = shard(k, cache_shd)
+            v = shard(v, cache_shd)
             cache.k_cache[...] = jax.lax.dynamic_update_slice(cache.k_cache[...], k, slice_indices)
             cache.v_cache[...] = jax.lax.dynamic_update_slice(cache.v_cache[...], v, slice_indices)
             k = cache.k_cache[...]
