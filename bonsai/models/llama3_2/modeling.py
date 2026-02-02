@@ -98,6 +98,7 @@ def shard(x: jnp.ndarray, s: PartitionSpec | None):
         return reshard(x, s)
     return x
 
+
 @dataclasses.dataclass(frozen=True)
 class RopeScalingConfig:
     factor: float

@@ -88,11 +88,7 @@ def run_model():
     model_size = args.model_size
     use_base_model = args.use_base_model
 
-    model_id = (
-        f"meta-llama/Llama-3.2-{model_size}"
-        if use_base_model
-        else f"meta-llama/Llama-3.2-{model_size}-Instruct"
-    )
+    model_id = f"meta-llama/Llama-3.2-{model_size}" if use_base_model else f"meta-llama/Llama-3.2-{model_size}-Instruct"
     try:
         access_token = os.environ["HF_TOKEN"]
     except KeyError:

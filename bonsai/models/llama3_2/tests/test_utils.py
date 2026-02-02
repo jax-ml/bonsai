@@ -2,6 +2,7 @@ import jax.numpy as jnp
 
 from bonsai.models.llama3_2 import modeling
 
+
 def tiny_config(*, use_sharding: bool = False) -> modeling.ModelConfig:
     """Create a minimal Llama3.2 model configuration for testing purposes"""
     return modeling.ModelConfig(
