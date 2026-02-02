@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import annotations
+
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
@@ -20,17 +20,19 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 from flax.nnx.module import first_from
+from jax import P
+from jax.sharding import PartitionSpec
 from jaxtyping import Array, Bool, Float, Int
-
-
-# =============================================================================
-# Configuration Classes
-# =============================================================================
 
 
 class AttentionType(Enum):
     GLOBAL = "global"
     LOCAL_SLIDING = "local_sliding"
+
+
+class ShardMode(Enum):
+    FSDP = "fsdp"
+    TP = "tp"
 
 
 # Attention pattern: 5 local sliding + 1 global
@@ -45,9 +47,99 @@ _ATTN_PATTERN = (
 
 
 def _make_layer_types(num_layers: int) -> tuple[AttentionType, ...]:
-    """Generate attention types for all layers using the standard pattern."""
     n = len(_ATTN_PATTERN)
     return _ATTN_PATTERN * (num_layers // n) + _ATTN_PATTERN[: num_layers % n]
+
+
+@dataclass(slots=True, frozen=True)
+class VisionShardingCfg:
+    attn_kernel: PartitionSpec | None = None
+    attn_bias: PartitionSpec | None = None
+    attn_qk_activation: PartitionSpec | None = None
+    fc1_kernel: PartitionSpec | None = None
+    fc1_bias: PartitionSpec | None = None
+    fc2_kernel: PartitionSpec | None = None
+    fc2_bias: PartitionSpec | None = None
+    activation: PartitionSpec | None = None
+    layer_norm: PartitionSpec | None = None
+    emb_patch_kernel: PartitionSpec | None = None
+    emb_patch_bias: PartitionSpec | None = None
+    emb_pos_kernel: PartitionSpec | None = None
+
+    @staticmethod
+    def no_sharding():
+        return VisionShardingCfg()
+
+    @staticmethod
+    def default(use_fsdp: bool, use_tp: bool):
+        fsdp = ShardMode.FSDP.value if use_fsdp else None
+        tp = ShardMode.TP.value if use_tp else None
+        return VisionShardingCfg(
+            attn_kernel=P(tp, fsdp),
+            attn_bias=P(tp),
+            attn_qk_activation=P(fsdp, tp),
+            fc1_kernel=P(fsdp, tp),
+            fc1_bias=P(tp),
+            fc2_kernel=P(tp, fsdp),
+            fc2_bias=P(tp),
+            activation=P(fsdp, None, tp),
+            layer_norm=P(tp),
+            emb_patch_kernel=P(None, None, None, tp),
+            emb_patch_bias=P(tp),
+            emb_pos_kernel=P(None, tp),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class TextShardingCfg:
+    attn_kernel: PartitionSpec | None = None
+    attn_bias: PartitionSpec | None = None
+    attn_qk_activation: PartitionSpec | None = None
+    down_kernel: PartitionSpec | None = None
+    down_bias: PartitionSpec | None = None
+    up_gate_kernel: PartitionSpec | None = None
+    up_gate_bias: PartitionSpec | None = None
+    activation: PartitionSpec | None = None
+    norm: PartitionSpec | None = None
+    cache: PartitionSpec | None = None
+    emb_kernel: PartitionSpec | None = None
+
+    @staticmethod
+    def no_sharding():
+        return TextShardingCfg()
+
+    @staticmethod
+    def default(use_fsdp: bool, use_tp: bool):
+        fsdp = ShardMode.FSDP.value if use_fsdp else None
+        tp = ShardMode.TP.value if use_tp else None
+        return TextShardingCfg(
+            attn_kernel=P(tp, fsdp),
+            attn_bias=P(tp),
+            attn_qk_activation=P(fsdp, None, tp),
+            down_kernel=P(tp, fsdp),
+            down_bias=P(tp),
+            up_gate_kernel=P(fsdp, tp),
+            up_gate_bias=P(tp),
+            activation=P(fsdp, None, tp),
+            norm=P(tp),
+            cache=P(fsdp, None, tp, None),
+            emb_kernel=P(None, tp),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class MMShardingCfg:
+    mmp_norm: PartitionSpec | None = None
+    mmp_weight: PartitionSpec | None = None
+
+    @staticmethod
+    def no_sharding():
+        return MMShardingCfg()
+
+    @staticmethod
+    def default(use_tp: bool):
+        tp = ShardMode.TP.value if use_tp else None
+        return MMShardingCfg(mmp_norm=P(tp), mmp_weight=P(tp))
 
 
 @dataclass(frozen=True)
@@ -74,6 +166,7 @@ class T5Gemma2VisionConfig:
     num_heads: int = 16
     posemb: str = "learn"
     dropout: float = 0.0
+    shd_cfg: VisionShardingCfg = field(default_factory=VisionShardingCfg)
 
 
 @dataclass(frozen=True)
@@ -93,6 +186,7 @@ class T5Gemma2TextConfig:
     bos_token_id: int = 2
     eos_token_id: int = 1
     attn_logit_softcapping: float | None = None
+    shd_cfg: TextShardingCfg = field(default_factory=TextShardingCfg)
 
     @functools.cached_property
     def query_pre_attn_scalar(self) -> float:
@@ -110,7 +204,7 @@ class T5Gemma2EncoderConfig:
 
 @dataclass(frozen=True)
 class T5Gemma2DecoderConfig(T5Gemma2TextConfig):
-    """Decoder config - inherits all fields from T5Gemma2TextConfig."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -119,6 +213,7 @@ class T5Gemma2Config:
     decoder: T5Gemma2DecoderConfig
     eoi_token_index: int = 256000
     pad_token_id: int = 0
+    shd_cfg: MMShardingCfg = field(default_factory=MMShardingCfg)
 
     @classmethod
     def _from_params(
@@ -130,8 +225,20 @@ class T5Gemma2Config:
         num_key_value_heads: int,
         sliding_window: int,
         with_vision: bool = True,
+        use_fsdp: bool = False,
+        use_tp: bool = False,
     ) -> "T5Gemma2Config":
         layer_types = _make_layer_types(num_layers)
+
+        if use_fsdp or use_tp:
+            text_shd = TextShardingCfg.default(use_fsdp, use_tp)
+            vision_shd = VisionShardingCfg.default(use_fsdp, use_tp)
+            mm_shd = MMShardingCfg.default(use_tp)
+        else:
+            text_shd = TextShardingCfg.no_sharding()
+            vision_shd = VisionShardingCfg.no_sharding()
+            mm_shd = MMShardingCfg.no_sharding()
+
         text_cfg = T5Gemma2TextConfig(
             num_hidden_layers=num_layers,
             embed_dim=embed_dim,
@@ -140,8 +247,9 @@ class T5Gemma2Config:
             num_key_value_heads=num_key_value_heads,
             sliding_window=sliding_window,
             layer_types=layer_types,
+            shd_cfg=text_shd,
         )
-        vision_cfg = T5Gemma2VisionConfig() if with_vision else None
+        vision_cfg = T5Gemma2VisionConfig(shd_cfg=vision_shd) if with_vision else None
         return cls(
             encoder=T5Gemma2EncoderConfig(text_config=text_cfg, vision_config=vision_cfg),
             decoder=T5Gemma2DecoderConfig(
@@ -152,30 +260,28 @@ class T5Gemma2Config:
                 num_key_value_heads=num_key_value_heads,
                 sliding_window=sliding_window,
                 layer_types=layer_types,
+                shd_cfg=text_shd,
             ),
+            shd_cfg=mm_shd,
         )
 
     @classmethod
-    def t5gemma2_270m_270m(cls, with_vision: bool = True) -> "T5Gemma2Config":
-        return cls._from_params(18, 640, 2048, 4, 1, 512, with_vision)
+    def t5gemma2_270m_270m(
+        cls, with_vision: bool = True, use_fsdp: bool = False, use_tp: bool = False
+    ) -> "T5Gemma2Config":
+        return cls._from_params(18, 640, 2048, 4, 1, 512, with_vision, use_fsdp, use_tp)
 
     @classmethod
-    def t5gemma2_1b_1b(cls, with_vision: bool = True) -> "T5Gemma2Config":
-        return cls._from_params(26, 1152, 6912, 4, 1, 512, with_vision)
+    def t5gemma2_1b_1b(cls, with_vision: bool = True, use_fsdp: bool = False, use_tp: bool = False) -> "T5Gemma2Config":
+        return cls._from_params(26, 1152, 6912, 4, 1, 512, with_vision, use_fsdp, use_tp)
 
     @classmethod
-    def t5gemma2_4b_4b(cls, with_vision: bool = True) -> "T5Gemma2Config":
-        return cls._from_params(34, 2560, 10240, 8, 4, 1024, with_vision)
+    def t5gemma2_4b_4b(cls, with_vision: bool = True, use_fsdp: bool = False, use_tp: bool = False) -> "T5Gemma2Config":
+        return cls._from_params(34, 2560, 10240, 8, 4, 1024, with_vision, use_fsdp, use_tp)
 
 
-# =============================================================================
-# Constants
-# =============================================================================
+_K_MASK = jnp.finfo(jnp.bfloat16).min
 
-# Large negative number for masking in attention
-K_MASK = -2.3819763e38
-
-# Special tokens
 BOS_TOKEN = 2
 EOS_TOKEN = 1
 NEW_LINE_TOKEN = 108
@@ -185,30 +291,14 @@ IMAGE_PLACEHOLDER_IN_PROMPT = "<start_of_image>"
 IMAGE_PLACEHOLDER_TOKEN = 256001  # Placeholder for image. Different from Gemma3.
 NUM_PLACEHOLDER_TOKENS_PER_IMAGE = 256
 
-# Default initializers
 NORMAL_INIT = nnx.initializers.normal()
 ZEROS_INIT = nnx.initializers.zeros_init()
-
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
 
 
 def _get_rope_base_frequency(
     text_config: T5Gemma2TextConfig,
     attn_type: AttentionType,
 ) -> int:
-    """Get RoPE base frequency for a given attention type.
-
-    Args:
-        text_config: Text configuration containing rope_parameters.
-        attn_type: The attention type (GLOBAL or LOCAL_SLIDING).
-
-    Returns:
-        The base frequency for RoPE.
-    """
-    # Map attention type to rope parameter key
     if attn_type == AttentionType.GLOBAL:
         key = "full_attention"
     else:
@@ -217,26 +307,13 @@ def _get_rope_base_frequency(
     rope_params = text_config.rope_parameters.get(key)
     if rope_params is not None:
         return int(rope_params.rope_theta)
-    return 10_000  # Default
+    return 10_000
 
 
 def _get_rope_scale_factor(
     text_config: T5Gemma2TextConfig,
     attn_type: AttentionType,
 ) -> float:
-    """Get RoPE scale factor for a given attention type.
-
-    For "linear" rope_type, this returns the factor from config.
-    For "default" rope_type, returns 1.0 (no scaling).
-
-    Args:
-        text_config: Text configuration containing rope_parameters.
-        attn_type: The attention type (GLOBAL or LOCAL_SLIDING).
-
-    Returns:
-        The scale factor for RoPE.
-    """
-    # Map attention type to rope parameter key
     if attn_type == AttentionType.GLOBAL:
         key = "full_attention"
     else:
@@ -244,10 +321,9 @@ def _get_rope_scale_factor(
 
     rope_params = text_config.rope_parameters.get(key)
     if rope_params is not None:
-        # "linear" rope_type uses factor, "default" uses 1.0
         if rope_params.rope_type == "linear":
             return rope_params.factor
-    return 1.0  # Default (no scaling)
+    return 1.0
 
 
 def apply_rope(
@@ -258,18 +334,6 @@ def apply_rope(
     scale_factor: float = 1.0,
     rope_proportion: float = 1.0,
 ) -> Float[Array, "B L N H"]:  # noqa: F722
-    """Applies Rotary Position Embeddings (RoPE).
-
-    Args:
-        inputs: Array of shape [B, L, N, H].
-        positions: Array of shape [B, L].
-        base_frequency: Base frequency used to compute rotations.
-        scale_factor: Scale factor for positional interpolation.
-        rope_proportion: Proportion of head dimension to apply RoPE to.
-
-    Returns:
-        Array of shape [B, L, N, H].
-    """
     head_dim = inputs.shape[-1]
     rope_angles = int(rope_proportion * head_dim // 2)
     nope_angles = head_dim // 2 - rope_angles
@@ -297,14 +361,7 @@ def apply_rope(
     return out.astype(inputs.dtype)
 
 
-# =============================================================================
-# Base Layers
-# =============================================================================
-
-
 class T5Gemma2Einsum(nnx.Module):
-    """Parameterized einsum layer."""
-
     def __init__(
         self,
         shape: tuple[int, ...],
@@ -315,13 +372,12 @@ class T5Gemma2Einsum(nnx.Module):
     ):
         self.w = nnx.Param(kernel_init(rngs.params(), shape, dtype))
 
-    def __call__(self, eqn: str, x: jax.Array) -> jax.Array:
-        return jnp.einsum(eqn, x, self.w.value)
+    @jax.named_scope("einsum")
+    def __call__(self, eqn: str, x: jax.Array, *, out_sharding=None) -> jax.Array:
+        return jnp.einsum(eqn, x, self.w[...], out_sharding=out_sharding)
 
 
 class T5Gemma2RMSNorm(nnx.Module):
-    """RMS Normalization layer."""
-
     def __init__(
         self,
         features: int,
@@ -334,29 +390,22 @@ class T5Gemma2RMSNorm(nnx.Module):
         self.epsilon = epsilon
         self.scale = nnx.Param(scale_init(rngs.params(), (features,), dtype))
 
+    @jax.named_scope("rms_norm")
     def __call__(self, x: Float[Array, "B L D"]) -> Float[Array, "B L D"]:  # noqa: F722
         var = jnp.mean(jnp.square(x), axis=-1, keepdims=True)
-
-        # Jax.lax.rsqrt is used because it returns different floats than
-        # jnp.reciprocal(jnp.sqrt(var + 1e-06))
         normed_inputs = x * jax.lax.rsqrt(var + self.epsilon)
-
-        # normed_inputs is a rank-K tensor, K > 1 (K is typically 2 or 3). scale is
-        # a rank-1 tensor. To avoid implicit rank-promotion, reshape scale to
-        # a (1, ..., 1, D) tensor, so the rank of scale matches normed_inputs.
-        scale = jnp.expand_dims(self.scale.value, axis=range(len(x.shape) - 1))
+        scale = jnp.expand_dims(self.scale[...], axis=range(len(x.shape) - 1))
         return normed_inputs * (1 + scale)
 
 
 class T5Gemma2FeedForward(nnx.Module):
-    """Feed-forward module with gated activation."""
-
     def __init__(
         self,
         features: int,
         hidden_dim: int,
         *,
         transpose_gating_einsum: bool,
+        shd_cfg: TextShardingCfg | None = None,
         kernel_init: nnx.Initializer = NORMAL_INIT,
         dtype: jnp.dtype = jnp.float32,
         rngs: nnx.Rngs,
@@ -364,6 +413,7 @@ class T5Gemma2FeedForward(nnx.Module):
         self.features = features
         self.hidden_dim = hidden_dim
         self.transpose_gating_einsum = transpose_gating_einsum
+        self.shd_cfg = shd_cfg
 
         if transpose_gating_einsum:
             gating_shape = (2, hidden_dim, features)
@@ -384,38 +434,18 @@ class T5Gemma2FeedForward(nnx.Module):
             rngs=rngs,
         )
 
+    @jax.named_scope("feed_forward")
     def __call__(self, x: Float[Array, "B L D"]) -> Float[Array, "B L D"]:  # noqa: F722
-        """Applies feed-forward transformation.
-
-        Args:
-            x: Input of shape [batch_size, seq_len, features].
-
-        Returns:
-            Output of shape [batch_size, seq_len, features].
-        """
         eq = "...F,NHF->...NH" if self.transpose_gating_einsum else "...F,NFH->...NH"
         gate = self.gating_einsum(eq, x)
         activations = jax.nn.gelu(gate[..., 0, :]) * gate[..., 1, :]
-        return self.linear("...H,HF->...F", activations)
-
-
-# =============================================================================
-# Attention Masks
-# =============================================================================
+        shd = self.shd_cfg.activation if self.shd_cfg is not None else None
+        return self.linear("...H,HF->...F", activations, out_sharding=shd)
 
 
 def make_bidirectional_mask(
     input_mask: Bool[Array, "B L"],  # noqa: F722
 ) -> Bool[Array, "B 1 L L"]:  # noqa: F722
-    """Creates a bidirectional attention mask for encoder.
-
-    Args:
-        input_mask: Boolean mask where True indicates valid tokens.
-
-    Returns:
-        Attention mask of shape [B, 1, L, L].
-    """
-    # [B, L] -> [B, 1, 1, L]
     mask = input_mask[:, None, None, :]
     return mask
 
@@ -423,18 +453,8 @@ def make_bidirectional_mask(
 def make_causal_mask(
     input_mask: Bool[Array, "B L"],  # noqa: F722
 ) -> Bool[Array, "B 1 L L"]:  # noqa: F722
-    """Creates a causal attention mask for decoder.
-
-    Args:
-        input_mask: Boolean mask where True indicates valid tokens.
-
-    Returns:
-        Causal attention mask of shape [B, 1, L, L].
-    """
     seq_len = input_mask.shape[-1]
-    # Create causal mask: [L, L]
     causal = jnp.tril(jnp.ones((seq_len, seq_len), dtype=jnp.bool_))
-    # Combine with input mask: [B, 1, L, L]
     mask = input_mask[:, None, None, :] & causal[None, None, :, :]
     return mask
 
@@ -445,26 +465,10 @@ def make_sliding_window_mask(
     *,
     bidirectional: bool = False,
 ) -> Bool[Array, "B 1 L L"]:  # noqa: F722
-    """Creates a sliding window mask.
-
-    Args:
-        positions: Position indices of shape [B, L].
-        sliding_window: Size of the sliding window.
-        bidirectional: If True, creates a symmetric bidirectional window where
-            the total window size equals `sliding_window` (split evenly on both
-            sides). If False, creates a causal window of size `sliding_window`.
-
-    Returns:
-        Sliding window mask of shape [B, 1, L, L].
-    """
-    # [B, L, 1] and [B, 1, L]
     q_pos = positions[:, :, None]
     k_pos = positions[:, None, :]
 
     if bidirectional:
-        # Bidirectional: symmetric window centered on query position
-        # Total window size = sliding_window, split evenly on both sides
-        # Matches PyTorch: left_window = (sw + 1) // 2, right_window = sw // 2 + 1
         left_window = (sliding_window + 1) // 2
         right_window = sliding_window // 2 + 1
         dist = q_pos - k_pos
@@ -472,7 +476,6 @@ def make_sliding_window_mask(
         right_mask = (dist < 0) & (-dist < right_window)
         mask = left_mask | right_mask
     else:
-        # Causal: can only attend to past tokens within window
         dist = jnp.abs(q_pos - k_pos)
         mask = dist < sliding_window
 
@@ -484,25 +487,8 @@ def make_sliding_window_causal_mask(
     positions: Int[Array, "B L"],  # noqa: F722
     sliding_window: int,
 ) -> Bool[Array, "B 1 L L"]:  # noqa: F722
-    """Creates a causal mask with sliding window for decoder.
-
-    Combines causal mask (lower triangular) with sliding window constraint.
-
-    Args:
-        input_mask: Boolean mask where True indicates valid tokens.
-        positions: Position indices of shape [B, L].
-        sliding_window: Size of the sliding window.
-
-    Returns:
-        Sliding window causal mask of shape [B, 1, L, L].
-    """
-    # Start with causal mask
     causal_mask = make_causal_mask(input_mask)
-
-    # Create sliding window mask
     sliding_mask = make_sliding_window_mask(positions, sliding_window)
-
-    # Combine: must satisfy both causal AND sliding window
     return causal_mask & sliding_mask
 
 
@@ -510,25 +496,9 @@ def make_merged_attention_mask(
     decoder_mask: Bool[Array, "B 1 L_dec L_dec"],  # noqa: F722
     encoder_mask: Bool[Array, "B 1 1 L_enc"],  # noqa: F722
 ) -> Bool[Array, "B 1 L_dec L_combined"]:  # noqa: F722
-    """Creates merged attention mask for decoder's merged attention.
-
-    Concatenates the decoder self-attention mask with the cross-attention
-    mask to form a single mask for the merged attention operation.
-
-    Args:
-        decoder_mask: Causal mask for decoder self-attention [B, 1, L_dec, L_dec].
-        encoder_mask: Mask for encoder hidden states [B, 1, 1, L_enc].
-
-    Returns:
-        Merged mask of shape [B, 1, L_dec, L_dec + L_enc].
-    """
     batch_size, _, seq_len, _ = decoder_mask.shape
     enc_len = encoder_mask.shape[-1]
-
-    # Broadcast encoder mask to [B, 1, L_dec, L_enc]
     cross_mask = jnp.broadcast_to(encoder_mask, (batch_size, 1, seq_len, enc_len))
-
-    # Concatenate along key dimension
     return jnp.concatenate([decoder_mask, cross_mask], axis=-1)
 
 
@@ -538,20 +508,6 @@ def make_decode_mode_self_mask(
     max_cache_len: int,
     current_cache_len: int,
 ) -> Bool[Array, "B 1 Q K"]:  # noqa: F722
-    """Creates self-attention mask for decode mode (with KV cache).
-
-    During decode mode, the query attends to all previously cached keys.
-    We mask out positions that haven't been written to yet (>= current_cache_len).
-
-    Args:
-        batch_size: Batch size.
-        query_len: Number of query positions (typically 1 for decode mode).
-        max_cache_len: Total allocated size of the cache.
-        current_cache_len: Current valid length of the cache.
-
-    Returns:
-        Mask of shape [B, 1, query_len, max_cache_len].
-    """
     k_pos = jnp.arange(max_cache_len)
     mask = k_pos < current_cache_len
     return jnp.broadcast_to(mask[None, None, None, :], (batch_size, 1, query_len, max_cache_len))
@@ -563,42 +519,14 @@ def make_decode_mode_sliding_mask(
     max_cache_len: int,
     sliding_window: int,
 ) -> Bool[Array, "B 1 1 K"]:  # noqa: F722
-    """Creates sliding window mask for decode mode (with KV cache).
-
-    During decode mode with sliding window, the query can only attend to
-    positions within the sliding window range.
-
-    Args:
-        batch_size: Batch size.
-        query_pos: Position of the current query (typically cache_index).
-        max_cache_len: Total allocated size of the cache.
-        sliding_window: Size of the sliding window.
-
-    Returns:
-        Mask of shape [B, 1, 1, max_cache_len].
-    """
-    # Key positions: 0, 1, 2, ..., max_cache_len-1
     k_positions = jnp.arange(max_cache_len)
-    # Within sliding window: |query_pos - k_pos| < sliding_window
     in_window = jnp.abs(query_pos - k_positions) < sliding_window
-    # Also must be causal (k_pos <= query_pos)
     is_causal = k_positions <= query_pos
     mask = in_window & is_causal
     return jnp.broadcast_to(mask[None, None, None, :], (batch_size, 1, 1, max_cache_len))
 
 
-# =============================================================================
-# Text Embeddings
-# =============================================================================
-
-
 class T5Gemma2ScaledWordEmbedding(nnx.Module):
-    """Scaled word embedding with special EOI (end-of-image) token.
-
-    The embeddings are scaled by the provided embed_scale, and the EOI token
-    has a separate learnable embedding.
-    """
-
     def __init__(
         self,
         vocab_size: int,
@@ -612,7 +540,6 @@ class T5Gemma2ScaledWordEmbedding(nnx.Module):
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.padding_idx = padding_idx
-        # If embed_scale is not provided, default to sqrt(embed_dim)
         if embed_scale is None:
             embed_scale = embed_dim**0.5
         self.embed_scale = jnp.array(embed_scale, dtype=dtype)
@@ -625,25 +552,9 @@ class T5Gemma2ScaledWordEmbedding(nnx.Module):
         )
 
     def __call__(self, input_ids: Int[Array, "B L"]) -> Float[Array, "B L D"]:  # noqa: F722
-        """Embed input tokens with scaling.
-
-        Args:
-            input_ids: Input token IDs of shape [B, L].
-
-        Returns:
-            Embeddings of shape [B, L, hidden_size].
-        """
         embeddings = self.embedding[input_ids] * self.embed_scale
-
-        # Replace EOI token embeddings
         eoi_mask = input_ids == END_OF_IMAGE_TOKEN
-
         return jnp.where(eoi_mask[..., None], self.eoi_embedding[...], embeddings)
-
-
-# =============================================================================
-# Vision Components
-# =============================================================================
 
 
 def _posemb_sincos_2d(
@@ -654,7 +565,6 @@ def _posemb_sincos_2d(
     temperature: float = 10_000.0,
     dtype: jnp.dtype = jnp.float32,
 ) -> Float[Array, "1 M D"]:  # noqa: F722
-    """Sinusoidal 2D position embeddings (MoCo v3 style)."""
     y, x = jnp.mgrid[:h, :w]
 
     assert width % 4 == 0, "Width must be mult of 4 for sincos posemb"
@@ -667,8 +577,6 @@ def _posemb_sincos_2d(
 
 
 class T5Gemma2VisionMLP(nnx.Module):
-    """MLP for Vision Transformer."""
-
     def __init__(
         self,
         *,
@@ -709,8 +617,6 @@ class T5Gemma2VisionMLP(nnx.Module):
 
 
 class T5Gemma2VisionEncoderBlock(nnx.Module):
-    """Transformer encoder block for Vision Transformer."""
-
     def __init__(
         self,
         *,
@@ -775,8 +681,6 @@ class T5Gemma2VisionEncoderBlock(nnx.Module):
 
 
 class T5Gemma2VisionEncoder(nnx.Module):
-    """Vision Transformer Encoder."""
-
     def __init__(
         self,
         *,
@@ -823,7 +727,7 @@ class T5Gemma2VisionEncoder(nnx.Module):
 
 
 class T5Gemma2VisionExit(nnx.Module):
-    """Vision exit layer - spatially pools soft tokens to output length."""
+    """Spatially pools soft tokens to output length."""
 
     def __init__(self, output_length: int = 256, *, rngs: nnx.Rngs):
         self.output_length = output_length
@@ -850,11 +754,7 @@ class T5Gemma2VisionExit(nnx.Module):
 
 
 class T5Gemma2VisionSoftTokenizer(nnx.Module):
-    """Vision soft tokenizer (ViT trained with SigLiP).
-
-    Transforms images into soft tokens that can be embedded into the
-    text embedding space.
-    """
+    """Vision soft tokenizer (ViT trained with SigLiP)."""
 
     def __init__(
         self,
@@ -917,7 +817,7 @@ class T5Gemma2VisionSoftTokenizer(nnx.Module):
         bn, h, w, c = x.shape
         x = jnp.reshape(x, [bn, h * w, c])
 
-        x = x + self.pos_embedding.value
+        x = x + self.pos_embedding[...]
         x = self.dropout(x, deterministic=deterministic)
         x = self.transformer(x, deterministic=deterministic)
         x = self.vision_exit(x)
@@ -933,7 +833,6 @@ class T5Gemma2VisionSoftTokenizer(nnx.Module):
         width: int,
         dtype: jnp.dtype = jnp.float32,
     ) -> nnx.Param:
-        """Returns the position embedding."""
         if typ == "learn":
             shape = (1, seqshape[0] * seqshape[1], width)
             initializer = nnx.initializers.normal(stddev=1 / (width**0.5))
@@ -953,9 +852,11 @@ class T5Gemma2VisionSoftTokensEmbedder(nnx.Module):
         embed_dim: int,
         *,
         soft_tokens_dim: int,
+        mm_shd_cfg: MMShardingCfg | None = None,
         dtype: jnp.dtype = jnp.float32,
         rngs: nnx.Rngs,
     ):
+        self.mm_shd_cfg = mm_shd_cfg
         self.mm_soft_embedding_norm = T5Gemma2RMSNorm(
             soft_tokens_dim,
             scale_init=nnx.initializers.zeros_init(),
@@ -971,7 +872,8 @@ class T5Gemma2VisionSoftTokensEmbedder(nnx.Module):
 
     def __call__(self, x: Float[Array, "B N P Dv"]) -> Float[Array, "B N P De"]:  # noqa: F722
         x = self.mm_soft_embedding_norm(x)
-        return self.mm_input_projection("...tm,md->...td", x)
+        shd = self.mm_shd_cfg.mmp_weight if self.mm_shd_cfg is not None else None
+        return self.mm_input_projection("...tm,md->...td", x, out_sharding=shd)
 
 
 class T5Gemma2VisionEmbedder(nnx.Module):
@@ -982,6 +884,7 @@ class T5Gemma2VisionEmbedder(nnx.Module):
         *,
         vision_config: T5Gemma2VisionConfig,
         embed_dim: int,
+        mm_shd_cfg: MMShardingCfg | None = None,
         freeze_params: bool = True,
         dtype: jnp.dtype = jnp.float32,
         rngs: nnx.Rngs,
@@ -997,6 +900,7 @@ class T5Gemma2VisionEmbedder(nnx.Module):
         self.soft_tokens_embedder = T5Gemma2VisionSoftTokensEmbedder(
             embed_dim,
             soft_tokens_dim=vision_config.width,
+            mm_shd_cfg=mm_shd_cfg,
             dtype=dtype,
             rngs=rngs,
         )
@@ -1015,15 +919,11 @@ class T5Gemma2VisionEmbedder(nnx.Module):
         return self.soft_tokens_embedder(soft_tokens)
 
 
-# =============================================================================
-# Multimodal Utilities
-# =============================================================================
 def merge_mm_embeddings(
     text_embeddings: jnp.ndarray,
     vision_embeddings: jnp.ndarray,
     mask: jnp.ndarray,
 ) -> jnp.ndarray:
-    """Merge text and multimodal (vision) embeddings."""
     return jax.vmap(_merge_mm_embeddings_inner, in_axes=(0, 0, 0))(
         text_embeddings,
         vision_embeddings,
@@ -1036,7 +936,6 @@ def _merge_mm_embeddings_inner(
     vision_embeddings: jnp.ndarray,
     mask: jnp.ndarray,
 ) -> jnp.ndarray:
-    """Merge embeddings without batch dimension."""
     num_images, num_toks_per_image, d = vision_embeddings.shape
     vision_embeddings = jnp.reshape(
         vision_embeddings,
@@ -1049,18 +948,7 @@ def _merge_mm_embeddings_inner(
     return merged.at[0].set(first_pos)
 
 
-# =============================================================================
-# Encoder Components
-# =============================================================================
-
-
 class T5Gemma2EncoderAttention(nnx.Module):
-    """Bidirectional self-attention for T5Gemma2 encoder.
-
-    This is separate from Gemma3Attention because the encoder needs
-    bidirectional sliding window attention, not causal sliding window.
-    """
-
     def __init__(
         self,
         num_q_heads: int,
@@ -1070,6 +958,7 @@ class T5Gemma2EncoderAttention(nnx.Module):
         attn_type: AttentionType,
         query_pre_attn_scalar: float,
         *,
+        shd_cfg: TextShardingCfg | None = None,
         rope_base_frequency: int = 10_000,
         rope_scale_factor: float = 1.0,
         rms_norm_eps: float = 1e-6,
@@ -1093,6 +982,7 @@ class T5Gemma2EncoderAttention(nnx.Module):
         self.attn_logits_soft_cap = attn_logits_soft_cap
         self.sliding_window_size = sliding_window_size
         self.use_qk_norm = use_qk_norm
+        self.shd_cfg = shd_cfg
 
         self.attn_vec_einsum = T5Gemma2Einsum(
             shape=(num_q_heads, head_dim, features),
@@ -1101,7 +991,6 @@ class T5Gemma2EncoderAttention(nnx.Module):
             rngs=rngs,
         )
 
-        # Check if we can use combined QKV projection
         if num_kv_heads == num_q_heads:
             self.qkv_einsum = T5Gemma2Einsum(
                 shape=(3, num_q_heads, features, head_dim),
@@ -1150,35 +1039,25 @@ class T5Gemma2EncoderAttention(nnx.Module):
     def use_gqa(self) -> bool:
         return self.num_kv_heads != self.num_q_heads and self.num_kv_heads > 1
 
+    @jax.named_scope("encoder_attention")
     def __call__(
         self,
         x: Float[Array, "B L D"],  # noqa: F722
         segment_pos: Float[Array, "B L"],  # noqa: F722
         attn_mask: Float[Array, "B L L"],  # noqa: F722
     ) -> Float[Array, "B L D"]:  # noqa: F722
-        """Applies bidirectional multi-head attention.
+        shd = self.shd_cfg.activation if self.shd_cfg is not None else None
 
-        Args:
-            x: Input sequence of shape [batch_size, seq_len, embed_dim].
-            segment_pos: Absolute positions of shape [batch_size, seq_len].
-            attn_mask: Attention mask of shape [batch_size, seq_len, seq_len].
-
-        Returns:
-            Output sequence of shape [batch_size, seq_len, embed_dim].
-        """
-        # Project Q, K, V
         if self.use_qkv_einsum:
             query_proj, key_proj, value_proj = self.qkv_einsum("BTD,SNDH->SBTNH", x)
         else:
-            query_proj = self.q_einsum("BTD,NDH->BTNH", x)
+            query_proj = self.q_einsum("BTD,NDH->BTNH", x, out_sharding=shd)
             key_proj, value_proj = self.kv_einsum("BSD,CKDH->CBSKH", x)
 
-        # Apply QK normalization
         if self.use_qk_norm:
             query_proj = self._query_norm(query_proj)
             key_proj = self._key_norm(key_proj)
 
-        # Apply RoPE
         query_proj = apply_rope(
             query_proj,
             segment_pos,
@@ -1194,7 +1073,6 @@ class T5Gemma2EncoderAttention(nnx.Module):
             scale_factor=self.rope_scale_factor,
         )
 
-        # Compute attention logits
         if self.use_gqa:
             b, t, kg, h = query_scaled.shape
             query_scaled = query_scaled.reshape(
@@ -1206,18 +1084,15 @@ class T5Gemma2EncoderAttention(nnx.Module):
         else:
             logits = jnp.einsum("BTNH,BSNH->BTNS", query_scaled, key_proj)
 
-        # Apply soft capping
         if self.attn_logits_soft_cap is not None:
             logits = jnp.tanh(logits / self.attn_logits_soft_cap)
             logits = logits * self.attn_logits_soft_cap
 
-        # Apply bidirectional sliding window mask for LOCAL_SLIDING layers
         if self.attn_type == AttentionType.LOCAL_SLIDING:
             if self.sliding_window_size is None:
                 raise ValueError(
                     "sliding_window_size must be set for LOCAL_SLIDING attention",
                 )
-            # Use make_sliding_window_mask with bidirectional=True, squeeze to [B, L, L]
             sliding_mask = make_sliding_window_mask(
                 segment_pos,
                 self.sliding_window_size,
@@ -1225,11 +1100,9 @@ class T5Gemma2EncoderAttention(nnx.Module):
             )[:, 0, :, :]
             attn_mask = attn_mask * sliding_mask
 
-        # Apply mask and softmax
-        padded_logits = jnp.where(jnp.expand_dims(attn_mask, -2), logits, K_MASK)
+        padded_logits = jnp.where(jnp.expand_dims(attn_mask, -2), logits, _K_MASK)
         probs = jax.nn.softmax(padded_logits, axis=-1).astype(key_proj.dtype)
 
-        # Compute attention output
         if self.use_gqa:
             b, t, kg, s = probs.shape
             probs = probs.reshape(
@@ -1241,16 +1114,10 @@ class T5Gemma2EncoderAttention(nnx.Module):
         else:
             encoded = jnp.einsum("BTNS,BSNH->BTNH", probs, value_proj)
 
-        return self.attn_vec_einsum("BTNH,NHD->BTD", encoded)
+        return self.attn_vec_einsum("BTNH,NHD->BTD", encoded, out_sharding=shd)
 
 
 class T5Gemma2EncoderBlock(nnx.Module):
-    """Encoder transformer block with bidirectional attention.
-
-    Uses T5Gemma2EncoderAttention which handles bidirectional sliding window
-    correctly (unlike Gemma3Attention which uses causal sliding window).
-    """
-
     def __init__(
         self,
         num_q_heads: int,
@@ -1264,6 +1131,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
         attn_type: AttentionType,
         query_pre_attn_scalar: float,
         transpose_gating_einsum: bool,
+        shd_cfg: TextShardingCfg | None = None,
         rope_base_frequency: int = 10_000,
         rope_scale_factor: float = 1.0,
         rms_norm_eps: float = 1e-6,
@@ -1293,6 +1161,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
             num_kv_heads=num_kv_heads,
             attn_type=attn_type,
             query_pre_attn_scalar=query_pre_attn_scalar,
+            shd_cfg=shd_cfg,
             rope_base_frequency=rope_base_frequency,
             rope_scale_factor=rope_scale_factor,
             rms_norm_eps=rms_norm_eps,
@@ -1325,6 +1194,7 @@ class T5Gemma2EncoderBlock(nnx.Module):
             features=embed_dim,
             hidden_dim=hidden_dim,
             transpose_gating_einsum=transpose_gating_einsum,
+            shd_cfg=shd_cfg,
             kernel_init=kernel_init,
             dtype=dtype,
             rngs=rngs,
@@ -1339,23 +1209,13 @@ class T5Gemma2EncoderBlock(nnx.Module):
                 rngs=rngs,
             )
 
+    @jax.named_scope("encoder_block")
     def __call__(
         self,
         x: Float[Array, "B L D"],  # noqa: F722
         segment_pos: Int[Array, "B L"],  # noqa: F722
         attn_mask: Bool[Array, "B L L"],  # noqa: F722
     ) -> Float[Array, "B L D"]:  # noqa: F722
-        """Apply encoder layer.
-
-        Args:
-            x: Input hidden states [B, L, D].
-            segment_pos: Position indices [B, L].
-            attn_mask: Bidirectional attention mask [B, L, L].
-
-        Returns:
-            Output hidden states [B, L, D].
-        """
-        # Attention block
         inputs_normalized = self.pre_attention_norm(x)
         attn_output = self.attn(inputs_normalized, segment_pos, attn_mask)
 
@@ -1364,7 +1224,6 @@ class T5Gemma2EncoderBlock(nnx.Module):
 
         attn_output = attn_output + x
 
-        # Feed-forward block
         outputs = self.pre_ffw_norm(attn_output)
         outputs = self.mlp(outputs)
 
@@ -1375,15 +1234,11 @@ class T5Gemma2EncoderBlock(nnx.Module):
 
 
 class T5Gemma2Encoder(nnx.Module):
-    """T5Gemma2 Encoder with optional vision support.
-
-    Processes text (and optional images) using bidirectional self-attention.
-    """
-
     def __init__(
         self,
         config: T5Gemma2EncoderConfig,
         *,
+        mm_shd_cfg: MMShardingCfg | None = None,
         embedder: nnx.Module | None = None,
         dtype: jnp.dtype = jnp.float32,
         dtype_mm: jnp.dtype = jnp.float32,
@@ -1391,8 +1246,8 @@ class T5Gemma2Encoder(nnx.Module):
     ):
         self.config = config
         text_config = config.text_config
+        shd_cfg = text_config.shd_cfg if text_config.shd_cfg.activation is not None else None
 
-        # Text embeddings
         self.embedder = embedder or T5Gemma2ScaledWordEmbedding(
             vocab_size=text_config.vocab_size,
             embed_dim=text_config.embed_dim,
@@ -1401,23 +1256,21 @@ class T5Gemma2Encoder(nnx.Module):
             rngs=rngs,
         )
 
-        # Vision encoder (optional) - uses Gemma3 vision component
         self.vision_embedder = nnx.data(None)
         if config.vision_config is not None:
             self.vision_embedder = T5Gemma2VisionEmbedder(
                 vision_config=config.vision_config,
                 embed_dim=text_config.embed_dim,
+                mm_shd_cfg=mm_shd_cfg,
                 freeze_params=True,
                 dtype=dtype_mm,
                 rngs=rngs,
             )
 
-        # Determine attention types per layer
         attention_types = text_config.layer_types
         if not attention_types:
             attention_types = tuple(AttentionType.GLOBAL for _ in range(text_config.num_hidden_layers))
 
-        # Encoder layers (use Gemma3Block via alias)
         self.blocks = nnx.List(
             [
                 T5Gemma2EncoderBlock(
@@ -1431,6 +1284,7 @@ class T5Gemma2Encoder(nnx.Module):
                     attn_type=attention_types[i],
                     query_pre_attn_scalar=text_config.query_pre_attn_scalar,
                     transpose_gating_einsum=True,
+                    shd_cfg=shd_cfg,
                     rope_base_frequency=_get_rope_base_frequency(
                         text_config,
                         attention_types[i],
@@ -1452,7 +1306,6 @@ class T5Gemma2Encoder(nnx.Module):
             ]
         )
 
-        # Final normalization
         self.norm = T5Gemma2RMSNorm(
             text_config.embed_dim,
             epsilon=text_config.rms_norm_eps,
@@ -1469,32 +1322,16 @@ class T5Gemma2Encoder(nnx.Module):
         *,
         deterministic: bool = True,
     ) -> Float[Array, "B L D"]:  # noqa: F722
-        """Forward pass of the encoder.
-
-        Args:
-            tokens: Input token IDs [B, L].
-            attention_mask: Attention mask [B, L].
-            position_ids: Position indices [B, L].
-            images: Optional input images [B, N, H, W, C] where N is images per batch.
-            deterministic: Whether to run in deterministic mode.
-
-        Returns:
-            Encoder hidden states [B, L, D].
-        """
         batch_size, seq_len = tokens.shape
 
-        # Create position IDs if not provided
         if position_ids is None:
             position_ids = jnp.arange(seq_len)[None, :].repeat(batch_size, axis=0)
 
-        # Create attention mask if not provided
         if attention_mask is None:
             attention_mask = jnp.ones((batch_size, seq_len), dtype=jnp.bool_)
 
-        # Embed tokens
         x = self.embedder(tokens)
 
-        # Process images and merge with text embeddings
         if images is not None and self.vision_embedder is not None:
             image_embeddings = self.vision_embedder(images, deterministic=deterministic)
             x = merge_mm_embeddings(
@@ -1503,41 +1340,21 @@ class T5Gemma2Encoder(nnx.Module):
                 tokens == IMAGE_PLACEHOLDER_TOKEN,
             )
 
-        # Create bidirectional attention mask for encoder [B, L, L]
-        # Each query can attend to all valid (non-padded) key positions
         attn_mask = make_bidirectional_mask(attention_mask)
-        # Squeeze to [B, L, L] if it's [B, 1, L, L]
         if attn_mask.ndim == 4:
             attn_mask = attn_mask[:, 0, :, :]
 
-        # Ensure mask is [B, L, L] by broadcasting if needed
         if attn_mask.shape[-2] == 1:
-            # [B, 1, L] -> [B, L, L]
             attn_mask = jnp.broadcast_to(attn_mask, (batch_size, seq_len, seq_len))
 
-        # Apply encoder layers
-        # T5Gemma2EncoderBlock handles bidirectional sliding window internally
         for block in self.blocks:
             x = block(x, position_ids, attn_mask)
 
-        # Final normalization
         return self.norm(x)
-
-
-# =============================================================================
-# Decoder Components
-# =============================================================================
 
 
 class T5Gemma2MergedAttention(nnx.Module):
     """Merged self-attention and cross-attention for decoder.
-
-    Combines self-attention and cross-attention in a single operation:
-    - Query comes from decoder hidden states
-    - Keys/Values are concatenation of [self_kv, cross_kv]
-    - Mask is concatenation of [causal_mask, encoder_mask]
-
-    This is more efficient than separate attention operations.
 
     Uses nnx.Cache for autoregressive decoding. Call init_cache() before
     using decode=True.
@@ -1551,6 +1368,7 @@ class T5Gemma2MergedAttention(nnx.Module):
         head_dim: int,
         query_pre_attn_scalar: float,
         *,
+        shd_cfg: TextShardingCfg | None = None,
         rope_base_frequency: int = 10_000,
         rope_scale_factor: float = 1.0,
         rms_norm_eps: float = 1e-6,
@@ -1573,10 +1391,10 @@ class T5Gemma2MergedAttention(nnx.Module):
         self.attn_logits_soft_cap = attn_logits_soft_cap
         self.use_qk_norm = use_qk_norm
         self.decode = decode
+        self.shd_cfg = shd_cfg
 
         self.num_kv_groups = num_q_heads // num_kv_heads
 
-        # Projections
         self.q_proj = T5Gemma2Einsum(
             shape=(num_q_heads, features, head_dim),
             kernel_init=kernel_init,
@@ -1602,7 +1420,6 @@ class T5Gemma2MergedAttention(nnx.Module):
             rngs=rngs,
         )
 
-        # QK normalization
         if use_qk_norm:
             self.q_norm = T5Gemma2RMSNorm(
                 head_dim,
@@ -1619,14 +1436,10 @@ class T5Gemma2MergedAttention(nnx.Module):
                 rngs=rngs,
             )
 
-        # Cache for autoregressive decoding (nnx.Cache pattern like Gemma3)
-        # Self-attention cache
         self.cached_self_key: nnx.Cache[Array] | None = nnx.data(None)
         self.cached_self_value: nnx.Cache[Array] | None = nnx.data(None)
-        # Cross-attention cache (computed once from encoder outputs)
         self.cached_cross_key: nnx.Cache[Array] | None = nnx.data(None)
         self.cached_cross_value: nnx.Cache[Array] | None = nnx.data(None)
-        # Cache index for self-attention
         self.cache_index: nnx.Cache[Array] | None = nnx.data(None)
 
     def init_cache(
@@ -1637,39 +1450,29 @@ class T5Gemma2MergedAttention(nnx.Module):
         encoder_seq_length: int,
         dtype: jnp.dtype = jnp.float32,
     ) -> None:
-        """Initialize KV caches for autoregressive decoding.
+        cache_shd = self.shd_cfg.cache if self.shd_cfg is not None else None
 
-        Must be called before using decode=True.
-
-        Args:
-            batch_size: Number of sequences in the batch.
-            max_decode_length: Maximum decoder sequence length.
-            encoder_seq_length: Encoder sequence length (for cross-attention).
-            dtype: Data type for cache arrays.
-        """
-        # Self-attention cache shape: [B, max_decode_len, num_kv_heads, head_dim]
         self_cache_shape = (
             batch_size,
             max_decode_length,
             self.num_kv_heads,
             self.head_dim,
         )
-        self.cached_self_key = nnx.Cache(jnp.zeros(self_cache_shape, dtype))
-        self.cached_self_value = nnx.Cache(jnp.zeros(self_cache_shape, dtype))
+        self.cached_self_key = nnx.Cache(jnp.zeros(self_cache_shape, dtype, out_sharding=cache_shd))
+        self.cached_self_value = nnx.Cache(jnp.zeros(self_cache_shape, dtype, out_sharding=cache_shd))
 
-        # Cross-attention cache shape: [B, enc_seq_len, num_kv_heads, head_dim]
         cross_cache_shape = (
             batch_size,
             encoder_seq_length,
             self.num_kv_heads,
             self.head_dim,
         )
-        self.cached_cross_key = nnx.Cache(jnp.zeros(cross_cache_shape, dtype))
-        self.cached_cross_value = nnx.Cache(jnp.zeros(cross_cache_shape, dtype))
+        self.cached_cross_key = nnx.Cache(jnp.zeros(cross_cache_shape, dtype, out_sharding=cache_shd))
+        self.cached_cross_value = nnx.Cache(jnp.zeros(cross_cache_shape, dtype, out_sharding=cache_shd))
 
-        # Cache index tracks current position in self-attention cache
         self.cache_index = nnx.Cache(jnp.array(0, dtype=jnp.int32))
 
+    @jax.named_scope("merged_attention")
     def __call__(
         self,
         hidden_states: Float[Array, "B L_dec D"],  # noqa: F722
@@ -1679,31 +1482,17 @@ class T5Gemma2MergedAttention(nnx.Module):
         *,
         decode: bool | None = None,
     ) -> Float[Array, "B L_dec D"]:  # noqa: F722
-        """Apply merged self-attention and cross-attention.
-
-        Args:
-            hidden_states: Decoder hidden states [B, L_dec, D].
-            encoder_hidden_states: Encoder outputs [B, L_enc, D].
-            position_ids: Decoder position indices [B, L_dec].
-            merged_attention_mask: Merged mask [B, 1, L_dec, L_combined].
-            decode: Whether to use KV cache for autoregressive decoding.
-
-        Returns:
-            Output hidden states [B, L_dec, D].
-        """
         seq_len = hidden_states.shape[1]
+        shd = self.shd_cfg.activation if self.shd_cfg is not None else None
 
-        # Project decoder Q, K, V (self-attention)
-        query = self.q_proj("BTD,NDH->BTNH", hidden_states)
-        self_key = self.k_proj("BTD,NDH->BTNH", hidden_states)
-        self_value = self.v_proj("BTD,NDH->BTNH", hidden_states)
+        query = self.q_proj("BTD,NDH->BTNH", hidden_states, out_sharding=shd)
+        self_key = self.k_proj("BTD,NDH->BTNH", hidden_states, out_sharding=shd)
+        self_value = self.v_proj("BTD,NDH->BTNH", hidden_states, out_sharding=shd)
 
-        # QK normalization for self-attention
         if self.use_qk_norm:
             query = self.q_norm(query)
             self_key = self.k_norm(self_key)
 
-        # Apply RoPE to query and self-attention key
         query = apply_rope(
             query,
             position_ids,
@@ -1717,14 +1506,12 @@ class T5Gemma2MergedAttention(nnx.Module):
             scale_factor=self.rope_scale_factor,
         )
 
-        # Determine decode mode
         decode = first_from(
             decode,
             self.decode,
             error_msg="No decode argument provided to T5Gemma2MergedAttention",
         )
 
-        # Handle caching for autoregressive decoding
         if decode:
             if (
                 self.cached_self_key is None
@@ -1740,7 +1527,6 @@ class T5Gemma2MergedAttention(nnx.Module):
             cur_index = self.cache_index[...]
             slice_indices = (0, cur_index, 0, 0)
 
-            # Update self-attention cache using dynamic_update_slice
             self_key_updated = jax.lax.dynamic_update_slice(
                 self.cached_self_key[...],
                 self_key,
@@ -1755,86 +1541,66 @@ class T5Gemma2MergedAttention(nnx.Module):
             self.cached_self_key[...] = self_key_updated
             self.cached_self_value[...] = self_value_updated
 
-            # Use the full updated cache (static shape) for JIT compatibility
             self_key = self_key_updated
             self_value = self_value_updated
 
-            # Cross-attention: compute and cache on first call (when index is 0)
-            # After that, reuse cached values
             def compute_cross_kv():
-                cross_k = self.k_proj("BTD,NDH->BTNH", encoder_hidden_states)
-                cross_v = self.v_proj("BTD,NDH->BTNH", encoder_hidden_states)
+                cross_k = self.k_proj("BTD,NDH->BTNH", encoder_hidden_states, out_sharding=shd)
+                cross_v = self.v_proj("BTD,NDH->BTNH", encoder_hidden_states, out_sharding=shd)
                 if self.use_qk_norm:
                     cross_k = self.k_norm(cross_k)
                 return cross_k, cross_v
 
-            # Use lax.cond to conditionally compute cross-attention KV
             cross_key, cross_value = jax.lax.cond(
                 cur_index == 0,
                 compute_cross_kv,
                 lambda: (self.cached_cross_key[...], self.cached_cross_value[...]),
             )
 
-            # Update cross cache (will be no-op after first call due to cond)
             self.cached_cross_key[...] = cross_key
             self.cached_cross_value[...] = cross_value
 
-            # Update cache index
             self.cache_index[...] = cur_index + seq_len
         else:
-            # No caching - compute cross-attention KV directly
-            cross_key = self.k_proj("BTD,NDH->BTNH", encoder_hidden_states)
-            cross_value = self.v_proj("BTD,NDH->BTNH", encoder_hidden_states)
+            cross_key = self.k_proj("BTD,NDH->BTNH", encoder_hidden_states, out_sharding=shd)
+            cross_value = self.v_proj("BTD,NDH->BTNH", encoder_hidden_states, out_sharding=shd)
             if self.use_qk_norm:
                 cross_key = self.k_norm(cross_key)
 
-        # Scale query
         query = query * self.query_pre_attn_scalar
 
-        # Concatenate self and cross KV
         key = jnp.concatenate([self_key, cross_key], axis=1)
         value = jnp.concatenate([self_value, cross_value], axis=1)
 
-        # Transpose to [B, N, T, H] for standard attention computation
         query = jnp.transpose(query, (0, 2, 1, 3))  # [B, N, T, H]
         key = jnp.transpose(key, (0, 2, 1, 3))  # [B, K, S, H]
         value = jnp.transpose(value, (0, 2, 1, 3))  # [B, K, S, H]
 
-        # Expand KV heads for GQA
         if self.num_kv_groups > 1:
             key = jnp.repeat(key, self.num_kv_groups, axis=1)
             value = jnp.repeat(value, self.num_kv_groups, axis=1)
 
-        # Compute attention scores: [B, N, T, S]
         attn_weights = jnp.einsum("BNTH,BNSH->BNTS", query, key)
 
-        # Apply softcapping
         if self.attn_logits_soft_cap is not None:
             attn_weights = jnp.tanh(attn_weights / self.attn_logits_soft_cap)
             attn_weights = attn_weights * self.attn_logits_soft_cap
 
-        # Apply attention mask
         if merged_attention_mask is not None:
-            attn_weights = jnp.where(merged_attention_mask, attn_weights, K_MASK)
+            attn_weights = jnp.where(merged_attention_mask, attn_weights, _K_MASK)
 
-        # Softmax
         attn_weights = jax.nn.softmax(attn_weights, axis=-1).astype(value.dtype)
 
-        # Apply attention to values: [B, N, T, H]
         attn_output = jnp.einsum("BNTS,BNSH->BNTH", attn_weights, value)
 
-        # Transpose back to [B, T, N, H]
         attn_output = jnp.transpose(attn_output, (0, 2, 1, 3))
 
-        # Output projection
-        output = self.o_proj("BTNH,NHD->BTD", attn_output)
+        output = self.o_proj("BTNH,NHD->BTD", attn_output, out_sharding=shd)
 
         return output
 
 
 class T5Gemma2DecoderBlock(nnx.Module):
-    """Decoder transformer block with merged self/cross attention."""
-
     def __init__(
         self,
         num_q_heads: int,
@@ -1847,6 +1613,7 @@ class T5Gemma2DecoderBlock(nnx.Module):
         use_post_attn_norm: bool = True,
         use_post_ffw_norm: bool = True,
         query_pre_attn_scalar: float,
+        shd_cfg: TextShardingCfg | None = None,
         rope_base_frequency: int = 10_000,
         rope_scale_factor: float = 1.0,
         rms_norm_eps: float = 1e-6,
@@ -1862,7 +1629,6 @@ class T5Gemma2DecoderBlock(nnx.Module):
         self.use_post_attn_norm = use_post_attn_norm
         self.use_post_ffw_norm = use_post_ffw_norm
 
-        # Pre-attention norm
         self.pre_attention_norm = T5Gemma2RMSNorm(
             embed_dim,
             epsilon=rms_norm_eps,
@@ -1871,13 +1637,13 @@ class T5Gemma2DecoderBlock(nnx.Module):
             rngs=rngs,
         )
 
-        # Merged attention (self + cross)
         self.attn = T5Gemma2MergedAttention(
             num_q_heads=num_q_heads,
             num_kv_heads=num_kv_heads,
             features=embed_dim,
             head_dim=head_dim,
             query_pre_attn_scalar=query_pre_attn_scalar,
+            shd_cfg=shd_cfg,
             rope_base_frequency=rope_base_frequency,
             rope_scale_factor=rope_scale_factor,
             rms_norm_eps=rms_norm_eps,
@@ -1890,7 +1656,6 @@ class T5Gemma2DecoderBlock(nnx.Module):
             rngs=rngs,
         )
 
-        # Post-attention norm
         if use_post_attn_norm:
             self.post_attention_norm = T5Gemma2RMSNorm(
                 embed_dim,
@@ -1900,7 +1665,6 @@ class T5Gemma2DecoderBlock(nnx.Module):
                 rngs=rngs,
             )
 
-        # Pre-FFW norm
         self.pre_ffw_norm = T5Gemma2RMSNorm(
             embed_dim,
             epsilon=rms_norm_eps,
@@ -1909,17 +1673,16 @@ class T5Gemma2DecoderBlock(nnx.Module):
             rngs=rngs,
         )
 
-        # Feed-forward
         self.mlp = T5Gemma2FeedForward(
             features=embed_dim,
             hidden_dim=hidden_dim,
             transpose_gating_einsum=True,
+            shd_cfg=shd_cfg,
             kernel_init=kernel_init,
             dtype=dtype,
             rngs=rngs,
         )
 
-        # Post-FFW norm
         if use_post_ffw_norm:
             self.post_ffw_norm = T5Gemma2RMSNorm(
                 embed_dim,
@@ -1929,6 +1692,7 @@ class T5Gemma2DecoderBlock(nnx.Module):
                 rngs=rngs,
             )
 
+    @jax.named_scope("decoder_block")
     def __call__(
         self,
         x: Float[Array, "B L_dec D"],  # noqa: F722
@@ -1938,19 +1702,6 @@ class T5Gemma2DecoderBlock(nnx.Module):
         *,
         decode: bool | None = None,
     ) -> Float[Array, "B L_dec D"]:  # noqa: F722
-        """Apply decoder layer.
-
-        Args:
-            x: Decoder hidden states [B, L_dec, D].
-            encoder_hidden_states: Encoder outputs [B, L_enc, D].
-            segment_pos: Decoder position indices [B, L_dec].
-            attn_mask: Merged attention mask [B, 1, L_dec, L_combined].
-            decode: Whether to use KV cache.
-
-        Returns:
-            Output hidden states [B, L_dec, D].
-        """
-        # Merged attention block
         inputs_normalized = self.pre_attention_norm(x)
         attn_output = self.attn(
             inputs_normalized,
@@ -1965,7 +1716,6 @@ class T5Gemma2DecoderBlock(nnx.Module):
 
         attn_output += x
 
-        # Feed-forward block
         outputs = self.pre_ffw_norm(attn_output)
         outputs = self.mlp(outputs)
 
@@ -1978,12 +1728,6 @@ class T5Gemma2DecoderBlock(nnx.Module):
 
 
 class T5Gemma2Decoder(nnx.Module):
-    """T5Gemma2 Decoder with merged self/cross attention.
-
-    Uses nnx.Cache for autoregressive decoding. Call init_cache() before
-    using decode=True.
-    """
-
     def __init__(
         self,
         config: T5Gemma2DecoderConfig,
@@ -1995,8 +1739,8 @@ class T5Gemma2Decoder(nnx.Module):
     ):
         self.config = config
         self.dtype = dtype
+        shd_cfg = config.shd_cfg if config.shd_cfg.activation is not None else None
 
-        # Text embeddings
         self.embedder = embedder or T5Gemma2ScaledWordEmbedding(
             vocab_size=config.vocab_size,
             embed_dim=config.embed_dim,
@@ -2005,12 +1749,10 @@ class T5Gemma2Decoder(nnx.Module):
             rngs=rngs,
         )
 
-        # Determine attention types per layer
         attention_types = config.layer_types
         if not attention_types:
             attention_types = tuple(AttentionType.GLOBAL for _ in range(config.num_hidden_layers))
 
-        # Decoder layers
         self.blocks = nnx.List(
             [
                 T5Gemma2DecoderBlock(
@@ -2023,6 +1765,7 @@ class T5Gemma2Decoder(nnx.Module):
                     use_post_attn_norm=True,
                     use_post_ffw_norm=True,
                     query_pre_attn_scalar=config.query_pre_attn_scalar,
+                    shd_cfg=shd_cfg,
                     rope_base_frequency=_get_rope_base_frequency(config, attention_types[i]),
                     rope_scale_factor=_get_rope_scale_factor(config, attention_types[i]),
                     rms_norm_eps=config.rms_norm_eps,
@@ -2036,7 +1779,6 @@ class T5Gemma2Decoder(nnx.Module):
             ]
         )
 
-        # Final normalization
         self.norm = T5Gemma2RMSNorm(
             config.embed_dim,
             epsilon=config.rms_norm_eps,
@@ -2052,16 +1794,6 @@ class T5Gemma2Decoder(nnx.Module):
         encoder_seq_length: int,
         dtype: jnp.dtype | None = None,
     ) -> None:
-        """Initialize KV caches for all decoder layers.
-
-        Must be called before using decode=True.
-
-        Args:
-            batch_size: Number of sequences in the batch.
-            max_decode_length: Maximum decoder sequence length.
-            encoder_seq_length: Encoder sequence length (for cross-attention).
-            dtype: Data type for cache arrays. Defaults to model dtype.
-        """
         if dtype is None:
             dtype = self.dtype
 
@@ -2074,7 +1806,6 @@ class T5Gemma2Decoder(nnx.Module):
             )
 
     def get_cache_index(self) -> int:
-        """Get current cache index from the first layer."""
         if len(self.blocks) > 0 and self.blocks[0].attn.cache_index is not None:
             return int(self.blocks[0].attn.cache_index[...])
         return 0
@@ -2089,27 +1820,12 @@ class T5Gemma2Decoder(nnx.Module):
         *,
         decode: bool | None = None,
     ) -> Float[Array, "B L_dec D"]:  # noqa: F722
-        """Forward pass of the decoder.
-
-        Args:
-            input_ids: Decoder input token IDs [B, L_dec].
-            encoder_hidden_states: Encoder outputs [B, L_enc, D].
-            attention_mask: Decoder attention mask [B, L_dec].
-            encoder_attention_mask: Encoder attention mask [B, L_enc].
-            position_ids: Decoder position indices [B, L_dec].
-            decode: Whether to use KV cache.
-
-        Returns:
-            Decoder hidden states [B, L_dec, D].
-        """
         batch_size, dec_seq_len = input_ids.shape
         enc_seq_len = encoder_hidden_states.shape[1]
 
-        # Create position IDs if not provided
         if position_ids is None:
             cache_index = self.get_cache_index()
             if decode and cache_index > 0:
-                # During autoregressive decoding, position is cache_index
                 position_ids = jnp.full(
                     (batch_size, dec_seq_len),
                     cache_index,
@@ -2121,7 +1837,6 @@ class T5Gemma2Decoder(nnx.Module):
                     axis=0,
                 )
 
-        # Create attention masks if not provided
         if attention_mask is None:
             attention_mask = jnp.ones((batch_size, dec_seq_len), dtype=jnp.bool_)
         if encoder_attention_mask is None:
@@ -2130,57 +1845,43 @@ class T5Gemma2Decoder(nnx.Module):
                 dtype=jnp.bool_,
             )
 
-        # Create encoder mask for cross-attention (bidirectional)
         encoder_mask = encoder_attention_mask[:, None, None, :]
 
         if decode:
-            # Decode mode: create masks accounting for cached sequence length
             cache_index = self.get_cache_index()
-            # Get max_decode_length (static) from the first block's cache
             max_decode_len = self.blocks[0].attn.cached_self_key.shape[1]
-            # Current valid length (dynamic)
             current_len = cache_index + dec_seq_len
 
-            # Full attention: new tokens can attend to all cached + encoder
             full_decoder_mask = make_decode_mode_self_mask(
                 batch_size,
                 dec_seq_len,
                 max_decode_len,
                 current_len,
             )
-            # Sliding attention: limited to sliding window
             sliding_decoder_mask = make_decode_mode_sliding_mask(
                 batch_size,
-                cache_index,  # Current query position
+                cache_index,
                 max_decode_len,
                 self.config.sliding_window,
             )
 
-            # Merged masks with encoder (broadcast encoder mask for query length)
             enc_mask_broadcast = jnp.broadcast_to(encoder_mask, (batch_size, 1, dec_seq_len, enc_seq_len))
             merged_mask_full = jnp.concatenate([full_decoder_mask, enc_mask_broadcast], axis=-1)
             merged_mask_sliding = jnp.concatenate([sliding_decoder_mask, enc_mask_broadcast], axis=-1)
         else:
-            # Non-decode mode: standard causal masks
-            # Full attention: standard causal mask
             full_decoder_mask = make_causal_mask(attention_mask)
-            # Sliding attention: causal + sliding window
             sliding_decoder_mask = make_sliding_window_causal_mask(
                 attention_mask,
                 position_ids,
                 self.config.sliding_window,
             )
 
-            # Create merged masks for each attention type
             merged_mask_full = make_merged_attention_mask(full_decoder_mask, encoder_mask)
             merged_mask_sliding = make_merged_attention_mask(sliding_decoder_mask, encoder_mask)
 
-        # Embed tokens
         hidden_states = self.embedder(input_ids)
 
-        # Apply decoder layers with per-layer masks
         for block in self.blocks:
-            # Select mask based on layer's attention type
             if block.attn_type == AttentionType.LOCAL_SLIDING:
                 block_mask = merged_mask_sliding
             else:
@@ -2194,25 +1895,12 @@ class T5Gemma2Decoder(nnx.Module):
                 decode=decode,
             )
 
-        # Final normalization
         hidden_states = self.norm(hidden_states)
 
         return hidden_states
 
 
-# =============================================================================
-# Full Model
-# =============================================================================
-
-
 class T5Gemma2(nnx.Module):
-    """T5Gemma2 Encoder-Decoder Model.
-
-    Combines the encoder and decoder into a full sequence-to-sequence model.
-    Uses nnx.Cache for autoregressive decoding. Call init_cache() before
-    using decode=True.
-    """
-
     def __init__(
         self,
         config: T5Gemma2Config,
@@ -2224,7 +1912,6 @@ class T5Gemma2(nnx.Module):
     ):
         self.config = config
 
-        # Use tied embedding for encoder and decoder
         self.embedder = T5Gemma2ScaledWordEmbedding(
             vocab_size=config.encoder.text_config.vocab_size,
             embed_dim=config.encoder.text_config.embed_dim,
@@ -2233,16 +1920,15 @@ class T5Gemma2(nnx.Module):
             rngs=rngs,
         )
 
-        # Encoder
         self.encoder = T5Gemma2Encoder(
             config.encoder,
+            mm_shd_cfg=config.shd_cfg if config.shd_cfg.mmp_weight is not None else None,
             embedder=self.embedder,
             dtype=dtype,
             dtype_mm=dtype_mm,
             rngs=rngs,
         )
 
-        # Decoder
         self.decoder = T5Gemma2Decoder(
             config.decoder,
             embedder=self.embedder,
@@ -2259,14 +1945,6 @@ class T5Gemma2(nnx.Module):
         encoder_seq_length: int,
         dtype: jnp.dtype | None = None,
     ) -> None:
-        """Initialize decoder KV caches for autoregressive decoding.
-
-        Args:
-            batch_size: Number of sequences in the batch.
-            max_decode_length: Maximum decoder sequence length.
-            encoder_seq_length: Encoder sequence length.
-            dtype: Data type for cache arrays.
-        """
         self.decoder.init_cache(
             batch_size=batch_size,
             max_decode_length=max_decode_length,
@@ -2287,35 +1965,16 @@ class T5Gemma2(nnx.Module):
         *,
         decode: bool | None = None,
         deterministic: bool = True,
-    ) -> tuple[Float[Array, "B L_dec D"], Float[Array, "B L_enc D"]]:  # noqa: F722
-        """Forward pass of the full model.
-
-        Args:
-            input_ids: Encoder input token IDs [B, L_enc].
-            decoder_input_ids: Decoder input token IDs [B, L_dec].
-            attention_mask: Encoder attention mask [B, L_enc].
-            decoder_attention_mask: Decoder attention mask [B, L_dec].
-            position_ids: Encoder position indices [B, L_enc].
-            decoder_position_ids: Decoder position indices [B, L_dec].
-            pixel_values: Optional input images [B, N, H, W, C] where N is images per batch.
-            encoder_outputs: Pre-computed encoder outputs (for generation).
-            decode: Whether to use KV cache.
-            deterministic: Whether to run in deterministic mode.
-
-        Returns:
-            Tuple of (decoder hidden states, encoder hidden states).
-        """
-        # Encode if not provided
+    ) -> tuple[Float[Array, "B L_dec V"], Float[Array, "B L_enc D"]]:  # noqa: F722
         if encoder_outputs is None:
             encoder_outputs = self.encoder(
                 input_ids,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
-                images=pixel_values,  # Note: encoder uses 'images' parameter
+                images=pixel_values,
                 deterministic=deterministic,
             )
 
-        # Decode
         decoder_outputs = self.decoder(
             decoder_input_ids,
             encoder_hidden_states=encoder_outputs,
@@ -2325,4 +1984,16 @@ class T5Gemma2(nnx.Module):
             decode=decode,
         )
 
-        return decoder_outputs, encoder_outputs
+        embed_table = self.embedder.embedding[...]
+        logits = jnp.einsum("btd,vd->btv", decoder_outputs, embed_table)
+        return logits, encoder_outputs
+
+
+@jax.jit
+def forward(
+    model: T5Gemma2,
+    encoder_input_ids: Array,
+    decoder_input_ids: Array,
+    pixel_values: Array | None = None,
+) -> tuple[Array, Array]:
+    return model(encoder_input_ids, decoder_input_ids, pixel_values=pixel_values)

@@ -276,34 +276,28 @@ def greedy_generate(
         if use_cache:
             if step == 0:
                 # First step: prefill with BOS
-                decoder_outputs = model.decoder(
+                logits, _ = model(
+                    encoder_input_ids,
                     decoder_input_ids,
-                    encoder_hidden_states=encoder_outputs,
-                    encoder_attention_mask=encoder_mask,
+                    encoder_outputs=encoder_outputs,
                     decode=True,
                 )
             else:
                 # Subsequent steps: feed only the new token
-                decoder_outputs = model.decoder(
+                logits, _ = model(
+                    encoder_input_ids,
                     next_token[:, None],
-                    encoder_hidden_states=encoder_outputs,
-                    encoder_attention_mask=encoder_mask,
+                    encoder_outputs=encoder_outputs,
                     decode=True,
                 )
         else:
             # No cache: recompute full sequence each step
-            decoder_outputs = model.decoder(
+            logits, _ = model(
+                encoder_input_ids,
                 decoder_input_ids,
-                encoder_hidden_states=encoder_outputs,
-                encoder_attention_mask=encoder_mask,
+                encoder_outputs=encoder_outputs,
                 decode=False,
             )
-
-        # Get logits from the last position
-        last_hidden = decoder_outputs[:, -1:, :]
-        # Use embedding weights for output projection (tied embeddings)
-        embed_table = model.decoder.embedder.embedding[...]
-        logits = jnp.einsum("btd,vd->btv", last_hidden, embed_table)
 
         # Greedy selection
         next_token = jnp.argmax(logits[:, -1, :], axis=-1)
