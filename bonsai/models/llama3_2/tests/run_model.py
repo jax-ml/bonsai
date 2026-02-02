@@ -23,7 +23,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from huggingface_hub import snapshot_download
-from jax.sharding import AxisType
 
 from transformers import AutoTokenizer
 
@@ -60,7 +59,7 @@ def _parse_args(argv: list[str]) -> Args:
     return Args(model_size=parsed.size, use_base_model=parsed.base)
 
 
-def tokenize(tokenizer, prompts: list[str], shd=None, use_chat_template: bool = True):
+def tokenize(tokenizer, prompts: list[str], use_chat_template: bool = True):
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
@@ -77,8 +76,8 @@ def tokenize(tokenizer, prompts: list[str], shd=None, use_chat_template: bool = 
         lines = prompts
 
     batch = tokenizer(lines, padding=True, return_tensors="np", add_special_tokens=not use_template)
-    input_ids = jnp.array(batch["input_ids"], out_sharding=shd)
-    attention_mask = jnp.array(batch["attention_mask"], out_sharding=shd)
+    input_ids = jnp.array(batch["input_ids"])
+    attention_mask = jnp.array(batch["attention_mask"])
     return input_ids, attention_mask
 
 
@@ -106,10 +105,6 @@ def run_model():
     # Default: no sharding (single-device friendly).
     config_fn = modeling.ModelConfig.llama3_2_1b if model_size == "1B" else modeling.ModelConfig.llama3_2_3b
     config = config_fn(use_fsdp=False, use_tp=False)
-    fsdp, tp = modeling.ShardMode.FSDP.value, modeling.ShardMode.TP.value
-    mesh = jax.make_mesh((1, 1), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
-    jax.set_mesh(mesh)
-    batch_shd = None
 
     instruct_prompts = [
         "Summarize what a tokenizer does in one paragraph.",
@@ -123,11 +118,11 @@ def run_model():
 
     tokenizer = AutoTokenizer.from_pretrained(model_ckpt_path)
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
-    tokens, attention_mask = tokenize(tokenizer, prompts, batch_shd, use_chat_template=not use_base_model)
+    tokens, attention_mask = tokenize(tokenizer, prompts, use_chat_template=not use_base_model)
     batch_size, token_len = tokens.shape
 
     generate_steps = 64
-    model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh)
+    model = params.create_model_from_safe_tensors(model_ckpt_path, config)
     cache = model.init_cache(config, batch_size, token_len, generate_steps)
 
     key = jax.random.key(0)

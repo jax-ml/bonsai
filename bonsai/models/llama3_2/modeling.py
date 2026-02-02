@@ -37,35 +37,38 @@ class ShardMode(Enum):
 @dataclasses.dataclass(slots=True, frozen=True)
 class LlamaShardCfg:
     # Embedding
-    emb_weight: PartitionSpec
-    activation: PartitionSpec
-    logits: PartitionSpec
+    emb_weight: PartitionSpec | None = None
+    activation: PartitionSpec | None = None
+    logits: PartitionSpec | None = None
 
     # Attention
-    q_proj: PartitionSpec
-    k_proj: PartitionSpec
-    v_proj: PartitionSpec
-    o_proj: PartitionSpec
+    q_proj: PartitionSpec | None = None
+    k_proj: PartitionSpec | None = None
+    v_proj: PartitionSpec | None = None
+    o_proj: PartitionSpec | None = None
 
-    attn_logits: PartitionSpec
-    attn_out: PartitionSpec
+    attn_logits: PartitionSpec | None = None
+    attn_out: PartitionSpec | None = None
 
-    cache: PartitionSpec
+    cache: PartitionSpec | None = None
 
     # MLP
-    gate_proj: PartitionSpec
-    up_proj: PartitionSpec
-    down_proj: PartitionSpec
+    gate_proj: PartitionSpec | None = None
+    up_proj: PartitionSpec | None = None
+    down_proj: PartitionSpec | None = None
 
     # Head
-    lm_head: PartitionSpec
+    lm_head: PartitionSpec | None = None
 
     @classmethod
     def no_sharding(cls) -> "LlamaShardCfg":
-        return cls.default(use_fsdp=False, use_tp=False)
+        return LlamaShardCfg()
 
     @classmethod
     def default(cls, use_fsdp: bool, use_tp: bool) -> "LlamaShardCfg":
+        if not (use_fsdp and use_tp):
+            return cls.no_sharding()
+
         fsdp = ShardMode.FSDP.value if use_fsdp else None
         tp = ShardMode.TP.value if use_tp else None
 
@@ -87,7 +90,9 @@ class LlamaShardCfg:
         )
 
 
-def shard(x: jnp.ndarray, s: PartitionSpec):
+def shard(x: jnp.ndarray, s: PartitionSpec | None):
+    if s is None:
+        return x
     mesh = get_abstract_mesh()
     if not mesh.empty and len(mesh.axis_names) > 0:
         return reshard(x, s)
@@ -164,7 +169,8 @@ class LayerCache(nnx.Module):
         self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype, out_sharding=kv_shd))
         self.v_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype, out_sharding=kv_shd))
         self.size = self.k_cache.shape[1]
-        self.start_ind = nnx.Variable(-1 * jnp.ones((batch_size,), dtype=jnp.int32, out_sharding=P(kv_shd[0])))
+        start_ind_shd = None if kv_shd is None else P(kv_shd[0])
+        self.start_ind = nnx.Variable(-1 * jnp.ones((batch_size,), dtype=jnp.int32, out_sharding=start_ind_shd))
         self.cur_ind = nnx.Variable(jnp.zeros((), dtype=jnp.int32))
 
 
@@ -194,7 +200,7 @@ class ShardedLinear(nnx.Module):
         self,
         in_dim: int,
         out_dim: int,
-        sharding: PartitionSpec,
+        sharding: PartitionSpec | None,
         *,
         use_bias: bool = True,
         dtype=jnp.bfloat16,
@@ -372,8 +378,8 @@ def sharded_attention(
     attn_mask: Array | None,
     scale: float,
     *,
-    attn_logit_sharding: PartitionSpec,
-    out_sharding: PartitionSpec,
+    attn_logit_sharding: PartitionSpec | None,
+    out_sharding: PartitionSpec | None,
 ) -> Array:
     """Compute scaled dot-product attention with optional masking."""
     attn_logits = jnp.einsum("BTKGH,BSKH->BTSKG", q, k, out_sharding=attn_logit_sharding) * scale
@@ -476,7 +482,7 @@ class LlamaAttention(nnx.Module):
         position_ids = compute_positions_from_segment_ids(segment_ids)
         if cache is not None:
             left_pads = count_left_pads(segment_ids)
-            cache.start_ind[...] = jnp.where(cache.start_ind[...] < 0, left_pads, cache.start_ind[...])
+            cache.start_ind.set_value(jnp.where(cache.start_ind[...] < 0, left_pads, cache.start_ind[...]))
             position_ids = position_ids + cache.cur_ind[...]
 
         sin, cos = _generate_pos_embeddings(
@@ -494,8 +500,8 @@ class LlamaAttention(nnx.Module):
             cache_shd = self.config.shd_cfg.cache
             k = shard(k, cache_shd)
             v = shard(v, cache_shd)
-            cache.k_cache[...] = jax.lax.dynamic_update_slice(cache.k_cache[...], k, slice_indices)
-            cache.v_cache[...] = jax.lax.dynamic_update_slice(cache.v_cache[...], v, slice_indices)
+            cache.k_cache.set_value(jax.lax.dynamic_update_slice(cache.k_cache[...], k, slice_indices))
+            cache.v_cache.set_value(jax.lax.dynamic_update_slice(cache.v_cache[...], v, slice_indices))
             k = cache.k_cache[...]
             v = cache.v_cache[...]
 
@@ -520,7 +526,7 @@ class LlamaAttention(nnx.Module):
         )
 
         if cache is not None:
-            cache.cur_ind[...] = cache.cur_ind[...] + t
+            cache.cur_ind.set_value(cache.cur_ind[...] + t)
 
         # Reshape back to [B, T, N * H] for the output projection.
         attn_output = attn_output.reshape((b, t, self.num_heads * self.head_dim))
