@@ -300,7 +300,7 @@ class Attention(nnx.Module):
         # RoPE and Cache Logic
         left_pads = count_left_pads(segment_ids)
         left_pads = shard(left_pads, P(self.shd_cfg.act_btnh[0]))
-        cache.start_ind[...] = jnp.where(cache.start_ind[...] < 0, left_pads, cache.start_ind[...])
+        cache.start_ind.set_value(jnp.where(cache.start_ind[...] < 0, left_pads, cache.start_ind[...]))
         position_ids = compute_positions_from_segment_ids(segment_ids) + cache.cur_ind[...]
         sin, cos = _generate_pos_embeddings(position_ids, self.head_dim)
         query_proj = apply_rope(query_proj, sin, cos)
