@@ -11,7 +11,7 @@ from bonsai.models.llama3_2.tests.test_utils import tiny_config
 jax.config.update("jax_num_cpu_devices", 8)
 
 
-class TestShardingLlama32(absltest.TestCase):
+class TestShardingLlama3_2(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

@@ -29,8 +29,8 @@ def check_hf_token():
     return False
 
 
-@unittest.skipIf(check_hf_token(), "Skipping Llama32 output tests due to HF_TOKEN failure.")
-class TestOutputsLlama32(absltest.TestCase):
+@unittest.skipIf(check_hf_token(), "Skipping Llama3.2 output tests due to HF_TOKEN failure.")
+class TestOutputsLlama3_2(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

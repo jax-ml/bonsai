@@ -9,7 +9,7 @@ from bonsai.models.llama3_2 import modeling
 from bonsai.models.llama3_2.tests.test_utils import tiny_config
 
 
-class TestPaddingLlama32(absltest.TestCase):
+class TestPaddingLlama3_2(absltest.TestCase):
     def test_forward_uses_per_sample_right_padding(self):
         cfg = tiny_config(use_sharding=False)
         fsdp, tp = modeling.ShardMode.FSDP.value, modeling.ShardMode.TP.value
