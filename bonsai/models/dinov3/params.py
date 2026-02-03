@@ -7,7 +7,7 @@ import safetensors
 from etils import epath
 from flax import nnx
 
-from bonsai.models.dinov3.modeling import DINOv3ViTFlaxConfig, Dinov3ViTModel
+from bonsai.models.dinov3.modeling import ModelConfig, Dinov3ViTModel
 
 
 def _get_key_and_transform_mapping():
@@ -15,7 +15,7 @@ def _get_key_and_transform_mapping():
         BIAS = (None, None, False)
         LINEAR = ((1, 0), None, False)
         CONV2D = ((2, 3, 1, 0), None, False)
-        DEFAULT = (None, None, False)
+        DEFAULT = None
 
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule, reshape_first))
     return {
@@ -99,7 +99,7 @@ def _stoi(s):
 
 def create_model_from_safe_tensors(
     file_dir: str,
-    cfg: DINOv3ViTFlaxConfig,
+    cfg: ModelConfig,
     mesh: jax.sharding.Mesh | None = None,
 ) -> Dinov3ViTModel:
     """Load tensors from the safetensors file and create a Dinov3 model (memory-optimized)."""

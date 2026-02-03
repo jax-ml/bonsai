@@ -1,11 +1,10 @@
 import os
-
+import tempfile
 import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
 from absl.testing import absltest
-from huggingface_hub import constants
 from safetensors.torch import save_file
 from transformers import DINOv3ViTConfig, DINOv3ViTModel
 
@@ -16,8 +15,6 @@ from bonsai.models.dinov3 import params
 class TestForwardPass(absltest.TestCase):
     def setUp(self):
         super().setUp()
-        self.save_dir = constants.default_cache_path
-        os.makedirs(self.save_dir, exist_ok=True)
 
         self.hfconfig = DINOv3ViTConfig(
             hidden_size=768,
@@ -29,36 +26,31 @@ class TestForwardPass(absltest.TestCase):
             num_register_tokens=4,
         )
         self.baseline_model = DINOv3ViTModel(config=self.hfconfig)
-        self.model_ckpt_path = os.path.join(self.save_dir, "model.safetensors")
-        save_file(self.baseline_model.state_dict(), self.model_ckpt_path)
+        self.config = model_lib.ModelConfig.dinov3_vitb16()
 
-        self.config = model_lib.DINOv3ViTFlaxConfig.dinov3_vitb16()
-        self.bonsai_model = params.create_model_from_safe_tensors(self.save_dir, self.config)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filename = os.path.join(temp_dir, "ref.safetensors")
+            save_file(self.baseline_model.state_dict(), filename)
+            self.bonsai_model = params.create_model_from_safe_tensors(temp_dir, self.config)
 
         self.bonsai_model.eval()
         self.baseline_model.eval()
 
-        self.batch_size = 1
+        self.batch_size = 2
         self.image_shape = (self.batch_size, 3, 224, 224)
 
     def test_input_embeddings(self):
         torch_emb = self.baseline_model.embeddings
         nnx_emb = self.bonsai_model.embeddings
 
-        key = jax.random.PRNGKey(0)
-        jx = jax.random.normal(key, self.image_shape, dtype=jnp.float32)
-
-        np_x = np.asarray(jax.device_get(jx))
-        tx = torch.tensor(np_x, dtype=torch.float32)
+        jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
+        tx = torch.tensor(jx, dtype=torch.float32)
 
         with torch.inference_mode():
             ty = torch_emb(tx)
         jy = nnx_emb(jx)
 
-        np_y = np.asarray(jax.device_get(jy))
-        ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
-
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=1e-5)
+        np.testing.assert_allclose(jy, ty.detach().cpu().numpy(), rtol=1e-5, atol=1e-5)
 
     def test_first_layer(self):
         torch_emb = self.baseline_model.embeddings
@@ -68,10 +60,8 @@ class TestForwardPass(absltest.TestCase):
         torch_layer = self.baseline_model.layer[0]
         nnx_layer = self.bonsai_model.layer[0]
 
-        key = jax.random.PRNGKey(0)
-        jx = jax.random.normal(key, self.image_shape, dtype=jnp.float32)
-        np_x = np.asarray(jax.device_get(jx))
-        tx = torch.tensor(np_x, dtype=torch.float32)
+        jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
+        tx = torch.tensor(jx, dtype=torch.float32)
 
         jhs = nnx_emb(jx)
         jpe = nnx_pe(jx)
@@ -83,42 +73,27 @@ class TestForwardPass(absltest.TestCase):
             ty = torch_layer(ths, position_embeddings=tpe)
         jy = nnx_layer(jhs, jpe)
 
-        np_y = np.asarray(jax.device_get(jy))
-        ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
-
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=3e-3)
+        np.testing.assert_allclose(jy, ty.detach().cpu().numpy(), rtol=1e-5, atol=3e-3)
 
     def test_last_hidden_state(self):
-        key = jax.random.PRNGKey(0)
-        jx = jax.random.normal(key, self.image_shape, dtype=jnp.float32)
-
-        np_x = np.asarray(jax.device_get(jx))
-        tx = torch.tensor(np_x, dtype=torch.float32)
+        jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
+        tx = torch.tensor(jx, dtype=torch.float32)
 
         with torch.inference_mode():
             ty = self.baseline_model(tx).last_hidden_state
         jy = self.bonsai_model(jx)["last_hidden_state"]
 
-        np_y = np.asarray(jax.device_get(jy))
-        ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
-
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=3e-2)
+        np.testing.assert_allclose(jy, ty.detach().cpu().numpy(), rtol=1e-5, atol=3e-2)
 
     def test_pooled_output_embeddings(self):
-        key = jax.random.PRNGKey(0)
-        jx = jax.random.normal(key, self.image_shape, dtype=jnp.float32)
-
-        np_x = np.asarray(jax.device_get(jx))
-        tx = torch.tensor(np_x, dtype=torch.float32)
+        jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
+        tx = torch.tensor(jx, dtype=torch.float32)
 
         with torch.inference_mode():
             ty = self.baseline_model(tx).pooler_output
         jy = self.bonsai_model(jx)["pooler_output"]
 
-        np_y = np.asarray(jax.device_get(jy))
-        ty_bonsai = torch.tensor(np_y, dtype=torch.float32)
-
-        torch.testing.assert_close(ty_bonsai, ty, rtol=1e-5, atol=2e-2)
+        np.testing.assert_allclose(jy, ty.detach().cpu().numpy(), rtol=1e-5, atol=2e-2)
 
 
 if __name__ == "__main__":
