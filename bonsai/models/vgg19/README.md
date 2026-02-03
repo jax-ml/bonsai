@@ -1,6 +1,6 @@
 ## VGG-19 in JAX
 
-This directory contains a pure JAX implementation of the [VGG-19](https://huggingface.co/keras/vgg_19_imagenet) model, using the Flax NNX API. 
+This directory contains a pure JAX implementation of the [VGG-19](https://huggingface.co/keras/vgg_19_imagenet) model, using the Flax NNX API.
 
 ## Model Configuration Support Status
 

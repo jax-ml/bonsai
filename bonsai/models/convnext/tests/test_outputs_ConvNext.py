@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 import torch
 from absl.testing import absltest, parameterized
 from huggingface_hub import snapshot_download
@@ -31,13 +32,13 @@ class TestModuleForwardPasses(absltest.TestCase):
         nnx_emb = self.bonsai_model.embedding_layer
 
         jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
-        tx = torch.tensor(jx).permute(0, 3, 1, 2)
+        tx = torch.tensor(np.asarray(jx)).permute(0, 3, 1, 2)
 
         with torch.no_grad():
             ty = torch_emb(tx)
         jy = nnx_emb(jx)
 
-        torch.testing.assert_close(torch.tensor(jy).permute(0, 3, 1, 2), ty, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(torch.tensor(np.asarray(jy)).permute(0, 3, 1, 2), ty, rtol=1e-5, atol=1e-5)
 
     def test_blocks_isolated(self):
         jax_model = self.bonsai_model
@@ -50,21 +51,23 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         for stage_idx, (stage_blocks, h, dim) in enumerate(zip(jax_model.stages, stage_img_sizes, stage_dims)):
             jx_input = jax.random.normal(key, (1, h, h, dim), dtype=jnp.float32)
-            tx_input = torch.tensor(jx_input).permute(0, 3, 1, 2)
+            tx_input = torch.tensor(np.asarray(jx_input)).permute(0, 3, 1, 2)
             for block_idx in range(len(stage_blocks.layers)):
                 j_out = stage_blocks.layers[block_idx](jx_input, rngs=key, train=False)
                 with torch.no_grad():
                     t_out = torch_model.encoder.stages[stage_idx].layers[block_idx](tx_input)
 
-                torch.testing.assert_close(torch.tensor(j_out), t_out.permute(0, 2, 3, 1), rtol=5e-4, atol=5e-4)
+                torch.testing.assert_close(
+                    torch.tensor(np.asarray(j_out)), t_out.permute(0, 2, 3, 1), rtol=5e-4, atol=5e-4
+                )
 
     def test_full(self):
         jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
-        tx = torch.tensor(jx).permute(0, 3, 1, 2)
+        tx = torch.tensor(np.asarray(jx)).permute(0, 3, 1, 2)
         with torch.no_grad():
             ty = self.baseline_model(tx).logits
         jy = self.bonsai_model(jx, rngs=jax.random.key(0))
-        torch.testing.assert_close(torch.tensor(jy), ty)
+        torch.testing.assert_close(torch.tensor(np.asarray(jy)), ty)
 
 
 class TestModuleFullOtherConfigs(parameterized.TestCase):
@@ -80,13 +83,13 @@ class TestModuleFullOtherConfigs(parameterized.TestCase):
 
         image_shape = (2, 224, 224, 3)
         jx = jax.random.normal(jax.random.key(0), image_shape, dtype=jnp.float32)
-        tx = torch.tensor(jx).permute(0, 3, 1, 2)
+        tx = torch.tensor(np.asarray(jx)).permute(0, 3, 1, 2)
 
         with torch.no_grad():
             ty = baseline_model(tx).logits
         jy = bonsai_model(jx, rngs=jax.random.key(0))
 
-        torch.testing.assert_close(torch.tensor(jy), ty, rtol=2e-5, atol=2e-5)
+        torch.testing.assert_close(torch.tensor(np.asarray(jy)), ty, rtol=2e-5, atol=2e-5)
 
 
 if __name__ == "__main__":
