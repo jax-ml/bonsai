@@ -293,9 +293,7 @@ class Hiera(nnx.Module):
 
     def _get_pos_embed(self, hw: tuple[int, int]) -> jnp.ndarray:
         h, w = hw
-        pos_embed = jax.image.resize(
-            self.pos_embed[...], shape=(1, self.pos_embed.shape[1], h, w), method="bicubic"
-        )
+        pos_embed = jax.image.resize(self.pos_embed[...], shape=(1, self.pos_embed.shape[1], h, w), method="bicubic")
 
         tile_factors = [1, h // self.pos_embed_window.shape[2], w // self.pos_embed_window.shape[3]]
         window_embed = jnp.tile(self.pos_embed_window[...], tile_factors)
