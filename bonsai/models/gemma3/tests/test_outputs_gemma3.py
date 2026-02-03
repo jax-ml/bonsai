@@ -63,9 +63,9 @@ class TestModuleForwardPasses(absltest.TestCase):
         cls.bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, cls.bonsai_config, mesh=cls.mesh)
 
     def _upgrade_dtypes(self):
-        self.bonsai_model.embed_tokens.weight.embedding.value = (
-            self.bonsai_model.embed_tokens.weight.embedding.value.astype(jnp.float32)
-        )
+        self.bonsai_model.embed_tokens.weight.embedding[...] = self.bonsai_model.embed_tokens.weight.embedding[
+            ...
+        ].astype(jnp.float32)
         return
 
     def _make_torch_input(self):
@@ -320,8 +320,8 @@ class TestModuleForwardPasses(absltest.TestCase):
         tm = self.torch_model.model.language_model.embed_tokens
         nm = self.bonsai_model.embed_tokens
 
-        torch.testing.assert_close(torch.tensor(nm.weight.embedding.value), tm.weight.cpu())
-        torch.testing.assert_close(torch.tensor(nm.embed_scale), tm.embed_scale.cpu())
+        np.testing.assert_allclose(nm.weight.embedding[...], tm.weight.detach().cpu().numpy())
+        np.testing.assert_allclose(nm.embed_scale[...], tm.embed_scale.detach().cpu().numpy())
 
         t_inputs = self._make_torch_input()
         n_inputs = self._make_bonsai_input(t_inputs)
@@ -369,7 +369,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         nx = tx.detach().cpu().numpy()
 
         np.testing.assert_allclose(
-            nm.q_norm.scale.value, tm.q_norm.weight.detach().cpu().numpy(), err_msg="q_norm weights"
+            nm.q_norm.scale[...], tm.q_norm.weight.detach().cpu().numpy(), err_msg="q_norm weights"
         )
 
         ty = tm.q_norm(tx)
@@ -393,19 +393,19 @@ class TestModuleForwardPasses(absltest.TestCase):
         rt = self.bonsai_config.text_config.rope_slide_theta
         js, jc = modeling._generate_pos_embeddings(jp, dim, rope_theta=rt, factor=1.0)
         rot_emb = self.torch_model.model.language_model.rotary_emb_local
-        tc, ts = rot_emb(hidden_states, torch.tensor(jp))
+        tc, ts = rot_emb(hidden_states, torch.from_numpy(np.asarray(jp)))
         tc, ts = tc[:, :, : dim // 2], ts[:, :, : dim // 2]
-        torch.testing.assert_close(torch.tensor(js), ts)
-        torch.testing.assert_close(torch.tensor(jc), tc)
+        np.testing.assert_allclose(js, ts.detach().cpu().numpy(), rtol=1e-5, atol=1e-5)
+        np.testing.assert_allclose(jc, tc.detach().cpu().numpy(), rtol=1e-5, atol=1e-5)
 
         # global uses linear
         rt = self.bonsai_config.text_config.rope_full_theta
         js, jc = modeling._generate_pos_embeddings(jp, dim, rope_theta=rt, factor=8.0)
         rot_emb = self.torch_model.model.language_model.rotary_emb
-        tc, ts = rot_emb(hidden_states, torch.tensor(jp))
+        tc, ts = rot_emb(hidden_states, torch.from_numpy(np.asarray(jp)))
         tc, ts = tc[:, :, : dim // 2], ts[:, :, : dim // 2]
-        torch.testing.assert_close(torch.tensor(js), ts)
-        torch.testing.assert_close(torch.tensor(jc), tc)
+        np.testing.assert_allclose(js, ts.detach().cpu().numpy(), rtol=1e-5, atol=1e-5)
+        np.testing.assert_allclose(jc, tc.detach().cpu().numpy(), rtol=1e-5, atol=1e-5)
 
     @unittest.skipIf(SKIP_INTERMEDIATE_TESTS, "Done")
     def test_text_decoder_layers(self):
@@ -462,7 +462,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         ty = tm.multi_modal_projector(tx)
         ny = nm(nx)
 
-        torch.testing.assert_close(torch.tensor(ny), ty, rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=1e-4, atol=1e-4)
 
     @unittest.skipIf(SKIP_INTERMEDIATE_TESTS, "Done")
     def test_text_image_merge(self):
@@ -633,7 +633,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         ny = nm(n_text, n_img, cache, segment_ids, n_tti)
         ty = tm(**t_inputs)
 
-        torch.testing.assert_close(torch.tensor(ny), ty.logits, rtol=5e-2, atol=5e-2)
+        np.testing.assert_allclose(ny, ty.logits.detach().cpu().numpy(), rtol=5e-2, atol=5e-2)
 
     @unittest.skip("TODO")
     def test_full_batched(self):
@@ -658,8 +658,8 @@ class TestModuleForwardPasses(absltest.TestCase):
         ny = nm(n_text, n_img, cache, segment_ids, n_tti)
         ty = tm(**t_inputs)
 
-        torch.testing.assert_close(torch.tensor(ny)[0:1], ty.logits, rtol=5e-2, atol=5e-2)
-        torch.testing.assert_close(torch.tensor(ny)[1:2], ty.logits, rtol=5e-2, atol=5e-2)
+        np.testing.assert_allclose(ny[0:1], ty.logits.detach().cpu().numpy(), rtol=5e-2, atol=5e-2)
+        np.testing.assert_allclose(ny[1:2], ty.logits.detach().cpu().numpy(), rtol=5e-2, atol=5e-2)
 
         raise NotImplementedError("Need to get more complex batched inputs working")
         # When doing batching, prompts have >= 0 images (not all same) -> change batched_merge_modalities
