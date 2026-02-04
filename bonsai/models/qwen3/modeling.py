@@ -29,7 +29,7 @@ ShardingSpec = PartitionSpec
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
-class ShardingCfg:
+class ShardConfig:
     emb_vd: ShardingSpec
     emb_dv: ShardingSpec
     q_weight_ndh: ShardingSpec
@@ -45,7 +45,7 @@ class ShardingCfg:
     @staticmethod
     def no_sharding():
         """Configuration with no sharding (all None)."""
-        return ShardingCfg(
+        return ShardConfig(
             emb_vd=P(None, None),
             emb_dv=P(None, None),
             q_weight_ndh=P(None, None, None),
@@ -61,7 +61,7 @@ class ShardingCfg:
 
     @staticmethod
     def default():
-        return ShardingCfg(
+        return ShardConfig(
             emb_vd=P("tp", "fsdp"),
             emb_dv=P("fsdp", "tp"),
             q_weight_ndh=P("tp", "fsdp", None),
@@ -90,12 +90,12 @@ class ModelConfig:
     local_rope_theta: float
     norm_eps: float
     tie_word_embeddings: bool
-    shd_cfg: ShardingCfg = ShardingCfg.no_sharding()
+    shd_cfg: ShardConfig = ShardConfig.no_sharding()
 
     @classmethod
     def _from_param(cls, use_sharding: bool, **kwargs):
         if use_sharding:
-            kwargs["shd_cfg"] = ShardingCfg.default()
+            kwargs["shd_cfg"] = ShardConfig.default()
         return cls(**kwargs)
 
     @classmethod
