@@ -26,7 +26,7 @@ from etils import epath
 from flax import nnx
 
 from bonsai.models.gemma3 import modeling as model_lib
-from bonsai.utils.params import stoi, safetensors_key_to_bonsai_key, assign_weights_from_eval_shape
+from bonsai.utils.params import stoi, map_to_bonsai_key, assign_weights_from_eval_shape
 
 
 def _get_key_and_transform_mapping():
@@ -201,7 +201,7 @@ def create_gemma3_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig):
 
     mapping = _get_key_and_transform_mapping()
     for st_key, tensor in tensor_dict.items():
-        jax_key, transform = safetensors_key_to_bonsai_key(mapping, st_key)
+        jax_key, transform = map_to_bonsai_key(mapping, st_key)
         if jax_key is None:
             continue
         keys = [stoi(k) for k in jax_key.split(r"\.")]

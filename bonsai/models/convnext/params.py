@@ -3,7 +3,7 @@ from etils import epath
 from flax import nnx
 
 from bonsai.models.convnext import modeling as model_lib
-from bonsai.utils.params import stoi, safetensors_key_to_bonsai_key, assign_weights_from_eval_shape
+from bonsai.utils.params import stoi, map_to_bonsai_key, assign_weights_from_eval_shape
 
 
 def _get_key_and_transform_mapping():
@@ -114,7 +114,7 @@ def create_convnext_from_pretrained(
 
     conversion_errors = []
     for h5_key, tensor in state_dict.items():
-        jax_key, transform = safetensors_key_to_bonsai_key(mapping, h5_key)
+        jax_key, transform = map_to_bonsai_key(mapping, h5_key)
         if jax_key is None:
             continue
 

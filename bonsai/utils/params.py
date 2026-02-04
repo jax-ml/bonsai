@@ -21,11 +21,16 @@ import safetensors
 from etils import epath
 from flax import nnx
 import logging
+from typing import Any, TypeAlias
 
-# TODO: Lets put type information in this file and improve docstrings
+ModelType: TypeAlias = Any
+ModelConfigType: TypeAlias = Any
+TransformValueType: TypeAlias = None | tuple[tuple[int, ...], tuple[int, ...] | None, bool]
+TransformType: TypeAlias = Any  # Enum with values of type TransformValueType
+KeyMapType: TypeAlias = tuple[str, TransformType]
 
 
-def safetensors_key_to_bonsai_key(mapping, source_key):
+def map_to_bonsai_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapType | tuple[None, None]:
     """Map a safetensors key to exactly one JAX key & transform, else warn/error."""
     subs = [
         (re.sub(pat, repl, source_key), transform)
@@ -41,16 +46,25 @@ def safetensors_key_to_bonsai_key(mapping, source_key):
     return subs[0]
 
 
-def stoi(s):
+def stoi(s: str) -> int | str:
+    """Convert a string to an int if possible, otherwise return the string."""
     try:
         return int(s)
     except ValueError:
         return s
 
 
-# NOTE: This assumes that the tensors contain the actual values, not just shapes.
-def assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
+def assign_weights(
+    keys: list[str],
+    tensor: jnp.ndarray,
+    state_dict: dict,
+    st_key: str,
+    transform: TransformType,
+    sharding_dict: dict | None,
+):
+    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
+    Assumes that the state_dict values are of type Array.
+    """
     key, *rest = keys
     if not rest:
         if transform is not None:
@@ -73,10 +87,12 @@ def assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
         assign_weights(rest, tensor, state_dict[key], st_key, transform, next_sharding)
 
 
-# NOTE: This is the newer one
-def assign_weights_from_eval_shape(keys, tensor, state_dict, st_key, transform):
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
-    # TODO: This assumes that state_dict starts with ShapeDtypeStruct's, not actual values.
+def assign_weights_from_eval_shape(
+    keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType
+):
+    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
+    Assumes that the state_dict values are of type ShapeDtypeStruct.
+    """
     key, *rest = keys
     if not rest:
         if transform is not None:
@@ -99,16 +115,15 @@ def assign_weights_from_eval_shape(keys, tensor, state_dict, st_key, transform):
 
 
 def create_model_from_safe_tensors(
-    file_dir: str, model_cls, cfg, key_mapping: dict, mesh: jax.sharding.Mesh | None = None
-):
+    file_dir: str, model_cls: ModelType, cfg: ModelConfigType, key_mapping: dict, mesh: jax.sharding.Mesh | None = None
+) -> ModelType:
     """
-    TODO: This isn't complete yet.
     Load tensors from the safetensors file and create a model (memory-optimized).
-
-    Note that this does not handle all model transfers, but gets the main parameters from key_mapping.
-
+    We currently define this separately for each model, but this may be a useful tool later
+    NOTE: This is not yet implemented.
     """
     raise NotImplementedError("This is in progress.")
+
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:
         raise ValueError(f"No safetensors found in {file_dir}")
@@ -123,7 +138,7 @@ def create_model_from_safe_tensors(
             for torch_key in sf.keys():
                 tensor = jnp.array(sf.get_tensor(torch_key))
 
-                jax_key, transform = safetensors_key_to_bonsai_key(key_mapping, torch_key)
+                jax_key, transform = map_to_bonsai_key(key_mapping, torch_key)
                 if jax_key is None:
                     continue
                 keys = [stoi(k) for k in jax_key.split(".")]

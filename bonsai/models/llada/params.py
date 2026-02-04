@@ -22,7 +22,7 @@ from flax import nnx
 import gc
 
 from bonsai.models.llada import modeling as model_lib
-from bonsai.utils.params import stoi, safetensors_key_to_bonsai_key, assign_weights
+from bonsai.utils.params import stoi, map_to_bonsai_key, assign_weights
 
 
 def _get_key_and_transform_mapping():
@@ -71,7 +71,7 @@ def create_llada_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, m
         with safetensors.safe_open(f, framework="numpy") as sf:
             for torch_key in sf.keys():
                 tensor = jnp.array(sf.get_tensor(torch_key))
-                jax_key, transform = safetensors_key_to_bonsai_key(mapping, torch_key)
+                jax_key, transform = map_to_bonsai_key(mapping, torch_key)
                 if jax_key is None:
                     continue
                 keys = [stoi(k) for k in jax_key.split(r"\.")]
