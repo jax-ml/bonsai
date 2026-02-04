@@ -391,24 +391,5 @@ class TestModuleForwardPasses(absltest.TestCase):
         self._check_batched_logits(torch_inputs["left_pads"], torch_logits, nnx_logits)
 
 
-class TestSharding(absltest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        model_name: str = "Qwen/Qwen3-0.6B"
-
-        ## models
-        cls.bonsai_config = modeling.ModelConfig.qwen3_0_6b(use_sharding=True)
-        model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
-        cls.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
-        jax.set_mesh(cls.mesh)
-        cls.nnx_model = params.create_model_from_safe_tensors(model_ckpt_path, cls.bonsai_config)
-
-    def test_sharding(self):
-        print(self.nnx_model.layers[0].attn.q_proj.w.sharding)
-        print(self.nnx_model.layers[0].attn.q_proj.w.dtype)
-        pass
-
-
 if __name__ == "__main__":
     absltest.main()
