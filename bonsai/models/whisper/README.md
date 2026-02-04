@@ -20,4 +20,3 @@ Remaining:
 2. Add chunking to deal with larger audio segments.
 3. Create notebook and `run_model.py` file to demonstrate how to use the model and it's efficiency.
 4. Implement sharding to improve performance with larger models.
-
