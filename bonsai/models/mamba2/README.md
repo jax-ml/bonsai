@@ -54,4 +54,3 @@ We welcome contributions! You can contribute to this model via the following:
 * **Paper**: [Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality](https://arxiv.org/abs/2405.21060) (Dao & Gu, ICML 2024)
 * **Reference PyTorch Implementation**: [state-spaces/mamba](https://github.com/state-spaces/mamba)
 * **Original JAX Port**: [CosmoNaught/mamba2-jax](https://github.com/CosmoNaught/mamba2-jax)
-
