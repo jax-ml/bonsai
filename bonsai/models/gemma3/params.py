@@ -19,32 +19,29 @@ Add functions to load or convert pretrained checkpoints and to return
 default configuration values used by the model implementation.
 """
 
-import logging
-import re
 from enum import Enum
 
-import jax
 import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
 
 from bonsai.models.gemma3 import modeling as model_lib
-
-
-class Transform(Enum):
-    """
-    Specifies default transformation types for model parameter names.
-    """
-
-    DEFAULT = None
-    BIAS = None
-    LINEAR = ((1, 0), None)
-    CONV2D = ((2, 3, 1, 0), None)
-    EMBED = None
+from bonsai.utils.params import stoi, safetensors_key_to_bonsai_key, assign_weights_from_eval_shape
 
 
 def _get_key_and_transform_mapping():
-    # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
+    class Transform(Enum):
+        """
+        Specifies default transformation types for model parameter names.
+        """
+
+        DEFAULT = None
+        BIAS = None
+        LINEAR = ((1, 0), None, False)
+        CONV2D = ((2, 3, 1, 0), None, False)
+        EMBED = None
+
+    # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule, reshape_first)).
     return {
         r"^language_model\.model\.embed_tokens\.weight$": (
             r"embed_tokens\.weight\.embedding",
@@ -182,52 +179,8 @@ def _get_key_and_transform_mapping():
     }
 
 
-def _st_key_to_jax_key(mapping, source_key):
-    """Map a safetensors key to exactly one JAX key & transform, else warn/error."""
-    subs = [
-        (re.sub(pat, repl, source_key), transform)
-        for pat, (repl, transform) in mapping.items()
-        if re.match(pat, source_key)
-    ]
-    if not subs:
-        logging.warning(f"No mapping found for key: {source_key!r}")
-        return None, None
-    if len(subs) > 1:
-        keys = [s for s, _ in subs]
-        raise ValueError(f"Multiple mappings found for {source_key!r}: {keys}")
-    return subs[0]
-
-
-def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
-    key, *rest = keys
-    if not rest:
-        if transform is not None:
-            permute, reshape = transform
-            if permute:
-                tensor = tensor.transpose(permute)
-            if reshape:
-                tensor = tensor.reshape(reshape)
-        if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        if sharding_dict is not None:
-            state_dict[key] = jax.device_put(tensor, sharding_dict[key])
-        else:
-            state_dict[key] = jax.device_put(tensor)
-    else:
-        next_sharding = sharding_dict[key] if sharding_dict is not None else None
-        _assign_weights(rest, tensor, state_dict[key], st_key, transform, next_sharding)
-
-
-def _stoi(s):
-    try:
-        return int(s)
-    except ValueError:
-        return s
-
-
 # TODO: Update to optimize parameter loading for larger models
-def create_gemma3_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, mesh: jax.sharding.Mesh | None = None):
+def create_gemma3_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig):
     """
     Load safetensor weights from a file, then convert & merge into a flax.nnx ViT model.
 
@@ -242,19 +195,18 @@ def create_gemma3_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, 
     for f in files:
         tensor_dict |= safetensors.load_file(f)
 
-    gemma3 = model_lib.Gemma3Model(cfg, rngs=nnx.Rngs(0))
+    gemma3 = nnx.eval_shape(lambda: model_lib.Gemma3Model(cfg, rngs=nnx.Rngs(0)))
     graph_def, abs_state = nnx.split(gemma3)
     jax_state = nnx.to_pure_dict(abs_state)
-    sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh)) if mesh is not None else None
 
     mapping = _get_key_and_transform_mapping()
     for st_key, tensor in tensor_dict.items():
-        jax_key, transform = _st_key_to_jax_key(mapping, st_key)
+        jax_key, transform = safetensors_key_to_bonsai_key(mapping, st_key)
         if jax_key is None:
             continue
-        keys = [_stoi(k) for k in jax_key.split(r"\.")]
+        keys = [stoi(k) for k in jax_key.split(r"\.")]
         try:
-            _assign_weights(keys, tensor, jax_state, st_key, transform.value, sharding)
+            assign_weights_from_eval_shape(keys, tensor, jax_state, st_key, transform.value)
         except KeyError as e:
             print(f"Key error: {keys} at {e}")
         except ValueError as e:

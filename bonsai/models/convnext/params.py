@@ -1,13 +1,9 @@
-import logging
-import re
-
 import h5py
-import jax
-import jax.numpy as jnp
 from etils import epath
 from flax import nnx
 
 from bonsai.models.convnext import modeling as model_lib
+from bonsai.utils.params import stoi, safetensors_key_to_bonsai_key, assign_weights_from_eval_shape
 
 
 def _get_key_and_transform_mapping():
@@ -86,51 +82,9 @@ def _get_key_and_transform_mapping():
     return mapping
 
 
-def _h5_key_to_jax_key(mapping, source_key):
-    """Map a h5 key to exactly one JAX key & transform, else warn/error."""
-    subs = [
-        (re.sub(pat, repl, source_key), transform)
-        for pat, (repl, transform) in mapping.items()
-        if re.match(pat, source_key)
-    ]
-    if not subs:
-        logging.warning(f"No mapping found for key: {source_key!r}")
-        return None, None
-    if len(subs) > 1:
-        keys = [s for s, _ in subs]
-        raise ValueError(f"Multiple mappings found for {source_key!r}: {keys}")
-    return subs[0]
-
-
-def _assign_weights(keys, tensor, state_dict, st_key, transform):
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
-    key, *rest = keys
-    if not rest:
-        if transform is not None:
-            permute, reshape = transform
-            if permute:
-                tensor = tensor.transpose(permute)
-            if reshape:
-                tensor = tensor.reshape(reshape)
-        if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = jnp.array(tensor)
-    else:
-        _assign_weights(rest, tensor, state_dict[key], st_key, transform)
-
-
-def _stoi(s):
-    try:
-        return int(s)
-    except ValueError:
-        return s
-
-
 def create_convnext_from_pretrained(
     file_dir: str,
     cfg: model_lib.ModelConfig,
-    *,
-    mesh: jax.sharding.Mesh | None = None,
 ):
     """
     Load h5 weights from a file, then convert & merge into a flax.nnx ResNet model.
@@ -152,7 +106,7 @@ def create_convnext_from_pretrained(
                 )
             )
 
-    model = model_lib.ConvNeXt(cfg=cfg, rngs=nnx.Rngs(params=0))
+    model = nnx.eval_shape(lambda: model_lib.ConvNeXt(cfg=cfg, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(model)
     jax_state = nnx.to_pure_dict(abs_state)
 
@@ -160,13 +114,13 @@ def create_convnext_from_pretrained(
 
     conversion_errors = []
     for h5_key, tensor in state_dict.items():
-        jax_key, transform = _h5_key_to_jax_key(mapping, h5_key)
+        jax_key, transform = safetensors_key_to_bonsai_key(mapping, h5_key)
         if jax_key is None:
             continue
 
-        keys = [_stoi(k) for k in jax_key.split(".")]
+        keys = [stoi(k) for k in jax_key.split(".")]
         try:
-            _assign_weights(keys, tensor, jax_state, h5_key, transform)
+            assign_weights_from_eval_shape(keys, tensor, jax_state, h5_key, transform)
         except Exception as e:
             full_jax_key = ".".join([str(k) for k in keys])
             conversion_errors.append(f"Failed to assign '{h5_key}' to '{full_jax_key}': {type(e).__name__}: {e}")
@@ -174,11 +128,5 @@ def create_convnext_from_pretrained(
     if conversion_errors:
         full_error_log = "\n".join(conversion_errors)
         raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
-
-    if mesh is not None:
-        sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh))
-        jax_state = jax.device_put(jax_state, sharding)
-    else:
-        jax_state = jax.device_put(jax_state, jax.devices()[0])
 
     return nnx.merge(graph_def, jax_state)

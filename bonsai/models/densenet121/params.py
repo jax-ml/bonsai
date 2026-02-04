@@ -12,16 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
-import re
 
 import h5py
-import jax
 import numpy as np
 from etils import epath
 from flax import nnx
 
 from bonsai.models.densenet121 import modeling as model_lib
+from bonsai.utils.params import stoi, safetensors_key_to_bonsai_key, assign_weights_from_eval_shape
 
 
 def _load_h5_file(file_path: str):
@@ -97,51 +95,7 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     return mapping
 
 
-def _st_key_to_jax_key(mapping, source_key):
-    """Map a h5 key to exactly one JAX key & transform, else warn/error."""
-    subs = [
-        (re.sub(pat, repl, source_key), transform)
-        for pat, (repl, transform) in mapping.items()
-        if re.match(pat, source_key)
-    ]
-    if not subs:
-        logging.warning(f"No mapping found for key: {source_key!r}")
-        return None, None
-    if len(subs) > 1:
-        keys = [s for s, _ in subs]
-        raise ValueError(f"Multiple mappings found for {source_key!r}: {keys}")
-    return subs[0]
-
-
-def _assign_weights(keys, tensor, state_dict, st_key, transform):
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
-    key, *rest = keys
-    if not rest:
-        if transform is not None:
-            permute, reshape = transform
-            if permute:
-                tensor = tensor.transpose(permute)
-            if reshape:
-                tensor = tensor.reshape(reshape)
-        if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = tensor
-    else:
-        _assign_weights(rest, tensor, state_dict[key], st_key, transform)
-
-
-def _stoi(s):
-    try:
-        return int(s)
-    except ValueError:
-        return s
-
-
-def create_model_from_h5(
-    file_dir: str,
-    cfg: model_lib.ModelConfig,
-    mesh: jax.sharding.Mesh | None = None,
-) -> model_lib.DenseNet:
+def create_model_from_h5(file_dir: str, cfg: model_lib.ModelConfig) -> model_lib.DenseNet:
     """
     Load h5 weights from a file, then convert & merge into a flax.nnx DenseNet121 model.
 
@@ -160,16 +114,10 @@ def create_model_from_h5(
 
     mapping = _get_key_and_transform_mapping(cfg)
     for st_key, tensor in tensor_dict.items():
-        jax_key, transform = _st_key_to_jax_key(mapping, st_key)
+        jax_key, transform = safetensors_key_to_bonsai_key(mapping, st_key)
         if jax_key is None:
             continue
-        keys = [_stoi(k) for k in jax_key.split(".")]
-        _assign_weights(keys, tensor, state_dict, st_key, transform)
-
-    if mesh is not None:
-        sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh))
-        state_dict = jax.device_put(state_dict, sharding)
-    else:
-        state_dict = jax.device_put(state_dict, jax.devices()[0])
+        keys = [stoi(k) for k in jax_key.split(".")]
+        assign_weights_from_eval_shape(keys, tensor, state_dict, st_key, transform)
 
     return nnx.merge(graph_def, state_dict)

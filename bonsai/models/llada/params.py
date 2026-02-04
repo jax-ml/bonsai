@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
-import re
 from enum import Enum
 
 import jax
@@ -24,17 +22,16 @@ from flax import nnx
 import gc
 
 from bonsai.models.llada import modeling as model_lib
+from bonsai.utils.params import stoi, safetensors_key_to_bonsai_key, assign_weights
 
 
 def _get_key_and_transform_mapping():
     class Transform(Enum):
-        """Specifies default transformation types for model parameter names."""
-
         EMBED = None
         NORM = None
-        LINEAR = ((1, 0), None)
+        LINEAR = ((1, 0), None, False)
 
-    # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
+    # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule, reshape_first)).
     return {
         r"^model\.transformer\.blocks\.(\d+)\.attn_norm\.weight$": (r"blocks\.\1\.attn_norm\.weight", Transform.NORM),
         r"^model\.transformer\.blocks\.(\d+)\.attn_out\.weight$": (r"blocks\.\1\.attn_out\.kernel", Transform.LINEAR),
@@ -51,50 +48,7 @@ def _get_key_and_transform_mapping():
     }
 
 
-def _st_key_to_jax_key(mapping, source_key):
-    """Map a safetensors key to exactly one JAX key & transform, else warn/error."""
-    subs = [
-        (re.sub(pat, repl, source_key), transform)
-        for pat, (repl, transform) in mapping.items()
-        if re.match(pat, source_key)
-    ]
-    if not subs:
-        logging.warning(f"No mapping found for key: {source_key!r}")
-        return None, None
-    if len(subs) > 1:
-        keys = [s for s, _ in subs]
-        raise ValueError(f"Multiple mappings found for {source_key!r}: {keys}")
-    return subs[0]
-
-
-def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
-    key, *rest = keys
-    if not rest:
-        if transform is not None:
-            permute, reshape = transform
-            if permute:
-                tensor = tensor.transpose(permute)
-            if reshape:
-                tensor = tensor.reshape(reshape)
-        if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        if sharding_dict is not None:
-            state_dict[key] = jax.device_put(tensor, sharding_dict[key])
-        else:
-            state_dict[key] = jax.device_put(tensor)
-    else:
-        next_sharding = sharding_dict[key] if sharding_dict is not None else None
-        _assign_weights(rest, tensor, state_dict[key], st_key, transform, next_sharding)
-
-
-def _stoi(s):
-    try:
-        return int(s)
-    except ValueError:
-        return s
-
-
+# TODO: use nnx.eval_shape
 def create_llada_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, mesh: jax.sharding.Mesh | None = None):
     """
     Load safetensor weights from a file, then convert & merge into a flax.nnx model.
@@ -117,12 +71,12 @@ def create_llada_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig, *, m
         with safetensors.safe_open(f, framework="numpy") as sf:
             for torch_key in sf.keys():
                 tensor = jnp.array(sf.get_tensor(torch_key))
-                jax_key, transform = _st_key_to_jax_key(mapping, torch_key)
+                jax_key, transform = safetensors_key_to_bonsai_key(mapping, torch_key)
                 if jax_key is None:
                     continue
-                keys = [_stoi(k) for k in jax_key.split(r"\.")]
+                keys = [stoi(k) for k in jax_key.split(r"\.")]
                 try:
-                    _assign_weights(keys, tensor, jax_state, torch_key, transform.value, sharding)
+                    assign_weights(keys, tensor, jax_state, torch_key, transform.value, sharding)
                 except Exception as e:
                     full_jax_key = ".".join([str(k) for k in keys])
                     conversion_errors.append(

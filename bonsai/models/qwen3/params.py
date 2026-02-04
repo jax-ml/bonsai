@@ -13,21 +13,18 @@
 # limitations under the License.
 
 import gc
-import re
 from enum import Enum
 
-import jax
 import safetensors
 from etils import epath
 from flax import nnx
 
 from bonsai.models.qwen3 import modeling as model_lib
+from bonsai.utils.params import stoi, safetensors_key_to_bonsai_key, assign_weights_from_eval_shape
 
 
 def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     class Transform(Enum):
-        """Transformations for model parameters"""
-
         BIAS = None
         LINEAR = ((1, 0), None, False)
         EMBED = None
@@ -61,51 +58,7 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     }
 
 
-def _torch_key_to_jax_key(mapping, source_key):
-    subs = [
-        (re.sub(pat, repl, source_key), reshape)
-        for pat, (repl, reshape) in mapping.items()
-        if re.match(pat, source_key)
-    ]
-    if len(subs) != 1:
-        raise ValueError(f"Only one key should be found: {subs[0]}")
-    return subs[0]
-
-
-def _assign_weights(keys, tensor, state_dict, st_key, transform, sharding_dict):
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
-    key, *rest = keys
-    if not rest:
-        if transform is not None:
-            permute, reshape, reshape_first = transform
-            if reshape_first and reshape is not None:
-                tensor = tensor.reshape(reshape)
-            if permute:
-                tensor = tensor.transpose(permute)
-            if not reshape_first and reshape is not None:
-                tensor = tensor.reshape(reshape)
-        if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        # Only apply sharding if sharding_dict is provided
-        if sharding_dict is not None:
-            state_dict[key] = jax.device_put(tensor, sharding_dict[key])
-        else:
-            state_dict[key] = jax.device_put(tensor)
-    else:
-        next_sharding = sharding_dict[key] if sharding_dict is not None else None
-        _assign_weights(rest, tensor, state_dict[key], st_key, transform, next_sharding)
-
-
-def _stoi(s):
-    try:
-        return int(s)
-    except ValueError:
-        return s
-
-
-def create_model_from_safe_tensors(
-    file_dir: str, cfg: model_lib.ModelConfig, mesh: jax.sharding.Mesh | None = None
-) -> model_lib.Qwen3:
+def create_model_from_safe_tensors(file_dir: str, cfg: model_lib.ModelConfig) -> model_lib.Qwen3:
     """Load tensors from the safetensors file and create a Qwen3 model (memory-optimized)."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:
@@ -114,8 +67,6 @@ def create_model_from_safe_tensors(
     qwen3 = nnx.eval_shape(lambda: model_lib.Qwen3(cfg, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(qwen3)
     state_dict = nnx.to_pure_dict(abs_state)
-    # Only use sharding if mesh is provided
-    sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh)) if mesh is not None else None
 
     key_mapping = _get_key_and_transform_mapping(cfg)
     conversion_errors = []
@@ -124,12 +75,12 @@ def create_model_from_safe_tensors(
             for torch_key in sf.keys():
                 tensor = sf.get_tensor(torch_key)
 
-                jax_key, transform = _torch_key_to_jax_key(key_mapping, torch_key)
+                jax_key, transform = safetensors_key_to_bonsai_key(key_mapping, torch_key)
                 if jax_key is None:
                     continue
-                keys = [_stoi(k) for k in jax_key.split(".")]
+                keys = [stoi(k) for k in jax_key.split(".")]
                 try:
-                    _assign_weights(keys, tensor, state_dict, torch_key, transform.value, sharding)
+                    assign_weights_from_eval_shape(keys, tensor, state_dict, torch_key, transform.value)
                 except Exception as e:
                     full_jax_key = ".".join([str(k) for k in keys])
                     conversion_errors.append(

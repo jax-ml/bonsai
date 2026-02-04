@@ -15,32 +15,32 @@ from transformers.models.qwen3 import Qwen3ForCausalLM
 from bonsai.models.qwen3 import modeling, params
 from bonsai.models.qwen3.tests.run_model import tokenize
 
+jax.config.update("jax_default_matmul_precision", "float32")
+
 
 class TestModuleForwardPasses(absltest.TestCase):
-    def setUp(self):
-        super().setUp()
-        jax.config.update("jax_default_matmul_precision", "float32")
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
         model_name: str = "Qwen/Qwen3-0.6B"
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        cls.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         ## models
-        self.torch_model = Qwen3ForCausalLM.from_pretrained(model_name, dtype="auto").eval()
-        self.bonsai_config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
+        cls.torch_model = Qwen3ForCausalLM.from_pretrained(model_name, dtype="auto").eval()
+        cls.bonsai_config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
         model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
-        self.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
-        jax.set_mesh(self.mesh)
+        cls.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        jax.set_mesh(cls.mesh)
 
         # Cast JAX model to float32 for precision matching with PyTorch CPU
-        graph_def, state = nnx.split(
-            params.create_model_from_safe_tensors(model_ckpt_path, self.bonsai_config, self.mesh)
-        )
+        graph_def, state = nnx.split(params.create_model_from_safe_tensors(model_ckpt_path, cls.bonsai_config))
         state = jax.tree.map(lambda x: x.astype(jnp.float32) if isinstance(x, jax.Array) else x, state)
-        self.nnx_model = nnx.merge(graph_def, state)
+        cls.nnx_model = nnx.merge(graph_def, state)
 
-        self.batch_size = 32
-        self.num_input_tokens = 5
-        self.cache_size, self.gen_steps = 128, 10
-        self.relaxed_tol = 1e-3
+        cls.batch_size = 32
+        cls.num_input_tokens = 5
+        cls.cache_size, cls.gen_steps = 128, 10
+        cls.relaxed_tol = 1e-3
 
     def _check_batched_logits(self, left_pads: int, torch_logits: torch.Tensor, nnx_logits: jax.Array):
         """Checks logits from batched inputs"""
@@ -389,6 +389,25 @@ class TestModuleForwardPasses(absltest.TestCase):
         torch_logits = self.torch_model(**torch_inputs).logits
 
         self._check_batched_logits(torch_inputs["left_pads"], torch_logits, nnx_logits)
+
+
+class TestSharding(absltest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        model_name: str = "Qwen/Qwen3-0.6B"
+
+        ## models
+        cls.bonsai_config = modeling.ModelConfig.qwen3_0_6b(use_sharding=True)
+        model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
+        cls.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        jax.set_mesh(cls.mesh)
+        cls.nnx_model = params.create_model_from_safe_tensors(model_ckpt_path, cls.bonsai_config)
+
+    def test_sharding(self):
+        print(self.nnx_model.layers[0].attn.q_proj.w.sharding)
+        print(self.nnx_model.layers[0].attn.q_proj.w.dtype)
+        pass
 
 
 if __name__ == "__main__":
