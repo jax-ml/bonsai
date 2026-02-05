@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
 
+
 @dataclass
 class GATConfig:
     """Configuration class for Graph Attention Network (GAT)."""
-    
+
     in_features: int = field(metadata={"help": "Dimension of input node features"})
     hidden_features: int = field(default=8, metadata={"help": "Dimension of hidden features PER HEAD"})
     out_features: int = field(default=7, metadata={"help": "Dimension of output features (classes)"})
