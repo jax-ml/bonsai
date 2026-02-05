@@ -60,8 +60,8 @@ def run_model():
     batch_size, token_len = tokens.shape
 
     generate_steps = 32
-    model = params.create_model_from_safe_tensors(model_ckpt_path, config, mesh)
-    cache = model.init_cache(config, batch_size, token_len, generate_steps)
+    model = params.create_model_from_safe_tensors(model_ckpt_path, config)
+    cache = model.init_cache(config, batch_size, token_len, generate_steps, dtype=jnp.float32)
 
     key = jax.random.key(0)
     sampler = Sampler(temperature=1.0, top_p=0.8, top_k=10)

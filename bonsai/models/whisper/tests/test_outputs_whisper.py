@@ -161,7 +161,6 @@ class TestModuleForwardPasses(absltest.TestCase):
         ty = tm(
             tx,
             attention_mask=None,
-            layer_head_mask=None,
             output_attentions=False,
         )[0]
         ny = nm(nx, None)

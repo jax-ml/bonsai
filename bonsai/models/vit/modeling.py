@@ -77,7 +77,7 @@ class Embeddings(nnx.Module):
 
         num_new_patch_patches = h * w
 
-        stored_pos_embeddings = self.pos_embeddings.value
+        stored_pos_embeddings = self.pos_embeddings[...]
         num_stored_patches = stored_pos_embeddings.shape[1]
 
         if num_stored_patches == num_new_patch_patches + 1:
@@ -87,7 +87,7 @@ class Embeddings(nnx.Module):
                 stored_pos_embeddings, num_tokens=num_new_patch_patches + 1, has_class_token=True
             )
 
-        cls_tokens = jnp.tile(self.cls_token.value, (b, 1, 1))
+        cls_tokens = jnp.tile(self.cls_token[...], (b, 1, 1))
         embeddings = jnp.concatenate((cls_tokens, embeddings), axis=1)
 
         embeddings = embeddings + current_pos_embeddings

@@ -29,7 +29,7 @@ ShardingSpec = PartitionSpec
 
 
 @dataclasses.dataclass(slots=True, frozen=True)
-class ShardingCfg:
+class ShardConfig:
     emb_vd: ShardingSpec
     emb_dv: ShardingSpec
     q_weight_ndh: ShardingSpec
@@ -45,7 +45,7 @@ class ShardingCfg:
     @staticmethod
     def no_sharding():
         """Configuration with no sharding (all None)."""
-        return ShardingCfg(
+        return ShardConfig(
             emb_vd=P(None, None),
             emb_dv=P(None, None),
             q_weight_ndh=P(None, None, None),
@@ -61,7 +61,7 @@ class ShardingCfg:
 
     @staticmethod
     def default():
-        return ShardingCfg(
+        return ShardConfig(
             emb_vd=P("tp", "fsdp"),
             emb_dv=P("fsdp", "tp"),
             q_weight_ndh=P("tp", "fsdp", None),
@@ -90,12 +90,12 @@ class ModelConfig:
     local_rope_theta: float
     norm_eps: float
     tie_word_embeddings: bool
-    shd_cfg: ShardingCfg = ShardingCfg.no_sharding()
+    shd_cfg: ShardConfig = ShardConfig.no_sharding()
 
     @classmethod
     def _from_param(cls, use_sharding: bool, **kwargs):
         if use_sharding:
-            kwargs["shd_cfg"] = ShardingCfg.default()
+            kwargs["shd_cfg"] = ShardConfig.default()
         return cls(**kwargs)
 
     @classmethod
@@ -218,7 +218,7 @@ class Einsum(nnx.Module):
 
     @jax.named_scope("einsum")
     def __call__(self, x: ArrayLike) -> Array:
-        return jnp.einsum(self.einsum_str, x, self.w.value)
+        return jnp.einsum(self.einsum_str, x, self.w[...])
 
 
 def _generate_pos_embeddings(
@@ -250,7 +250,7 @@ class RMSNorm(nnx.Module):
     def __call__(self, x: Array) -> Array:
         dtype = x.dtype
         rms = jnp.sqrt(jnp.mean(jnp.astype(x, jnp.float32) ** 2, axis=-1, keepdims=True) + self.norm_eps)
-        return jnp.astype(self.scale.value * x / rms, dtype)
+        return jnp.astype(self.scale[...] * x / rms, dtype)
 
 
 def count_left_pads(x: jax.Array) -> int:
@@ -300,28 +300,28 @@ class Attention(nnx.Module):
         # RoPE and Cache Logic
         left_pads = count_left_pads(segment_ids)
         left_pads = shard(left_pads, P(self.shd_cfg.act_btnh[0]))
-        cache.start_ind.value = jnp.where(cache.start_ind.value < 0, left_pads, cache.start_ind.value)
-        position_ids = compute_positions_from_segment_ids(segment_ids) + cache.cur_ind.value
+        cache.start_ind.set_value(jnp.where(cache.start_ind[...] < 0, left_pads, cache.start_ind[...]))
+        position_ids = compute_positions_from_segment_ids(segment_ids) + cache.cur_ind[...]
         sin, cos = _generate_pos_embeddings(position_ids, self.head_dim)
         query_proj = apply_rope(query_proj, sin, cos)
         key_proj = apply_rope(key_proj, sin, cos)
 
         # Update K/V cache [B, S, K, H]
-        slice_indices = (0, cache.cur_ind.value, 0, 0)
-        cache.v_cache.value = jax.lax.dynamic_update_slice(cache.v_cache.value, value_proj, slice_indices)
-        cache.k_cache.value = jax.lax.dynamic_update_slice(cache.k_cache.value, key_proj, slice_indices)
+        slice_indices = (0, cache.cur_ind[...], 0, 0)
+        cache.v_cache[...] = jax.lax.dynamic_update_slice(cache.v_cache[...], value_proj, slice_indices)
+        cache.k_cache[...] = jax.lax.dynamic_update_slice(cache.k_cache[...], key_proj, slice_indices)
 
         b, t, n, h = query_proj.shape
 
         # GQA reshape and attention logits
         query_proj_gqa = query_proj.reshape((b, t, self.num_kv_heads, self.n_rep, h))
-        attn_logits = jnp.einsum("BTKGH,BSKH->BTSKG", query_proj_gqa, cache.k_cache.value) * self.scale
+        attn_logits = jnp.einsum("BTKGH,BSKH->BTSKG", query_proj_gqa, cache.k_cache[...]) * self.scale
 
         # Masking and Softmax
-        q_pos = cache.cur_ind.value + jnp.arange(t, dtype=jnp.int32)[None, :] - cache.start_ind.value[:, None]
+        q_pos = cache.cur_ind[...] + jnp.arange(t, dtype=jnp.int32)[None, :] - cache.start_ind[:, None]
         ts = jnp.arange(cache.size, dtype=jnp.int32)  # (cache.size,)
-        kv_segment_ids = (ts[None, :] >= cache.start_ind.value[:, None]) & (ts[None, :] < cache.cur_ind.value + t)
-        k_pos = ts[None, :] - cache.start_ind.value[:, None]  # (b, cache.size)
+        kv_segment_ids = (ts[None, :] >= cache.start_ind[:, None]) & (ts[None, :] < cache.cur_ind[...] + t)
+        k_pos = ts[None, :] - cache.start_ind[:, None]  # (b, cache.size)
         causal_mask = k_pos[:, None, :] <= q_pos[:, :, None]
         segment_mask = kv_segment_ids[:, None, :] == segment_ids[:, :, None]
         final_mask = causal_mask & segment_mask  # (B, T, S)
@@ -330,10 +330,10 @@ class Attention(nnx.Module):
 
         # Softmax
         attn_weights = jax.nn.softmax(attn_logits.astype(jnp.float32), axis=2).astype(attn_logits.dtype)
-        qkv = jnp.einsum("BTSKG,BSKH->BTKGH", attn_weights, cache.v_cache.value)
+        qkv = jnp.einsum("BTSKG,BSKH->BTKGH", attn_weights, cache.v_cache[...])
         qkv = qkv.reshape((b, t, n, h))
 
-        cache.cur_ind.value = cache.cur_ind.value + t
+        cache.cur_ind[...] = cache.cur_ind[...] + t
         return shard(self.o_proj(qkv), self.shd_cfg.act_btd)
 
     @property
@@ -399,7 +399,7 @@ class Qwen3(nnx.Module):
         return [LayerCache(cfg, batch_size, cache_size, dtype) for _ in range(cfg.num_layers)]
 
     def __call__(self, tokens, segment_ids, cache, num_right_pads):
-        x = self.embedder.embedding.value.at[(tokens,)].get(out_sharding=self.out_emb_shd)
+        x = self.embedder.embedding[...].at[(tokens,)].get(out_sharding=self.out_emb_shd)
         for i, layer in enumerate(self.layers):
             x = layer(x, cache[i], segment_ids)
         logits = self.lm_head(self.final_norm(x))
