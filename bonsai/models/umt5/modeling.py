@@ -15,7 +15,7 @@
 import copy
 import dataclasses
 import math
-from typing import Optional, Union
+from typing import Union
 
 import jax
 import jax.numpy as jnp
@@ -191,7 +191,7 @@ class UMT5Attention(nnx.Module):
         config: UMT5Config,
         *,
         has_relative_attention_bias=False,
-        layer_idx: Optional[int] = None,
+        layer_idx: int | None = None,
         param_dtype: jnp.dtype | None = jnp.float32,
         rngs: nnx.Rngs,
     ):
@@ -285,8 +285,8 @@ class UMT5Attention(nnx.Module):
     def __call__(
         self,
         hidden_states: jax.Array,
-        encoder_hidden_states: Optional[jax.Array] = None,
-        attention_mask: Optional[jax.Array] = None,
+        encoder_hidden_states: jax.Array | None = None,
+        attention_mask: jax.Array | None = None,
     ):
         b, n, c = hidden_states.shape[0], self.n_heads, self.key_value_proj_dim
 
@@ -341,7 +341,7 @@ class UMT5LayerSelfAttention(nnx.Module):
         self,
         config: UMT5Config,
         *,
-        layer_idx: Optional[int] = None,
+        layer_idx: int | None = None,
         param_dtype: jnp.dtype | None = jnp.float32,
         rngs: nnx.Rngs,
     ):
@@ -374,7 +374,7 @@ class UMT5LayerCrossAttention(nnx.Module):
         self,
         config: UMT5Config,
         *,
-        layer_idx: Optional[int] = None,
+        layer_idx: int | None = None,
         param_dtype: jnp.dtype | None = jnp.float32,
         rngs: nnx.Rngs,
     ) -> None:
@@ -405,7 +405,7 @@ class UMT5Block(nnx.Module):
         self,
         config: UMT5Config,
         *,
-        layer_idx: Optional[int] = None,
+        layer_idx: int | None = None,
         param_dtype: jnp.dtype | None = jnp.float32,
         rngs: nnx.Rngs,
     ):
@@ -632,11 +632,11 @@ class UMT5Model(nnx.Module):
 
     def __call__(
         self,
-        input_ids: Optional[jax.Array] = None,
-        attention_mask: Optional[jax.Array] = None,
-        decoder_input_ids: Optional[jax.Array] = None,
-        decoder_attention_mask: Optional[jax.Array] = None,
-        encoder_outputs: Optional[jax.Array] = None,
+        input_ids: jax.Array | None = None,
+        attention_mask: jax.Array | None = None,
+        decoder_input_ids: jax.Array | None = None,
+        decoder_attention_mask: jax.Array | None = None,
+        encoder_outputs: jax.Array | None = None,
     ) -> jax.Array:
         # Encode if needed (training, first prediction pass)
         if encoder_outputs is None:
@@ -662,8 +662,8 @@ class UMT5Model(nnx.Module):
         self,
         input_ids: jax.Array,
         attention_mask: jax.Array = None,
-        max_tokens: Optional[int] = None,
-        max_new_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
+        max_new_tokens: int | None = None,
     ) -> jax.Array:
         """Generate sequences using greedy decoding.
 
@@ -723,11 +723,11 @@ def forward(
     graphdef: nnx.GraphDef,
     state: nnx.State,
     *,
-    input_ids: Optional[jax.Array] = None,
-    attention_mask: Optional[jax.Array] = None,
-    decoder_input_ids: Optional[jax.Array] = None,
-    decoder_attention_mask: Optional[jax.Array] = None,
-    encoder_outputs: Optional[jax.Array] = None,
+    input_ids: jax.Array | None = None,
+    attention_mask: jax.Array | None = None,
+    decoder_input_ids: jax.Array | None = None,
+    decoder_attention_mask: jax.Array | None = None,
+    encoder_outputs: jax.Array | None = None,
 ) -> jax.Array:
     model = nnx.merge(graphdef, state)
     return model(
