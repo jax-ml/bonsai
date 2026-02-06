@@ -5,7 +5,7 @@ import safetensors
 from etils import epath
 from flax import nnx
 
-from bonsai.models.dinov3.modeling import DINOv3ViTFlaxConfig, Dinov3ViTModel
+from bonsai.models.dinov3.modeling import ModelConfig, Dinov3ViTModel
 from bonsai.utils.params import stoi, map_to_bonsai_key, assign_weights_from_eval_shape
 
 
@@ -54,7 +54,7 @@ def _get_key_and_transform_mapping():
     }
 
 
-def create_model_from_safe_tensors(file_dir: str, cfg: DINOv3ViTFlaxConfig) -> Dinov3ViTModel:
+def create_model_from_safe_tensors(file_dir: str, cfg: ModelConfig) -> Dinov3ViTModel:
     """Load tensors from the safetensors file and create a Dinov3 model (memory-optimized)."""
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:

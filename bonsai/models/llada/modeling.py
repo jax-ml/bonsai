@@ -26,6 +26,7 @@ from jax import P
 from jax.sharding import PartitionSpec
 from jaxtyping import Array, DTypeLike
 from tqdm import trange
+from bonsai.utils.rope import RoPE, apply_rope
 
 LARGE_NEGATIVE = jnp.finfo(jnp.float32).min
 
@@ -154,24 +155,6 @@ class ShardedEmbedding(nnx.Embed):
             dtype=self.dtype,
         )
         return jnp.dot(query, embedding.T, out_sharding=out_sharding)
-
-
-def _generate_pos_embeddings(positions: Array, head_dim: int, rope_theta: int) -> tuple[Array, Array]:
-    # Forked from: jax-llm-examples/qwen3/qwen3_jax/model.py;l=571
-    fraction = jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim
-    timescale = rope_theta**fraction
-    rotational_frequency = 1.0 / timescale
-    # Use high-precision einsum to prevent catastrophic bfloat16 rounding (ex: 257→256), as sin(257) differs from sin(256).
-    sinusoid_inp = jnp.einsum("BT,k->BTk", positions, rotational_frequency, precision=jax.lax.Precision.HIGHEST)
-    return jnp.sin(sinusoid_inp), jnp.cos(sinusoid_inp)
-
-
-def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
-    assert x.ndim == 4 and sin.ndim == 3 and cos.ndim == 3
-    x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
-    # [B, T, head_dim] -> [B, h, T, head_dim]
-    sin, cos = sin[:, :, None, :], cos[:, :, None, :]
-    return jnp.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1).astype(x.dtype)
 
 
 def count_left_pads(x: jax.Array) -> int:
@@ -342,15 +325,14 @@ class LLaDAModel(nnx.Module):
             rngs=rngs,
         )
 
-        self.head_dim = self.blocks[0].head_dim
-        self.rope_theta = cfg.rope_theta
+        self.rope = RoPE(rope_type="default", head_dim=self.blocks[0].head_dim, rope_theta=cfg.rope_theta)
 
     def __call__(self, input_ids: Array, attention_mask: Array, key: Array) -> tuple[Array, Array, list[Array]]:
         shd = self.config.shd_cfg.activation
         left_pads = count_left_pads(attention_mask)
         start_ind = left_pads.reshape((-1, 1))
         position_ids = compute_positions_from_segment_ids(attention_mask) + start_ind
-        sin, cos = _generate_pos_embeddings(position_ids, self.head_dim, self.rope_theta)
+        sin, cos = self.rope(position_ids)
 
         if attention_mask is not None:
             attention_mask = attention_mask[:, None, :]
