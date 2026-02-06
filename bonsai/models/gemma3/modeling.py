@@ -47,7 +47,7 @@ def _set_attention_modes(global_attn_freq: int, layers: int) -> list[AttentionMo
 
 
 @dataclass(slots=True, frozen=True)
-class VisionShardingCfg:
+class VisionShardConfig:
     attn_kernel: PartitionSpec | None = None
     attn_bias: PartitionSpec | None = None
     attn_qk_activation: PartitionSpec | None = None
@@ -63,13 +63,13 @@ class VisionShardingCfg:
 
     @staticmethod
     def no_sharding():
-        return VisionShardingCfg()
+        return VisionShardConfig()
 
     @staticmethod
     def default(use_fsdp: bool, use_tp: bool):
         fsdp = ShardMode.FSDP.value if use_fsdp else None
         tp = ShardMode.TP.value if use_tp else None
-        return VisionShardingCfg(
+        return VisionShardConfig(
             attn_kernel=P(tp, fsdp),
             attn_bias=P(tp),
             attn_qk_activation=P(fsdp, tp),
@@ -86,7 +86,7 @@ class VisionShardingCfg:
 
 
 @dataclass(slots=True, frozen=True)
-class TextShardingCfg:
+class TextShardConfig:
     attn_kernel: PartitionSpec | None = None
     attn_bias: PartitionSpec | None = None
     attn_qk_activation: PartitionSpec | None = None
@@ -101,13 +101,13 @@ class TextShardingCfg:
 
     @staticmethod
     def no_sharding():
-        return TextShardingCfg()
+        return TextShardConfig()
 
     @staticmethod
     def default(use_fsdp: bool, use_tp: bool):
         fsdp = ShardMode.FSDP.value if use_fsdp else None
         tp = ShardMode.TP.value if use_tp else None
-        return TextShardingCfg(
+        return TextShardConfig(
             attn_kernel=P(tp, fsdp),
             attn_bias=P(tp),
             attn_qk_activation=P(fsdp, tp),
@@ -123,18 +123,18 @@ class TextShardingCfg:
 
 
 @dataclass(slots=True, frozen=True)
-class ShardingCfg:
+class ShardConfig:
     mmp_norm: PartitionSpec | None = None
     mmp_weight: PartitionSpec | None = None
 
     @staticmethod
     def no_sharding():
-        return ShardingCfg()
+        return ShardConfig()
 
     @staticmethod
     def default(use_tp: bool):
         tp = ShardMode.TP.value if use_tp else None
-        return ShardingCfg(mmp_norm=P(tp), mmp_weight=P(tp))
+        return ShardConfig(mmp_norm=P(tp), mmp_weight=P(tp))
 
 
 @dataclass(frozen=True)
@@ -149,7 +149,7 @@ class VisionConfig:
     num_hidden_layers: int
     patch_size: int
     vision_use_head: bool
-    shd_cfg: VisionShardingCfg
+    shd_cfg: VisionShardConfig
 
     @classmethod
     def gemma3_4b_it(
@@ -158,9 +158,9 @@ class VisionConfig:
         use_tp: bool = False,
     ):
         if not (use_fsdp and use_tp):
-            shd_cfg = VisionShardingCfg.no_sharding()
+            shd_cfg = VisionShardConfig.no_sharding()
         else:
-            shd_cfg = VisionShardingCfg.default(use_fsdp=use_fsdp, use_tp=use_tp)
+            shd_cfg = VisionShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
 
         return cls(
             attention_dropout=0.0,
@@ -197,7 +197,7 @@ class TextConfig:
     sliding_window: int
     vocab_size: int
     norm_dtype: jnp.dtype
-    shd_cfg: TextShardingCfg
+    shd_cfg: TextShardConfig
 
     @classmethod
     def gemma3_4b_it(
@@ -208,9 +208,9 @@ class TextConfig:
         norm_dtype: jnp.dtype,
     ):
         if not (use_fsdp and use_tp):
-            shd_cfg = TextShardingCfg.no_sharding()
+            shd_cfg = TextShardConfig.no_sharding()
         else:
-            shd_cfg = TextShardingCfg.default(use_fsdp=use_fsdp, use_tp=use_tp)
+            shd_cfg = TextShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
 
         num_hidden_layers = 34
         return cls(
@@ -243,11 +243,11 @@ class ModelConfig:
     mm_tokens_per_image: int
     dtype: str  # TODO: unused
     final_logit_softcapping: float | None
-    shd_cfg: ShardingCfg
+    shd_cfg: ShardConfig
 
     @classmethod
     def gemma3_4b_it(cls, use_fsdp: bool = False, use_tp: bool = False, *, norm_dtype: jnp.dtype):
-        shd_cfg = ShardingCfg.no_sharding() if use_tp is None else ShardingCfg.default(use_tp)
+        shd_cfg = ShardConfig.no_sharding() if use_tp is None else ShardConfig.default(use_tp)
         return cls(
             vision_config=VisionConfig.gemma3_4b_it(use_fsdp, use_tp),
             text_config=TextConfig.gemma3_4b_it(use_fsdp, use_tp, norm_dtype=norm_dtype),
