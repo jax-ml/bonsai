@@ -312,7 +312,7 @@ class Upsample2D(nnx.Module):
 
 
 class UpDecoderBlock2D(nnx.Module):
-    upsamplers = nnx.Data["Upsample2D" | None]
+    upsamplers: nnx.Data[Upsample2D | None]
 
     def __init__(self, in_channels: int, out_channels: int, groups: int, is_final_block: bool, rngs: nnx.Rngs):
         self.resnets = nnx.List([])

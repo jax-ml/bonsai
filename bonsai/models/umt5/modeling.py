@@ -15,7 +15,6 @@
 import copy
 import dataclasses
 import math
-from typing import Union
 
 import jax
 import jax.numpy as jnp
@@ -582,7 +581,7 @@ class UMT5EncoderModel(nnx.Module):
         self,
         input_ids: jax.Array = None,
         attention_mask: jax.Array = None,
-    ) -> Union[jax.Array]:
+    ) -> jax.Array:
         r"""
         input_ids (`jax.Array` of shape `(batch_size, sequence_length)`):
             Indices of input sequence tokens in the vocabulary. UMT5 is a model with relative position embeddings so you
