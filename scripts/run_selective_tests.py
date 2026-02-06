@@ -106,7 +106,7 @@ def main():
 
     # Create venv once
     print("Creating virtual environment")
-    subprocess.run(["uv", "venv"], check=True)
+    subprocess.run(["uv", "venv", "--clear"], check=True)
 
     for target, extras in test_targets.items():
         extras_str = ",".join(sorted(extras))

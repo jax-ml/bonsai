@@ -155,14 +155,14 @@ class TestModuleForwardPasses(absltest.TestCase):
         tm = self.baseline_model.model.transformer.blocks[0].rotary_emb
         t_sin, t_cos = tm.get_rotary_embedding(self.seq_len, "cpu")
 
-        head_dim = self.bonsai_config.d_model // self.bonsai_config.n_heads
-        rope_theta = self.bonsai_config.rope_theta
+        bonsai_rope = self.bonsai_model.rope
+
         segment_ids = jnp.ones((self.batch_size, self.seq_len), jnp.int32)
 
         left_pads = modeling.count_left_pads(segment_ids)
         start_ind = left_pads.reshape((-1, 1))
         position_ids = modeling.compute_positions_from_segment_ids(segment_ids) + start_ind
-        n_sin, n_cos = modeling._generate_pos_embeddings(position_ids, head_dim, rope_theta)
+        n_sin, n_cos = bonsai_rope(position_ids)
 
         for ny, ty, name in [(n_sin, t_sin, "sin"), (n_cos, t_cos, "cos")]:
             ty_part = ty[0, 0, :, :64].detach().cpu().numpy()
@@ -171,10 +171,9 @@ class TestModuleForwardPasses(absltest.TestCase):
     def test_block(self):
         tm = self.baseline_model.model.transformer.blocks[0]
         nm = self.bonsai_model.blocks[0]
+        bonsai_rope = self.bonsai_model.rope
 
         shape = (self.batch_size, self.seq_len, self.bonsai_config.d_model)
-        head_dim = self.bonsai_config.d_model // self.bonsai_config.n_heads
-        rope_theta = self.bonsai_config.rope_theta
         jx = jax.random.normal(jax.random.key(0), shape, jnp.float32)
         segment_ids = jnp.ones((self.batch_size, self.seq_len), jnp.int32)
         tx = torch.tensor(jx)
@@ -182,7 +181,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         left_pads = modeling.count_left_pads(segment_ids)
         start_ind = left_pads.reshape((-1, 1))
         position_ids = modeling.compute_positions_from_segment_ids(segment_ids) + start_ind
-        sin, cos = modeling._generate_pos_embeddings(position_ids, head_dim, rope_theta)
+        sin, cos = bonsai_rope(position_ids)
 
         ty = tm(tx, attention_bias=None, layer_past=None, use_cache=False)[0]
         ny = nm(jx, sin, cos, None, jax.random.key(0))
