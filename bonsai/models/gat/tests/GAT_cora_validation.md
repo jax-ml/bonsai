@@ -1,3 +1,17 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+    jupytext_version: 1.18.1
+kernelspec:
+  display_name: .venv
+  language: python
+  name: python3
+---
+
+```{code-cell} ipython3
 import os
 import urllib.request
 import jax
@@ -5,16 +19,25 @@ import jax.numpy as jnp
 import numpy as np
 from flax import nnx
 import optax
-from bonsai.models.gat.modeling import GAT
-from bonsai.models.gat.params import GATConfig
+
+try:
+    from bonsai.models.gat.modeling import GAT
+    from bonsai.models.gat.params import GATConfig
+except ImportError:
+    try:
+        !pip insetall -e .
+    except:
+        !pip install -q git+https://github.com/jax-ml/bonsai@main
+
 
 # Configuration
 # Use a temporary directory for data to avoid polluting the repo
 DATA_DIR = os.path.join(os.getcwd(), "data", "cora")
 CORA_CONTENT_URL = "https://raw.githubusercontent.com/tkipf/pygcn/master/data/cora/cora.content"
 CORA_CITES_URL = "https://raw.githubusercontent.com/tkipf/pygcn/master/data/cora/cora.cites"
+```
 
-
+```{code-cell} ipython3
 def download_cora():
     os.makedirs(DATA_DIR, exist_ok=True)
     content_path = os.path.join(DATA_DIR, "cora.content")
@@ -125,62 +148,63 @@ def eval_step(model, x, adj, labels, mask):
     accuracy = correct / jnp.maximum(total, 1)
     loss = loss_fn(model, x, adj, labels, mask, False)
     return loss, accuracy
+```
 
+```{code-cell} ipython3
+print("Loading Cora data...")
+x, adj, labels, train_mask, val_mask, test_mask = load_data()
+print(f"Data loaded. Features: {x.shape}, Nodes: {x.shape[0]}, Edges: {jnp.sum(adj > 0)}")
 
-def main():
-    print("Loading Cora data...")
-    x, adj, labels, train_mask, val_mask, test_mask = load_data()
-    print(f"Data loaded. Features: {x.shape}, Nodes: {x.shape[0]}, Edges: {jnp.sum(adj > 0)}")
+key = jax.random.key(42)
+model_key, _ = jax.random.split(key)
 
-    key = jax.random.key(42)
-    model_key, _ = jax.random.split(key)
+config = GATConfig(
+    in_features=x.shape[1],
+    hidden_features=8,
+    out_features=int(jnp.max(labels) + 1),
+    num_heads=8,
+    num_out_heads=1,
+    dropout_prob=0.6,
+    alpha=0.2,
+)
 
-    config = GATConfig(
-        in_features=x.shape[1],
-        hidden_features=8,
-        out_features=int(jnp.max(labels) + 1),
-        num_heads=8,
-        num_out_heads=1,
-        dropout_prob=0.6,
-        alpha=0.2,
-    )
+model = GAT(
+    in_features=config.in_features,
+    hidden_features=config.hidden_features,
+    out_features=config.out_features,
+    num_heads=config.num_heads,
+    dropout_rng=model_key,
+    dropout_prob=config.dropout_prob,
+    alpha=config.alpha,
+    num_out_heads=config.num_out_heads,
+)
 
-    model = GAT(
-        in_features=config.in_features,
-        hidden_features=config.hidden_features,
-        out_features=config.out_features,
-        num_heads=config.num_heads,
-        dropout_rng=model_key,
-        dropout_prob=config.dropout_prob,
-        alpha=config.alpha,
-        num_out_heads=config.num_out_heads,
-    )
+# Standard Adam optimizer for GAT
+# Paper uses lr=0.005 and weight_decay=5e-4
+optimizer = nnx.Optimizer(model, optax.adam(learning_rate=0.005), wrt=nnx.Param)
 
-    # Standard Adam optimizer for GAT
-    # Paper uses lr=0.005 and weight_decay=5e-4
-    optimizer = nnx.Optimizer(model, optax.adam(learning_rate=0.005), wrt=nnx.Param)
+print("Starting training...")
+best_val_acc = 0
+for epoch in range(1, 201):
+    loss = train_step(model, optimizer, x, adj, labels, train_mask)
 
-    print("Starting training...")
-    best_val_acc = 0
-    for epoch in range(1, 201):
-        loss = train_step(model, optimizer, x, adj, labels, train_mask)
+    if epoch % 10 == 0:
+        val_loss, val_acc = eval_step(model, x, adj, labels, val_mask)
+        print(f"Epoch {epoch:3d}: Loss = {loss:.4f}, Val Loss = {val_loss:.4f}, Val Acc = {val_acc:.4f}")
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
 
-        if epoch % 10 == 0:
-            val_loss, val_acc = eval_step(model, x, adj, labels, val_mask)
-            print(f"Epoch {epoch:3d}: Loss = {loss:.4f}, Val Loss = {val_loss:.4f}, Val Acc = {val_acc:.4f}")
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
+test_loss, test_acc = eval_step(model, x, adj, labels, test_mask)
+print("\nFinal Results:")
+print(f"Test Loss: {test_loss:.4f}")
+print(f"Test Accuracy: {test_acc:.4f}")
 
-    test_loss, test_acc = eval_step(model, x, adj, labels, test_mask)
-    print("\nFinal Results:")
-    print(f"Test Loss: {test_loss:.4f}")
-    print(f"Test Accuracy: {test_acc:.4f}")
+if test_acc >= 0.80:
+    print("SUCCESS: Accuracy is above 80%")
+else:
+    print("FAILURE: Accuracy is below 80%")
+```
 
-    if test_acc >= 0.80:
-        print("SUCCESS: Accuracy is above 80%")
-    else:
-        print("FAILURE: Accuracy is below 80%")
+```{code-cell} ipython3
 
-
-if __name__ == "__main__":
-    main()
+```
