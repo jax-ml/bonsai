@@ -21,6 +21,8 @@ default configuration values used by the model implementation.
 
 from enum import Enum
 
+import jax
+import jax.numpy as jnp
 import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
@@ -214,5 +216,15 @@ def create_gemma3_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig):
         except Exception as e:
             print(keys)
             raise e
+
+    # Convert remaining ShapeDtypeStruct into arrays
+    if isinstance(jax_state["embed_tokens"]["embed_scale"], jax.ShapeDtypeStruct):
+        jax_state["embed_tokens"]["embed_scale"] = jnp.array(
+            cfg.text_config.hidden_size**0.5, dtype=jnp.bfloat16
+        ).astype(jnp.float32)
+    if isinstance(jax_state["vision_tower"]["embeddings"]["position_ids"], jax.ShapeDtypeStruct):
+        jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(
+            jnp.arange(gemma3.vision_tower.embeddings.num_patches), 0
+        )
 
     return nnx.merge(graph_def, jax_state)
