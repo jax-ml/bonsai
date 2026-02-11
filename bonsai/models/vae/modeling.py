@@ -1,6 +1,6 @@
 import dataclasses
 
-from typing import Optional, Sequence
+from typing import Sequence
 
 import jax
 import jax.image
@@ -24,7 +24,7 @@ class ModelConfig:
 
 
 class ResnetBlock(nnx.Module):
-    conv_shortcut: nnx.Data[Optional[nnx.Conv]]
+    conv_shortcut: nnx.Data[nnx.Conv | None]
 
     def __init__(self, in_channels: int, out_channels: int, groups: int, rngs: nnx.Rngs):
         self.conv_shortcut = None
@@ -77,7 +77,7 @@ class ResnetBlock(nnx.Module):
 
 
 class DownEncoderBlock2D(nnx.Module):
-    downsamplers: nnx.Data[Optional[nnx.Conv]]
+    downsamplers: nnx.Data[nnx.Conv | None]
 
     def __init__(self, in_channels: int, out_channels: int, groups: int, is_final_block: bool, rngs: nnx.Rngs):
         self.resnets = nnx.List([])
@@ -312,7 +312,7 @@ class Upsample2D(nnx.Module):
 
 
 class UpDecoderBlock2D(nnx.Module):
-    upsamplers = nnx.Data[Optional["Upsample2D"]]
+    upsamplers: nnx.Data[Upsample2D | None]
 
     def __init__(self, in_channels: int, out_channels: int, groups: int, is_final_block: bool, rngs: nnx.Rngs):
         self.resnets = nnx.List([])

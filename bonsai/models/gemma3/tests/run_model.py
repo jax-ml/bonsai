@@ -71,7 +71,7 @@ def run_model():
     model_ckpt_path = snapshot_download(model_name, token=access_token)
 
     bonsai_config = modeling.ModelConfig.gemma3_4b_it(norm_dtype=jnp.float32)
-    bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, bonsai_config, mesh=mesh)
+    bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, bonsai_config)
     eot_token_id = processor.tokenizer.convert_tokens_to_ids("<end_of_turn>")
 
     # Make inputs

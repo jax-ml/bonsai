@@ -12,35 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
-import re
 from enum import Enum
 
-import jax.numpy as jnp
 import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
 
 from bonsai.models.vit import modeling as model_lib
+from bonsai.utils.params import stoi, map_to_bonsai_key, assign_weights_from_eval_shape
 
 
 def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     head_dim = cfg.hidden_dim // cfg.num_heads
 
     class Transform(Enum):
-        """Transformations for model parameters"""
-
         DEFAULT = None
         BIAS = None
-        LINEAR = ((1, 0), None)
+        LINEAR = ((1, 0), None, False)
         SCALE = None
-        ATTN_KQV_BIAS = (None, (cfg.num_heads, head_dim))
-        ATTN_KQV_KERNEL = ((1, 0), (cfg.hidden_dim, cfg.num_heads, head_dim))
-        ATTN_OUT = ((1, 0), (cfg.num_heads, head_dim, cfg.hidden_dim))
+        ATTN_KQV_BIAS = (None, (cfg.num_heads, head_dim), False)
+        ATTN_KQV_KERNEL = ((1, 0), (cfg.hidden_dim, cfg.num_heads, head_dim), False)
+        ATTN_OUT = ((1, 0), (cfg.num_heads, head_dim, cfg.hidden_dim), False)
         EMBED = None
-        CONV2D = ((2, 3, 1, 0), None)
+        CONV2D = ((2, 3, 1, 0), None, False)
 
-    # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule)).
+    # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule, reshape_first)).
     return {
         r"^classifier.bias$": (r"classifier.bias", Transform.BIAS),
         r"^classifier.weight$": (r"classifier.kernel", Transform.LINEAR),
@@ -90,46 +86,6 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     }
 
 
-def _st_key_to_jax_key(mapping, source_key):
-    """Map a safetensors key to exactly one JAX key & transform, else warn/error."""
-    subs = [
-        (re.sub(pat, repl, source_key), transform)
-        for pat, (repl, transform) in mapping.items()
-        if re.match(pat, source_key)
-    ]
-    if not subs:
-        logging.warning(f"No mapping found for key: {source_key!r}")
-        return None, None
-    if len(subs) > 1:
-        keys = [s for s, _ in subs]
-        raise ValueError(f"Multiple mappings found for {source_key!r}: {keys}")
-    return subs[0]
-
-
-def _assign_weights(keys, tensor, state_dict, st_key, transform):
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
-    key, *rest = keys
-    if not rest:
-        if transform is not None:
-            permute, reshape = transform
-            if permute:
-                tensor = tensor.transpose(permute)
-            if reshape:
-                tensor = tensor.reshape(reshape)
-        if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
-        state_dict[key] = jnp.array(tensor)
-    else:
-        _assign_weights(rest, tensor, state_dict[key], st_key, transform)
-
-
-def _stoi(s):
-    try:
-        return int(s)
-    except ValueError:
-        return s
-
-
 def create_vit_from_pretrained(file_dir: str, config: model_lib.ModelConfig):
     """
     Load safetensor weights from a file, then convert & merge into a flax.nnx ViT model.
@@ -145,19 +101,19 @@ def create_vit_from_pretrained(file_dir: str, config: model_lib.ModelConfig):
     for f in files:
         tensor_dict |= safetensors.load_file(f)
 
-    vit = model_lib.ViTClassificationModel(config, rngs=nnx.Rngs(0))
+    vit = nnx.eval_shape(lambda: model_lib.ViTClassificationModel(config, rngs=nnx.Rngs(0)))
     graph_def, abs_state = nnx.split(vit)
     jax_state = nnx.to_pure_dict(abs_state)
 
     mapping = _get_key_and_transform_mapping(config)
     conversion_errors = []
     for st_key, tensor in tensor_dict.items():
-        jax_key, transform = _st_key_to_jax_key(mapping, st_key)
+        jax_key, transform = map_to_bonsai_key(mapping, st_key)
         if jax_key is None:
             continue
-        keys = [_stoi(k) for k in jax_key.split(".")]
+        keys = [stoi(k) for k in jax_key.split(".")]
         try:
-            _assign_weights(keys, tensor, jax_state, st_key, transform.value)
+            assign_weights_from_eval_shape(keys, tensor, jax_state, st_key, transform.value)
         except Exception as e:
             full_jax_key = ".".join([str(k) for k in keys])
             conversion_errors.append(f"Failed to assign '{st_key}' to '{full_jax_key}': {type(e).__name__}: {e}")

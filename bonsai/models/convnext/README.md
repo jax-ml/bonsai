@@ -18,4 +18,3 @@ Run ConvNeXT model inference in action:
 ```sh
 python3 bonsai.models.convnext.tests.run_model.py
 ```
-
