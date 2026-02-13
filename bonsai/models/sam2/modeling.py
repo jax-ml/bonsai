@@ -135,7 +135,7 @@ class MemoryEncoderConfig:
 
 
 @dataclass(frozen=True)
-class SAM2Config:
+class ModelConfig:
     image_encoder: ImageEncoderConfig
     memory_attention: MemoryAttentionConfig
     memory_encoder: MemoryEncoderConfig
@@ -1229,7 +1229,7 @@ class SAM2Base(nnx.Module):
         return jnp.where(keep, pred_masks, clamped)
 
 
-def build_sam2_model_from_config(cfg: SAM2Config, rngs: nnx.Rngs) -> SAM2Base:
+def build_sam2_model_from_config(cfg: ModelConfig, rngs: nnx.Rngs) -> SAM2Base:
     # === Position Encodings ===
     pos_enc_backbone = PositionEmbeddingSine(
         num_pos_feats=cfg.image_encoder.neck.position_encoding.num_pos_feats,

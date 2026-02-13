@@ -59,7 +59,7 @@ class TestForwardPass(ParityTestBase):
         self.baseline_model = VJEPA2Model(config=self.hfconfig)
         self.model_ckpt_path = os.path.join(self.save_dir, "model.safetensors")
         save_file(self.baseline_model.state_dict(), self.model_ckpt_path)
-        self.config = model_lib.VJEPA2Config.standard_test()
+        self.config = model_lib.ModelConfig.standard_test()
         self.bonsai_model = params.create_model_from_safe_tensors(self.save_dir, self.config, classifier=False)
         if os.path.exists(self.model_ckpt_path):
             os.remove(self.model_ckpt_path)
@@ -128,7 +128,7 @@ class TestVideoClassification(ParityTestBase):
         self.baseline_model = VJEPA2TorchClassif(config=self.hfconfig)
         self.model_ckpt_path = os.path.join(self.save_dir, "classifier_model.safetensors")
         save_file(self.baseline_model.state_dict(), self.model_ckpt_path)
-        self.config = model_lib.VJEPA2Config(
+        self.config = model_lib.ModelConfig(
             crop_size=64,
             frames_per_clip=4,
             hidden_size=64,
@@ -163,7 +163,7 @@ class TestPretrainedFoundationModel(absltest.TestCase):
         cls.hf_repo = "facebook/vjepa2-vitl-fpc64-256"
         cls.model_dir = snapshot_download(cls.hf_repo)
         cls.torch_model = VJEPA2Model.from_pretrained(cls.hf_repo).eval()
-        cls.jax_config = model_lib.VJEPA2Config.vitl_fpc64_256()
+        cls.jax_config = model_lib.ModelConfig.vitl_fpc64_256()
         cls.jax_model = params.create_model_from_safe_tensors(cls.model_dir, cls.jax_config, classifier=False)
         cls.jax_model.eval()
 
@@ -208,7 +208,7 @@ class TestPretrainedClassificationModel(absltest.TestCase):
         cls.hf_repo = "facebook/vjepa2-vitl-fpc16-256-ssv2"
         cls.model_dir = snapshot_download(cls.hf_repo)
         cls.torch_model = VJEPA2ForVideoClassification.from_pretrained(cls.hf_repo).eval()
-        cls.jax_config = model_lib.VJEPA2Config.vitl_fpc16_256()
+        cls.jax_config = model_lib.ModelConfig.vitl_fpc16_256()
         cls.jax_model = params.create_model_from_safe_tensors(cls.model_dir, cls.jax_config, classifier=True)
         cls.jax_model.eval()
         cls.processor = AutoVideoProcessor.from_pretrained(cls.hf_repo)

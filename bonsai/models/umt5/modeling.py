@@ -36,7 +36,7 @@ def fp16_clamp(x: jax.Array):
 
 
 @dataclasses.dataclass
-class UMT5Config:
+class ModelConfig:
     """Configuration for UMT5 model."""
 
     vocab_size: int = 250112
@@ -111,7 +111,7 @@ class T5LayerNorm(nnx.Module):
 class UMT5DenseActDense(nnx.Module):
     def __init__(
         self,
-        config: UMT5Config,
+        config: ModelConfig,
         *,
         is_gated_act: bool = True,
         param_dtype: jnp.dtype | None = jnp.float32,
@@ -165,7 +165,7 @@ class UMT5DenseActDense(nnx.Module):
 
 
 class UMT5LayerFF(nnx.Module):
-    def __init__(self, config: UMT5Config, *, param_dtype: jnp.dtype | None = jnp.float32, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, param_dtype: jnp.dtype | None = jnp.float32, rngs: nnx.Rngs):
         super().__init__()
         self.DenseReluDense = UMT5DenseActDense(
             config, is_gated_act=config.is_gated_act, param_dtype=param_dtype, rngs=rngs
@@ -187,7 +187,7 @@ class UMT5Attention(nnx.Module):
 
     def __init__(
         self,
-        config: UMT5Config,
+        config: ModelConfig,
         *,
         has_relative_attention_bias=False,
         layer_idx: int | None = None,
@@ -338,7 +338,7 @@ class UMT5Attention(nnx.Module):
 class UMT5LayerSelfAttention(nnx.Module):
     def __init__(
         self,
-        config: UMT5Config,
+        config: ModelConfig,
         *,
         layer_idx: int | None = None,
         param_dtype: jnp.dtype | None = jnp.float32,
@@ -371,7 +371,7 @@ class UMT5LayerSelfAttention(nnx.Module):
 class UMT5LayerCrossAttention(nnx.Module):
     def __init__(
         self,
-        config: UMT5Config,
+        config: ModelConfig,
         *,
         layer_idx: int | None = None,
         param_dtype: jnp.dtype | None = jnp.float32,
@@ -402,7 +402,7 @@ class UMT5LayerCrossAttention(nnx.Module):
 class UMT5Block(nnx.Module):
     def __init__(
         self,
-        config: UMT5Config,
+        config: ModelConfig,
         *,
         layer_idx: int | None = None,
         param_dtype: jnp.dtype | None = jnp.float32,
@@ -449,7 +449,7 @@ class UMT5Block(nnx.Module):
 
 
 class UMT5Stack(nnx.Module):
-    def __init__(self, config: UMT5Config, *, param_dtype: jnp.dtype | None = jnp.float32, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, param_dtype: jnp.dtype | None = jnp.float32, rngs: nnx.Rngs):
         super().__init__()
         self.embed_tokens = nnx.Embed(config.vocab_size, config.d_model, param_dtype=param_dtype, rngs=rngs)
         self.is_decoder = config.is_decoder
@@ -568,7 +568,7 @@ class UMT5Stack(nnx.Module):
 class UMT5EncoderModel(nnx.Module):
     def __init__(
         self,
-        config: UMT5Config,
+        config: ModelConfig,
         *,
         param_dtype: jnp.dtype | None = jnp.float32,
         rngs: nnx.Rngs,
@@ -602,7 +602,7 @@ class UMT5EncoderModel(nnx.Module):
 class UMT5Model(nnx.Module):
     def __init__(
         self,
-        config: UMT5Config,
+        config: ModelConfig,
         *,
         param_dtype: jnp.dtype | None = jnp.float32,
         rngs: nnx.Rngs,

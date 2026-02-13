@@ -25,11 +25,11 @@ from flax import nnx
 from bonsai.models.mamba2 import modeling
 
 
-def create_random_model(cfg: modeling.Mamba2Config, seed: int = 0) -> modeling.Mamba2ForCausalLM:
+def create_random_model(cfg: modeling.ModelConfig, seed: int = 0) -> modeling.Mamba2ForCausalLM:
     """Create a randomly initialized Mamba2ForCausalLM.
 
     Args:
-        cfg: Mamba2Config for the model.
+        cfg: ModelConfig for the model.
         seed: Random seed for initialization.
 
     Returns:
@@ -263,7 +263,7 @@ def load_pytorch_weights(
 
 def create_model_from_torch_checkpoint(
     checkpoint_path: str,
-    cfg: modeling.Mamba2Config | None = None,
+    cfg: modeling.ModelConfig | None = None,
     dtype: jnp.dtype = jnp.float32,
     seed: int = 0,
 ) -> modeling.Mamba2ForCausalLM:
@@ -324,7 +324,7 @@ def create_model_from_torch_checkpoint(
 
 def create_model_from_huggingface(
     model_id: str,
-    cfg: modeling.Mamba2Config | None = None,
+    cfg: modeling.ModelConfig | None = None,
     dtype: jnp.dtype = jnp.float32,
     seed: int = 0,
     revision: str = "main",
@@ -342,7 +342,7 @@ def create_model_from_huggingface(
         Mamba2ForCausalLM with loaded weights.
 
     Example:
-        >>> cfg = modeling.Mamba2Config(
+        >>> cfg = modeling.ModelConfig(
         ...     vocab_size=50280, hidden_size=768,
         ...     state_size=128, num_hidden_layers=24, head_dim=64
         ... )
@@ -369,7 +369,7 @@ def create_model_from_huggingface(
         with open(config_path) as f:
             hf_config = json.load(f)
 
-        cfg = modeling.Mamba2Config(
+        cfg = modeling.ModelConfig(
             vocab_size=hf_config.get("vocab_size", 50280),
             hidden_size=hf_config.get("d_model", hf_config.get("hidden_size", 768)),
             state_size=hf_config.get("d_state", hf_config.get("state_size", 128)),

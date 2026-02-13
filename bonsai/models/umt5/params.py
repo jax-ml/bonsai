@@ -29,7 +29,7 @@ from flax import nnx
 from bonsai.models.umt5 import modeling as model_lib
 
 
-def _get_key_and_transform_mapping(cls, cfg: model_lib.UMT5Config):
+def _get_key_and_transform_mapping(cls, cfg: model_lib.ModelConfig):
     """Define mapping from HuggingFace UMT5 keys to JAX UMT5 keys."""
 
     class Transform(Enum):
@@ -291,7 +291,7 @@ def get_tensor(sf, torch_key, file_type):
 def create_model(
     cls,
     file_dir: str,
-    cfg: model_lib.UMT5Config,
+    cfg: model_lib.ModelConfig,
     key_mapping=None,
     param_dtype: jnp.dtype | None = jnp.float32,
     mesh: jax.sharding.Mesh | None = None,
@@ -375,7 +375,7 @@ def get_weight_dtype_from_config(conf_dict):
         return jnp.float32
 
 
-def load_model_config(model_path: str) -> model_lib.UMT5Config:
+def load_model_config(model_path: str) -> model_lib.ModelConfig:
     """Load the model config from the model path."""
     model_dir = epath.Path(model_path).expanduser()
     config_path = model_dir / "config.json"
@@ -388,8 +388,8 @@ def load_model_config(model_path: str) -> model_lib.UMT5Config:
 
     dtype = get_weight_dtype_from_config(config_dict)
 
-    # Filter config_dict to only include fields defined in UMT5Config
-    config_fields = {f.name for f in dataclasses.fields(model_lib.UMT5Config)}
+    # Filter config_dict to only include fields defined in ModelConfig
+    config_fields = {f.name for f in dataclasses.fields(model_lib.ModelConfig)}
     filtered_config = {k: v for k, v in config_dict.items() if k in config_fields}
 
-    return model_lib.UMT5Config(**filtered_config, dtype=dtype)
+    return model_lib.ModelConfig(**filtered_config, dtype=dtype)

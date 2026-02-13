@@ -63,7 +63,7 @@ def run_model(MODEL_CP_PATH=None):
         convert_pt_to_safetensors(pt_path, safetensors_path)
 
     # 2. Create SAM2 model and predictor
-    config = modeling.SAM2Config.sam2_tiny()
+    config = modeling.ModelConfig.sam2_tiny()
     model_obj = params.create_sam2_from_pretrained(safetensors_path, config)
     model = modeling.SAM2ImagePredictor(model_obj)
 

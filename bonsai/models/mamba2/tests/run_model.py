@@ -101,7 +101,7 @@ def _greedy_generate_cached(
     prompt_ids_1d: jnp.ndarray,
     *,
     max_new_tokens: int,
-    cfg: modeling.Mamba2Config,
+    cfg: modeling.ModelConfig,
 ) -> jnp.ndarray:
     """Greedy generation with SSM state caching (O(n) complexity).
 
@@ -150,7 +150,7 @@ def run_model(*, max_new_tokens: int = 32, use_cache: bool = True) -> None:
         "What is the capital city of England?",
     ]
 
-    cfg = modeling.Mamba2Config(
+    cfg = modeling.ModelConfig(
         vocab_size=50288,
         hidden_size=768,
         state_size=128,

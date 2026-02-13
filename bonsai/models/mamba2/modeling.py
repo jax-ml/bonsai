@@ -33,7 +33,7 @@ from flax import nnx
 
 
 @dataclasses.dataclass(frozen=True)
-class Mamba2Config:
+class ModelConfig:
     """Configuration for Mamba2 models."""
 
     vocab_size: int = 50280
@@ -96,14 +96,14 @@ class Mamba2Cache:
 
 
 def create_empty_cache(
-    cfg: Mamba2Config,
+    cfg: ModelConfig,
     batch_size: int,
     dtype: jnp.dtype = jnp.float32,
 ) -> Mamba2Cache:
     """Create an empty cache for Mamba2 model.
 
     Args:
-        cfg: Mamba2Config for the model.
+        cfg: ModelConfig for the model.
         batch_size: Batch size for the cache.
         dtype: Data type for cache arrays.
 
@@ -304,7 +304,7 @@ class DepthwiseConv1d(nnx.Module):
 class Mamba2Mixer(nnx.Module):
     """Mamba2 mixer block using the SSD algorithm."""
 
-    def __init__(self, cfg: Mamba2Config, layer_idx: int, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, layer_idx: int, *, rngs: nnx.Rngs):
         self.cfg = cfg
         self.layer_idx = layer_idx
         self.hidden_size = cfg.hidden_size
@@ -407,7 +407,7 @@ class Mamba2Mixer(nnx.Module):
 class Mamba2Block(nnx.Module):
     """Single Mamba2 block with pre-norm and residual connection."""
 
-    def __init__(self, cfg: Mamba2Config, layer_idx: int, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, layer_idx: int, *, rngs: nnx.Rngs):
         self.cfg = cfg
         self.residual_in_fp32 = cfg.residual_in_fp32
         self.norm = RMSNorm(cfg.hidden_size, eps=cfg.layer_norm_epsilon, rngs=rngs)
@@ -430,7 +430,7 @@ class Mamba2Block(nnx.Module):
 class Mamba2Model(nnx.Module):
     """Mamba2 backbone model (no task-specific head)."""
 
-    def __init__(self, cfg: Mamba2Config, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
         self.embedder = nnx.Embed(num_embeddings=cfg.vocab_size, features=cfg.hidden_size, rngs=rngs)
         self.layers = nnx.List([Mamba2Block(cfg, layer_idx=i, rngs=rngs) for i in range(cfg.num_hidden_layers)])
@@ -491,7 +491,7 @@ class Mamba2Model(nnx.Module):
 class Mamba2ForCausalLM(nnx.Module):
     """Mamba2 model with causal language modeling head."""
 
-    def __init__(self, cfg: Mamba2Config, *, rngs: nnx.Rngs):
+    def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
         self.cfg = cfg
         self.backbone = Mamba2Model(cfg, rngs=rngs)
         if not cfg.tie_word_embeddings:
@@ -527,7 +527,7 @@ class Mamba2ForCausalLM(nnx.Module):
         cls,
         model_id_or_path: str,
         *,
-        cfg: Mamba2Config | None = None,
+        cfg: ModelConfig | None = None,
         dtype: jnp.dtype = jnp.float32,
         seed: int = 0,
         revision: str = "main",
@@ -565,7 +565,7 @@ class Mamba2Forecaster(nnx.Module):
         self.output_dim = output_dim
 
         self.input_proj = nnx.Linear(input_dim, d_model, rngs=rngs)
-        cfg = Mamba2Config(
+        cfg = ModelConfig(
             vocab_size=1,
             hidden_size=d_model,
             state_size=d_state,

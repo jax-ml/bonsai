@@ -699,7 +699,7 @@ def assign_nan_at_path(tree, dotted_path):
 
 def create_sam2_from_pretrained(
     file_path: str,
-    config: model_lib.SAM2Config,
+    config: model_lib.ModelConfig,
     *,
     mesh: jax.sharding.Mesh | None = None,
 ):
