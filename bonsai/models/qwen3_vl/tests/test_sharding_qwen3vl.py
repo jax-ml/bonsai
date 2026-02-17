@@ -1,16 +1,12 @@
-import os
-
-os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
-
 import jax
 import jax.numpy as jnp
 import numpy as np
 from absl.testing import absltest
+import unittest
+
 from flax import nnx
 from jax._src.mesh import AxisType
 from jax.sharding import PartitionSpec as P
-
-jax.config.update("jax_platform_name", "cpu")
 
 from bonsai.models.qwen3_vl import modeling
 
@@ -30,9 +26,9 @@ def get_test_config(use_fsdp=False, use_tp=False):
             out_hidden_size=128,
             num_position_embeddings=256,
             deepstack_visual_indexes=(0,),
-            shd_cfg=modeling.VisionShardingCfg.default(use_fsdp, use_tp)
+            shd_cfg=modeling.VisionShardingConfig.default(use_fsdp, use_tp)
             if (use_fsdp or use_tp)
-            else modeling.VisionShardingCfg.no_sharding(),
+            else modeling.VisionShardingConfig.no_sharding(),
         ),
         text_config=modeling.Qwen3VLTextConfig(
             vocab_size=1000,
@@ -42,13 +38,14 @@ def get_test_config(use_fsdp=False, use_tp=False):
             num_attention_heads=4,
             num_key_value_heads=4,
             head_dim=32,
-            shd_cfg=modeling.TextShardingCfg.default(use_fsdp, use_tp)
+            shd_cfg=modeling.TextShardingConfig.default(use_fsdp, use_tp)
             if (use_fsdp or use_tp)
-            else modeling.TextShardingCfg.no_sharding(),
+            else modeling.TextShardingConfig.no_sharding(),
         ),
     )
 
 
+@unittest.skipIf(jax.device_count() < 4, "Atleast 4 devices required")
 class TestSharding(absltest.TestCase):
     """Test sharding with simulated 8-device mesh."""
 
@@ -72,7 +69,7 @@ class TestSharding(absltest.TestCase):
     def test_text_mlp_sharded_vs_unsharded(self):
         """Test text MLP output is numerically equivalent with/without sharding."""
         # Setup mesh for sharded test
-        mesh = jax.make_mesh((2, 4), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
 
         # Create unsharded model and input
         cfg_unsharded = get_test_config(use_fsdp=False, use_tp=False)
@@ -118,7 +115,7 @@ class TestSharding(absltest.TestCase):
 
     def test_vision_mlp_sharded_vs_unsharded(self):
         """Test vision MLP output is numerically equivalent with/without sharding."""
-        mesh = jax.make_mesh((2, 4), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
 
         # Create unsharded model
         cfg_unsharded = get_test_config(use_fsdp=False, use_tp=False)
@@ -161,7 +158,7 @@ class TestSharding(absltest.TestCase):
 
     def test_full_model_creation_with_sharding(self):
         """Test full model can be created with sharding enabled."""
-        mesh = jax.make_mesh((2, 4), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(mesh)
 
         cfg = get_test_config(use_fsdp=True, use_tp=True)
@@ -177,7 +174,7 @@ class TestSharding(absltest.TestCase):
 
     def test_text_model_forward_with_sharding(self):
         """Test text model can run forward pass with sharding enabled."""
-        mesh = jax.make_mesh((2, 4), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(mesh)
 
         # Create sharded model
@@ -202,7 +199,7 @@ class TestSharding(absltest.TestCase):
 
     def test_vision_attention_sharded_vs_unsharded(self):
         """Test vision attention output is numerically equivalent with/without sharding."""
-        mesh = jax.make_mesh((2, 4), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
 
         # Create unsharded model
         cfg_unsharded = get_test_config(use_fsdp=False, use_tp=False)

@@ -1,6 +1,7 @@
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, TypeAlias
+from enum import Enum
 
 import jax
 import jax.numpy as jnp
@@ -11,9 +12,14 @@ from jax.sharding import PartitionSpec, get_abstract_mesh, reshard
 _K_MASK = jnp.finfo(jnp.bfloat16).min
 
 
+class ShardMode(Enum):
+    FSDP = "fsdp"
+    TP = "tp"
+
+
 # --- Sharding Configuration --- #
 @dataclass(slots=True, frozen=True)
-class VisionShardingCfg:
+class VisionShardingConfig:
     """Sharding configuration for vision encoder components."""
 
     attn_qkv_kernel: PartitionSpec
@@ -27,7 +33,7 @@ class VisionShardingCfg:
 
     @staticmethod
     def no_sharding():
-        return VisionShardingCfg(
+        return VisionShardingConfig(
             attn_qkv_kernel=P(None, None),
             attn_proj_kernel=P(None, None),
             mlp_fc1_kernel=P(None, None),
@@ -40,9 +46,9 @@ class VisionShardingCfg:
 
     @staticmethod
     def default(use_fsdp: bool, use_tp: bool):
-        fsdp = "fsdp" if use_fsdp else None
-        tp = "tp" if use_tp else None
-        return VisionShardingCfg(
+        fsdp = ShardMode.FSDP.value if use_fsdp else None
+        tp = ShardMode.TP.value if use_tp else None
+        return VisionShardingConfig(
             attn_qkv_kernel=P(fsdp, tp),
             attn_proj_kernel=P(tp, fsdp),
             mlp_fc1_kernel=P(fsdp, tp),
@@ -55,7 +61,7 @@ class VisionShardingCfg:
 
 
 @dataclass(slots=True, frozen=True)
-class TextShardingCfg:
+class TextShardingConfig:
     """Sharding configuration for text decoder components."""
 
     q_weight: PartitionSpec
@@ -72,7 +78,7 @@ class TextShardingCfg:
 
     @staticmethod
     def no_sharding():
-        return TextShardingCfg(
+        return TextShardingConfig(
             q_weight=P(None, None),
             kv_weight=P(None, None),
             o_weight=P(None, None),
@@ -88,9 +94,9 @@ class TextShardingCfg:
 
     @staticmethod
     def default(use_fsdp: bool, use_tp: bool):
-        fsdp = "fsdp" if use_fsdp else None
-        tp = "tp" if use_tp else None
-        return TextShardingCfg(
+        fsdp = ShardMode.FSDP.value if use_fsdp else None
+        tp = ShardMode.TP.value if use_tp else None
+        return TextShardingConfig(
             q_weight=P(fsdp, tp),
             kv_weight=P(fsdp, tp),
             o_weight=P(tp, fsdp),
@@ -195,7 +201,7 @@ class Qwen3VLVisionConfig:
     hidden_act: str = "gelu"
     layer_norm_eps: float = 1e-6
     rope_theta: float = 10000.0
-    shd_cfg: VisionShardingCfg = VisionShardingCfg.no_sharding()
+    shd_cfg: VisionShardingConfig = VisionShardingConfig.no_sharding()
 
     @property
     def head_dim(self) -> int:
@@ -203,7 +209,11 @@ class Qwen3VLVisionConfig:
 
     @classmethod
     def qwen3vl_2b(cls, use_fsdp: bool = False, use_tp: bool = False):
-        shd = VisionShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else VisionShardingCfg.no_sharding()
+        shd = (
+            VisionShardingConfig.default(use_fsdp, use_tp)
+            if (use_fsdp or use_tp)
+            else VisionShardingConfig.no_sharding()
+        )
         return cls(
             depth=24,
             hidden_size=1024,
@@ -216,7 +226,11 @@ class Qwen3VLVisionConfig:
 
     @classmethod
     def qwen3vl_4b(cls, use_fsdp: bool = False, use_tp: bool = False):
-        shd = VisionShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else VisionShardingCfg.no_sharding()
+        shd = (
+            VisionShardingConfig.default(use_fsdp, use_tp)
+            if (use_fsdp or use_tp)
+            else VisionShardingConfig.no_sharding()
+        )
         return cls(
             depth=24,
             hidden_size=1024,
@@ -229,7 +243,11 @@ class Qwen3VLVisionConfig:
 
     @classmethod
     def qwen3vl_8b(cls, use_fsdp: bool = False, use_tp: bool = False):
-        shd = VisionShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else VisionShardingCfg.no_sharding()
+        shd = (
+            VisionShardingConfig.default(use_fsdp, use_tp)
+            if (use_fsdp or use_tp)
+            else VisionShardingConfig.no_sharding()
+        )
         return cls(
             depth=27,
             hidden_size=1152,
@@ -242,7 +260,11 @@ class Qwen3VLVisionConfig:
 
     @classmethod
     def qwen3vl_32b(cls, use_fsdp: bool = False, use_tp: bool = False):
-        shd = VisionShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else VisionShardingCfg.no_sharding()
+        shd = (
+            VisionShardingConfig.default(use_fsdp, use_tp)
+            if (use_fsdp or use_tp)
+            else VisionShardingConfig.no_sharding()
+        )
         return cls(
             depth=27,
             hidden_size=1152,
@@ -271,11 +293,11 @@ class Qwen3VLTextConfig:
     mrope_section: tuple = (24, 20, 20)  # T, H, W partitions of head_dim
     attention_bias: bool = False
     tie_word_embeddings: bool = True
-    shd_cfg: TextShardingCfg = TextShardingCfg.no_sharding()
+    shd_cfg: TextShardingConfig = TextShardingConfig.no_sharding()
 
     @classmethod
     def qwen3vl_2b(cls, use_fsdp: bool = False, use_tp: bool = False):
-        shd = TextShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingCfg.no_sharding()
+        shd = TextShardingConfig.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingConfig.no_sharding()
         return cls(
             hidden_size=2048,
             intermediate_size=6144,
@@ -288,7 +310,7 @@ class Qwen3VLTextConfig:
 
     @classmethod
     def qwen3vl_4b(cls, use_fsdp: bool = False, use_tp: bool = False):
-        shd = TextShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingCfg.no_sharding()
+        shd = TextShardingConfig.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingConfig.no_sharding()
         return cls(
             hidden_size=2560,
             intermediate_size=9728,
@@ -301,7 +323,7 @@ class Qwen3VLTextConfig:
 
     @classmethod
     def qwen3vl_8b(cls, use_fsdp: bool = False, use_tp: bool = False):
-        shd = TextShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingCfg.no_sharding()
+        shd = TextShardingConfig.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingConfig.no_sharding()
         return cls(
             hidden_size=4096,
             intermediate_size=12288,
@@ -314,7 +336,7 @@ class Qwen3VLTextConfig:
 
     @classmethod
     def qwen3vl_32b(cls, use_fsdp: bool = False, use_tp: bool = False):
-        shd = TextShardingCfg.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingCfg.no_sharding()
+        shd = TextShardingConfig.default(use_fsdp, use_tp) if (use_fsdp or use_tp) else TextShardingConfig.no_sharding()
         return cls(
             hidden_size=5120,
             intermediate_size=25600,
@@ -877,10 +899,12 @@ class Qwen3VLAttention(nnx.Module):
         k = k.transpose(0, 2, 1, 3)
         v = v.transpose(0, 2, 1, 3)
 
-        if jax._src.config.abstract_mesh_context_manager.value is not None:
+        mesh = get_abstract_mesh()
+        if not mesh.empty and len(mesh.axis_names) > 0:
             attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2), out_sharding=self.shd_cfg.act_btd) * self.scale
         else:
             attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2)) * self.scale
+
         if mask is not None:
             attn_weights = jnp.where(mask, attn_weights, _K_MASK)
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)

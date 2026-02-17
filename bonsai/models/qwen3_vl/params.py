@@ -351,7 +351,6 @@ def create_model_from_safe_tensors(
     key_mapping = _get_key_and_transform_mapping(config.text_config.tie_word_embeddings)
 
     conversion_errors = []
-    loaded_keys = set()
 
     for f in files:
         with safetensors.safe_open(f, framework="numpy") as sf:
@@ -366,7 +365,6 @@ def create_model_from_safe_tensors(
                 keys = [_stoi(k) for k in jax_key.split(".")]
                 try:
                     _assign_weights(keys, tensor, state_dict, torch_key, transform, sharding)
-                    loaded_keys.add(torch_key)
                 except Exception as e:
                     full_jax_key = ".".join(str(k) for k in keys)
                     conversion_errors.append(

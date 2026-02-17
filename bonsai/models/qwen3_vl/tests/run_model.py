@@ -26,44 +26,6 @@ MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
 EOS_TOKEN_ID = 151643
 
 
-def generate(model, cache, input_ids, max_new_tokens: int = 50):
-    """Fast greedy generation with JIT-compiled forward and KV-cache."""
-    batch_size, seq_len = input_ids.shape
-    generated_tokens = []
-
-    # Prefill
-    start = time.time()
-    logits, cache = modeling.forward(model, cache, input_ids)
-    logits.block_until_ready()
-    prefill_time = time.time() - start
-    print(f"   Prefill: {prefill_time:.2f}s ({seq_len} tokens)")
-
-    next_token = jnp.argmax(logits, axis=-1, keepdims=True)
-    generated_tokens.append(next_token)
-
-    # Decode loop
-    start = time.time()
-    for step in range(max_new_tokens - 1):
-        logits, cache = modeling.forward(model, cache, next_token)
-        next_token = jnp.argmax(logits, axis=-1, keepdims=True)
-        generated_tokens.append(next_token)
-
-        # Stop on EOS - use numpy to avoid sharding issues with indexing
-        if int(np.array(next_token)[0, 0]) == EOS_TOKEN_ID:
-            break
-
-    decode_time = time.time() - start
-    tokens_generated = len(generated_tokens)
-    if decode_time > 0:
-        print(f"   Decode: {decode_time:.2f}s ({tokens_generated} tokens, {tokens_generated / decode_time:.1f} tok/s)")
-    else:
-        print(f"   Decode: {decode_time:.2f}s ({tokens_generated} tokens)")
-
-    # Use numpy for concatenation to avoid sharding mismatches
-    all_tokens = [np.array(input_ids)] + [np.array(t) for t in generated_tokens]
-    return jnp.array(np.concatenate(all_tokens, axis=1))
-
-
 def generate_with_vision(
     model, cache, input_ids, pixel_values, image_grid_thw, token_type_ids, max_new_tokens: int = 50
 ):
@@ -72,17 +34,12 @@ def generate_with_vision(
     generated_tokens = []
 
     # Prefill with vision
-    start = time.time()
     logits, cache = modeling.forward_vision(model, cache, input_ids, pixel_values, image_grid_thw, token_type_ids)
-    logits.block_until_ready()
-    prefill_time = time.time() - start
-    print(f"   Prefill (with vision): {prefill_time:.2f}s ({seq_len} tokens)")
 
     next_token = jnp.argmax(logits, axis=-1, keepdims=True)
     generated_tokens.append(next_token)
 
     # Decode loop (text-only after prefill)
-    start = time.time()
     for step in range(max_new_tokens - 1):
         logits, cache = modeling.forward(model, cache, next_token)
         next_token = jnp.argmax(logits, axis=-1, keepdims=True)
@@ -91,11 +48,6 @@ def generate_with_vision(
         # Stop on EOS - use numpy to avoid sharding issues with indexing
         if int(np.array(next_token)[0, 0]) == EOS_TOKEN_ID:
             break
-
-    decode_time = time.time() - start
-    tokens_generated = len(generated_tokens)
-    if decode_time > 0:
-        print(f"   Decode: {decode_time:.2f}s ({tokens_generated} tokens, {tokens_generated / decode_time:.1f} tok/s)")
 
     # Use numpy for concatenation to avoid sharding mismatches
     all_tokens = [np.array(input_ids)] + [np.array(t) for t in generated_tokens]
@@ -132,117 +84,8 @@ def main():
     # Load processor
     processor = AutoProcessor.from_pretrained(model_path)
 
-    # =========================================================================
-    # Example 1: Text-only generation
-    # =========================================================================
     print("\n" + "=" * 60)
-    print("Example 1: Text-only Generation")
-    print("=" * 60)
-
-    messages = [
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": "What is the capital of France? Answer in one word."}],
-        }
-    ]
-
-    inputs = processor.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_dict=True,
-        return_tensors="pt",
-    )
-
-    input_ids = jnp.array(inputs["input_ids"].numpy())
-    batch_size, seq_len = input_ids.shape
-
-    # When sharding, batch size must be >= fsdp for divisibility
-    if USE_SHARDING and batch_size < MESH_SHAPE[0]:
-        print(f"WARNING: batch_size={batch_size} < fsdp={MESH_SHAPE[0]}, padding batch")
-        pad_size = MESH_SHAPE[0] - batch_size
-        input_ids = jnp.concatenate([input_ids, jnp.zeros((pad_size, seq_len), dtype=jnp.int32)], axis=0)
-        batch_size = MESH_SHAPE[0]
-
-    print(f"\n3. Input: {seq_len} tokens (batch_size={batch_size})")
-
-    # Warm up JIT - use minimum batch size that works with sharding
-    print("\n4. Warming up JIT (first run is slow)...")
-    warm_batch = MESH_SHAPE[0] if USE_SHARDING else 1
-    warm_input = jnp.zeros((warm_batch, 1), dtype=jnp.int32)
-    warm_cache = modeling.init_cache(flax_config, warm_batch, 1, 10)
-    _ = modeling.forward(flax_model, warm_cache, warm_input)
-    print("   JIT warm-up complete")
-
-    # Generate
-    print("\n5. Generating...")
-    cache = modeling.init_cache(flax_config, batch_size, seq_len, generate_steps=100)
-    generated_ids = generate(flax_model, cache, input_ids, max_new_tokens=30)
-
-    # Decode
-    generated_ids_trimmed = generated_ids[:, seq_len:]
-    output_text = processor.batch_decode(
-        np.asarray(generated_ids_trimmed),
-        skip_special_tokens=True,
-        clean_up_tokenization_spaces=False,
-    )
-
-    print("\n" + "-" * 40)
-    print("Q: What is the capital of France?")
-    print(f"A: {output_text[0]}")
-    print("-" * 40)
-
-    # =========================================================================
-    # Example 2: Second text generation (JIT is warm)
-    # =========================================================================
-    print("\n" + "=" * 60)
-    print("Example 2: Second Generation (JIT warm)")
-    print("=" * 60)
-
-    messages2 = [
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": "How to cook lasagna? Answer in 20 words."}],
-        }
-    ]
-
-    inputs2 = processor.apply_chat_template(
-        messages2,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_dict=True,
-        return_tensors="pt",
-    )
-
-    input_ids2 = jnp.array(inputs2["input_ids"].numpy())
-    batch2 = MESH_SHAPE[0] if USE_SHARDING else 1
-    if USE_SHARDING and input_ids2.shape[0] < batch2:
-        input_ids2 = jnp.concatenate(
-            [input_ids2, jnp.zeros((batch2 - 1, input_ids2.shape[1]), dtype=jnp.int32)], axis=0
-        )
-    seq_len2 = input_ids2.shape[1]
-    print(f"\nInput: {seq_len2} tokens")
-
-    cache2 = modeling.init_cache(flax_config, batch2, seq_len2, generate_steps=100)
-    generated_ids2 = generate(flax_model, cache2, input_ids2, max_new_tokens=60)
-
-    generated_ids_trimmed2 = generated_ids2[:, seq_len2:]
-    output_text2 = processor.batch_decode(
-        np.asarray(generated_ids_trimmed2),
-        skip_special_tokens=True,
-        clean_up_tokenization_spaces=False,
-    )
-
-    print("\n" + "-" * 40)
-    print("Q: How to cook lasagna?")
-    print(f"A: {output_text2[0]}")
-    print("-" * 40)
-
-    # =========================================================================
-    # Example 3: Image + Text generation
-    # =========================================================================
-    print("\n" + "=" * 60)
-    print("Example 3: Image + Text Generation")
+    print("3. Example : Image + Text Generation")
     print("=" * 60)
 
     messages_vision = [
@@ -287,9 +130,6 @@ def main():
         # Initialize cache
         batch_vision = MESH_SHAPE[0] if USE_SHARDING else 1
         if USE_SHARDING and input_ids_vision.shape[0] < batch_vision:
-            # Only pad input_ids and token_type_ids - they have batch dimension
-            # pixel_values and image_grid_thw do NOT have batch dimension
-            # (they're (num_patches, features) and (num_images, 3) respectively)
             input_ids_vision = jnp.concatenate(
                 [input_ids_vision, jnp.zeros((batch_vision - 1, input_ids_vision.shape[1]), dtype=jnp.int32)], axis=0
             )

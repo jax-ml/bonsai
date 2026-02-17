@@ -26,7 +26,7 @@ This directory contains a pure JAX implementation of the [Qwen3-VL SOTA Vision L
 
 ### Running this model
 
-Run Qwen3 in action, implemented in [900 lines of code](bonsai/models/qwen3_vl/modeling.py) in JAX.
+Run Qwen3 in action, implemented in [900 lines of code](modeling.py) in JAX.
 
 ```sh
 python3 -m bonsai.models.qwen3_vl.tests.run_model
