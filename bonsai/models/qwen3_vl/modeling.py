@@ -75,6 +75,8 @@ class TextShardingConfig:
     act_btd: PartitionSpec
     act_btf: PartitionSpec
     act_btnh: PartitionSpec
+    act_bhsd: PartitionSpec  # (batch, heads, seq, dim) - post-transpose attention
+    attn_logit_shd: PartitionSpec  # (batch, heads, q_seq, k_seq) - attention logits
 
     @staticmethod
     def no_sharding():
@@ -90,6 +92,8 @@ class TextShardingConfig:
             act_btd=P(None, None, None),
             act_btf=P(None, None, None),
             act_btnh=P(None, None, None, None),
+            act_bhsd=P(None, None, None, None),
+            attn_logit_shd=P(None, None, None, None),
         )
 
     @staticmethod
@@ -108,6 +112,8 @@ class TextShardingConfig:
             act_btd=P(fsdp, None, tp),
             act_btf=P(fsdp, None, tp),
             act_btnh=P(fsdp, None, tp, None),
+            act_bhsd=P(fsdp, tp, None, None),  # transpose of act_btnh
+            attn_logit_shd=P(fsdp, tp, None, None),  # TP on heads for attn logits
         )
 
 
@@ -872,14 +878,15 @@ class Qwen3VLAttention(nnx.Module):
 
     def __call__(self, x: Array, cache: LayerCache, sin: Array, cos: Array, mask: Array | None) -> Array:
         batch, seq_len, _ = x.shape
+        shd = self.shd_cfg
 
-        q_out = self.q_proj(x, out_sharding=self.shd_cfg.act_btd)
-        k_out = self.k_proj(x, out_sharding=self.shd_cfg.act_btd)
-        v_out = self.v_proj(x, out_sharding=self.shd_cfg.act_btd)
+        q_out = self.q_proj(x, out_sharding=shd.act_btd)
+        k_out = self.k_proj(x, out_sharding=shd.act_btd)
+        v_out = self.v_proj(x, out_sharding=shd.act_btd)
 
-        q = self.q_norm(q_out.reshape(batch, seq_len, self.num_heads, self.head_dim))
-        k = self.k_norm(k_out.reshape(batch, seq_len, self.num_kv_heads, self.head_dim))
-        v = v_out.reshape(batch, seq_len, self.num_kv_heads, self.head_dim)
+        q = shard(self.q_norm(q_out.reshape(batch, seq_len, self.num_heads, self.head_dim)), shd.act_btnh)
+        k = shard(self.k_norm(k_out.reshape(batch, seq_len, self.num_kv_heads, self.head_dim)), shd.act_btnh)
+        v = shard(v_out.reshape(batch, seq_len, self.num_kv_heads, self.head_dim), shd.act_btnh)
 
         q = _apply_rope(q, sin, cos)
         k = _apply_rope(k, sin, cos)
@@ -892,26 +899,28 @@ class Qwen3VLAttention(nnx.Module):
         cache.k_cache[...] = jax.lax.dynamic_update_slice(cache.k_cache[...], k_cached, slice_indices)
         cache.v_cache[...] = jax.lax.dynamic_update_slice(cache.v_cache[...], v_cached, slice_indices)
 
-        k = repeat_kv(cache.k_cache[...], self.n_rep)
-        v = repeat_kv(cache.v_cache[...], self.n_rep)
+        k = shard(repeat_kv(cache.k_cache[...], self.n_rep), shd.act_btnh)
+        v = shard(repeat_kv(cache.v_cache[...], self.n_rep), shd.act_btnh)
 
-        q = q.transpose(0, 2, 1, 3)  # (B, heads, T, dim)
-        k = k.transpose(0, 2, 1, 3)
-        v = v.transpose(0, 2, 1, 3)
+        # Transpose to (B, heads, T, dim) and re-shard for attention
+        q = shard(q.transpose(0, 2, 1, 3), shd.act_bhsd)
+        k = shard(k.transpose(0, 2, 1, 3), shd.act_bhsd)
+        v = shard(v.transpose(0, 2, 1, 3), shd.act_bhsd)
 
-        mesh = get_abstract_mesh()
-        if not mesh.empty and len(mesh.axis_names) > 0:
-            attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2), out_sharding=self.shd_cfg.act_btd) * self.scale
-        else:
-            attn_weights = jnp.matmul(q, k.transpose(0, 1, 3, 2)) * self.scale
+        # Attention: TP shards heads (axis 1), safe for any seq_len
+        attn_weights = shard(
+            jnp.matmul(q, k.transpose(0, 1, 3, 2)) * self.scale,
+            shd.attn_logit_shd,
+        )
 
         if mask is not None:
             attn_weights = jnp.where(mask, attn_weights, _K_MASK)
         attn_weights = jax.nn.softmax(attn_weights.astype(jnp.float32), axis=-1).astype(q.dtype)
-        attn_out = jnp.matmul(attn_weights, v).transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
+        attn_out = shard(jnp.matmul(attn_weights, v), shd.act_bhsd)
+        attn_out = attn_out.transpose(0, 2, 1, 3).reshape(batch, seq_len, -1)
 
         cache.cur_ind[...] = cache.cur_ind[...] + seq_len
-        return self.o_proj(attn_out, out_sharding=self.shd_cfg.act_btd)
+        return self.o_proj(attn_out, out_sharding=shd.act_btd)
 
 
 class Qwen3VLDecoderLayer(nnx.Module):
