@@ -3,11 +3,9 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 from absl.testing import absltest, parameterized
-from huggingface_hub import snapshot_download
 from transformers import ConvNextForImageClassification
 
 from bonsai.models.convnext import modeling as model_lib
-from bonsai.models.convnext import params
 
 
 class TestModuleForwardPasses(absltest.TestCase):
@@ -17,10 +15,9 @@ class TestModuleForwardPasses(absltest.TestCase):
     def setUpClass(cls):
         super().setUpClass()
         model_name = "facebook/convnext-large-224"
-        model_ckpt_path = snapshot_download(model_name)
 
-        cls.bonsai_config = model_lib.ModelConfig.convnext_large_224()
-        cls.bonsai_model = params.create_convnext_from_pretrained(model_ckpt_path, cls.bonsai_config)
+        cls.bonsai_model = model_lib.ConvNeXt.from_pretrained(model_name)
+        cls.bonsai_config = cls.bonsai_model.config
         cls.baseline_model = ConvNextForImageClassification.from_pretrained(model_name)
 
         cls.baseline_model.eval()
@@ -74,10 +71,8 @@ class TestModuleFullOtherConfigs(parameterized.TestCase):
     @parameterized.named_parameters(("tiny", "tiny"), ("small", "small"), ("base", "base"))
     def test_full(self, model_size):
         model_name = f"facebook/convnext-{model_size}-224"
-        model_ckpt_path = snapshot_download(model_name)
 
-        bonsai_config = getattr(model_lib.ModelConfig, f"convnext_{model_size}_224")()
-        bonsai_model = params.create_convnext_from_pretrained(model_ckpt_path, bonsai_config)
+        bonsai_model = model_lib.ConvNeXt.from_pretrained(model_name)
         baseline_model = ConvNextForImageClassification.from_pretrained(model_name)
         baseline_model.eval()
 

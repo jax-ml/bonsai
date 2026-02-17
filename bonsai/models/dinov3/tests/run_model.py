@@ -2,29 +2,27 @@ import time
 
 import jax
 import jax.numpy as jnp
-from flax import nnx
 
-from bonsai.models.efficientnet import modeling
+from bonsai.models.dinov3 import modeling
 
 
 def run_model():
     # 1. Create model
-    model = modeling.EfficientNet.from_pretrained("efficientnet_b0")
+    model = modeling.Dinov3ViTModel.from_pretrained("facebook/dinov3-vits16-pretrain-lvd1689m")
     config = model.config
-    graphdef, state = nnx.split(model)
 
     # 2. Prepare dummy input
     batch_size = 4
-    image_size = config.resolution
-    dummy_input = jnp.ones((batch_size, image_size, image_size, 3), dtype=jnp.float32)
+    image_size = 224
+    dummy_input = jnp.ones((batch_size, 3, image_size, image_size), dtype=jnp.float32)
 
     # 3. Warmup (triggers JIT compilation)
-    modeling.forward(graphdef, state, dummy_input).block_until_ready()
+    modeling.forward(model, dummy_input)["pooler_output"].block_until_ready()
 
     # Profile a few steps
-    jax.profiler.start_trace("/tmp/profile-efficientnet")
+    jax.profiler.start_trace("/tmp/profile-dinov3")
     for _ in range(5):
-        logits = modeling.forward(graphdef, state, dummy_input)
+        logits = modeling.forward(model, dummy_input)["pooler_output"]
         jax.block_until_ready(logits)
     jax.profiler.stop_trace()
 
@@ -32,7 +30,7 @@ def run_model():
     num_runs = 10
     t0 = time.perf_counter()
     for _ in range(num_runs):
-        logits = modeling.forward(graphdef, state, dummy_input)
+        logits = modeling.forward(model, dummy_input)["pooler_output"]
         jax.block_until_ready(logits)
     t1 = time.perf_counter()
     print(f"{num_runs} inference runs took {t1 - t0:.4f} s")

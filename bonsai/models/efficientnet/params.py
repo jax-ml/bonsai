@@ -1,9 +1,9 @@
-import jax.numpy as jnp
 import numpy as np
-import timm
+import jax.numpy as jnp
 from flax import nnx
 
 from bonsai.models.efficientnet import modeling as model_lib
+from bonsai.utils.params import stoi, map_to_bonsai_key, assign_weights_from_eval_shape
 
 
 def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
@@ -16,6 +16,8 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     Returns:
       A dictionary mapping pre-trained layer names to NumPy arrays.
     """
+    import timm
+
     # Map to correct timm model names. Some larger models use specific checkpoints.
     timm_name_map = {
         "efficientnet_b0": "efficientnet_b0",
@@ -37,7 +39,7 @@ def get_timm_pretrained_weights(model_name: str = "efficientnet_b0"):
     return {k: v.numpy() for k, v in m.state_dict().items()}
 
 
-def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig) -> dict:
+def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig, mapping_version: int = 0) -> dict:
     """
     Creates a mapping from the JAX model's parameter names to the timm model's names.
     This version correctly handles the different architectures of the MBConv blocks.
@@ -96,6 +98,20 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig) -> dict:
         "bias": "classifier.bias",
     }
 
+    if mapping_version == 1:
+
+        def flatten_dict(d, parent_key="", sep="."):
+            items = []
+            for k, v in d.items():
+                new_key = f"{parent_key}{sep}{k}" if parent_key else k
+                if isinstance(v, dict):
+                    items.extend(flatten_dict(v, new_key, sep=sep).items())
+                else:
+                    items.append((new_key, v))
+            return dict(items)
+
+        name_map = {v: (k, None) for k, v in flatten_dict(name_map).items()}
+
     return name_map
 
 
@@ -103,7 +119,7 @@ def load_pretrained_weights(model: model_lib.EfficientNet, pretrained_weights: d
     """
     Loads pre-trained weights by directly modifying the JAX model's attributes in-place.
     """
-    name_map = _get_key_and_transform_mapping(model.cfg)
+    name_map = _get_key_and_transform_mapping(model.config)
 
     timm_to_jax_map = {}
     for jax_module_path, params_map in name_map.items():
@@ -158,3 +174,33 @@ def create_efficientnet_from_pretrained(version: int):
     torch_state_dict = get_timm_pretrained_weights(f"efficientnet_b{version}")
     model = model_lib.EfficientNet(config, rngs=nnx.Rngs(0))
     return load_pretrained_weights(model, torch_state_dict)
+
+
+def _create_model_from_timm(version: str, cfg: model_lib.ModelConfig) -> model_lib.EfficientNet:
+    """
+    Load pre-trained weights from timm, then convert & merge into a flax.nnx EfficientNet model.
+
+    Returns:
+      A flax.nnx.Model instance with loaded parameters.
+    """
+    tensor_dict = get_timm_pretrained_weights(version)
+
+    efficientnet = nnx.eval_shape(lambda: model_lib.EfficientNet(cfg, rngs=nnx.Rngs(params=0)))
+    graph_def, abs_state = nnx.split(efficientnet)
+    state_dict = nnx.to_pure_dict(abs_state)
+
+    mapping = _get_key_and_transform_mapping(cfg, mapping_version=1)
+    for st_key, tensor in tensor_dict.items():
+        jax_key, transform = map_to_bonsai_key(mapping, st_key)
+        if jax_key is None:
+            continue
+        keys = [stoi(k) for k in jax_key.split(".")]
+
+        if st_key.endswith(".weight") and len(tensor.shape) == 4:
+            tensor = np.transpose(tensor, (2, 3, 1, 0))
+        if st_key.endswith(".weight") and len(tensor.shape) == 2:
+            tensor = np.transpose(tensor, (1, 0))
+
+        assign_weights_from_eval_shape(keys, tensor, state_dict, st_key, transform)
+
+    return nnx.merge(graph_def, state_dict)

@@ -44,7 +44,7 @@ class TestForwardPass(absltest.TestCase):
         nnx_emb = self.bonsai_model.embeddings
 
         jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
-        tx = torch.tensor(jx, dtype=torch.float32)
+        tx = torch.tensor(np.asarray(jx), dtype=torch.float32)
 
         with torch.inference_mode():
             ty = torch_emb(tx)
@@ -61,7 +61,7 @@ class TestForwardPass(absltest.TestCase):
         nnx_layer = self.bonsai_model.layer[0]
 
         jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
-        tx = torch.tensor(jx, dtype=torch.float32)
+        tx = torch.tensor(np.asarray(jx), dtype=torch.float32)
 
         jhs = nnx_emb(jx)
         jpe = nnx_pe(jx)
@@ -77,7 +77,7 @@ class TestForwardPass(absltest.TestCase):
 
     def test_last_hidden_state(self):
         jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
-        tx = torch.tensor(jx, dtype=torch.float32)
+        tx = torch.tensor(np.asarray(jx), dtype=torch.float32)
 
         with torch.inference_mode():
             ty = self.baseline_model(tx).last_hidden_state
@@ -87,7 +87,7 @@ class TestForwardPass(absltest.TestCase):
 
     def test_pooled_output_embeddings(self):
         jx = jax.random.normal(jax.random.key(0), self.image_shape, dtype=jnp.float32)
-        tx = torch.tensor(jx, dtype=torch.float32)
+        tx = torch.tensor(np.asarray(jx), dtype=torch.float32)
 
         with torch.inference_mode():
             ty = self.baseline_model(tx).pooler_output

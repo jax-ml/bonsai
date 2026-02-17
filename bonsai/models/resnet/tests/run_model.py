@@ -16,26 +16,20 @@ import time
 
 import jax
 import jax.numpy as jnp
-from huggingface_hub import snapshot_download
 
 from bonsai.models.resnet import modeling as model_lib
-from bonsai.models.resnet import params
 
 
 def run_model(MODEL_CP_PATH=None):
-    # 1. Download safetensors file
-    model_ckpt_path = snapshot_download("microsoft/resnet-50")
+    # 1. Load pretrained model
+    model = model_lib.ResNet.from_pretrained("microsoft/resnet-50")
 
-    # 2. Load pretrained model
-    config = model_lib.ModelConfig.resnet50()
-    model = params.create_resnet_from_pretrained(model_ckpt_path, config)
-
-    # 3. Prepare dummy input
+    # 2. Prepare dummy input
     batch_size = 8
     image_size = 224
     dummy_input = jnp.ones((batch_size, image_size, image_size, 3), dtype=jnp.float32)
 
-    # 4. Warmup + profiling
+    # 3. Warmup + profiling
     # Warmup (triggers compilation)
     _ = model_lib.forward(model, dummy_input)
     jax.block_until_ready(_)
@@ -47,14 +41,14 @@ def run_model(MODEL_CP_PATH=None):
         jax.block_until_ready(logits)
     jax.profiler.stop_trace()
 
-    # 5. Timed execution
+    # 4. Timed execution
     t0 = time.perf_counter()
     for _ in range(10):
         logits = model_lib.forward(model, dummy_input)
         jax.block_until_ready(logits)
     print(f"10 runs took {time.perf_counter() - t0:.4f} s")
 
-    # 6. Show top-1 predicted class
+    # 5. Show top-1 predicted class
     pred = jnp.argmax(logits, axis=-1)
     print("Predicted classes:", pred)
 

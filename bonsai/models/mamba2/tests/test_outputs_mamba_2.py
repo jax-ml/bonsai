@@ -155,8 +155,8 @@ class TestMamba2Model(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.ModelConfig.tiny()
-        self.model = modeling.Mamba2Model(self.cfg, rngs=nnx.Rngs(42))
+        self.config = modeling.ModelConfig.tiny()
+        self.model = modeling.Mamba2Model(self.config, rngs=nnx.Rngs(42))
 
     def test_output_shape(self):
         """Test Mamba2Model output shape."""
@@ -164,7 +164,7 @@ class TestMamba2Model(absltest.TestCase):
         input_ids = jnp.ones((batch_size, seq_len), dtype=jnp.int32)
         outputs = self.model(input_ids=input_ids)
 
-        self.assertEqual(outputs["last_hidden_state"].shape, (batch_size, seq_len, self.cfg.hidden_size))
+        self.assertEqual(outputs["last_hidden_state"].shape, (batch_size, seq_len, self.config.hidden_size))
         self.assertIsNone(outputs["hidden_states"])
         self.assertIsNotNone(outputs["cache"])
         self.assertIsInstance(outputs["cache"], modeling.Mamba2Cache)
@@ -177,15 +177,15 @@ class TestMamba2Model(absltest.TestCase):
 
         self.assertIsNotNone(outputs["hidden_states"])
         # num_layers + 1 (final norm output)
-        self.assertLen(outputs["hidden_states"], self.cfg.num_hidden_layers + 1)
+        self.assertLen(outputs["hidden_states"], self.config.num_hidden_layers + 1)
 
     def test_inputs_embeds(self):
         """Test using inputs_embeds instead of input_ids."""
         batch_size, seq_len = 2, 32
-        inputs_embeds = jnp.ones((batch_size, seq_len, self.cfg.hidden_size))
+        inputs_embeds = jnp.ones((batch_size, seq_len, self.config.hidden_size))
         outputs = self.model(inputs_embeds=inputs_embeds)
 
-        self.assertEqual(outputs["last_hidden_state"].shape, (batch_size, seq_len, self.cfg.hidden_size))
+        self.assertEqual(outputs["last_hidden_state"].shape, (batch_size, seq_len, self.config.hidden_size))
 
     def test_no_nans(self):
         """Test that outputs don't contain NaNs."""
@@ -196,7 +196,7 @@ class TestMamba2Model(absltest.TestCase):
     def test_invalid_inputs(self):
         """Test that providing both input_ids and inputs_embeds raises error."""
         input_ids = jnp.ones((2, 32), dtype=jnp.int32)
-        inputs_embeds = jnp.ones((2, 32, self.cfg.hidden_size))
+        inputs_embeds = jnp.ones((2, 32, self.config.hidden_size))
         with self.assertRaises(ValueError):
             self.model(input_ids=input_ids, inputs_embeds=inputs_embeds)
 
@@ -206,8 +206,8 @@ class TestMamba2ForCausalLM(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.ModelConfig.tiny()
-        self.model = modeling.Mamba2ForCausalLM(self.cfg, rngs=nnx.Rngs(42))
+        self.config = modeling.ModelConfig.tiny()
+        self.model = modeling.Mamba2ForCausalLM(self.config, rngs=nnx.Rngs(42))
 
     def test_output_shape(self):
         """Test Mamba2ForCausalLM logits shape."""
@@ -215,7 +215,7 @@ class TestMamba2ForCausalLM(absltest.TestCase):
         input_ids = jnp.ones((batch_size, seq_len), dtype=jnp.int32)
         outputs = self.model(input_ids=input_ids)
 
-        self.assertEqual(outputs["logits"].shape, (batch_size, seq_len, self.cfg.vocab_size))
+        self.assertEqual(outputs["logits"].shape, (batch_size, seq_len, self.config.vocab_size))
         self.assertIsNone(outputs["loss"])
         self.assertIsNotNone(outputs["cache"])
 
@@ -292,11 +292,11 @@ class TestJIT(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.ModelConfig.tiny()
+        self.config = modeling.ModelConfig.tiny()
 
     def test_jit_backbone(self):
         """Test that backbone can be JIT compiled."""
-        model = modeling.Mamba2Model(self.cfg, rngs=nnx.Rngs(42))
+        model = modeling.Mamba2Model(self.config, rngs=nnx.Rngs(42))
 
         @jax.jit
         def forward_fn(model, x):
@@ -308,7 +308,7 @@ class TestJIT(absltest.TestCase):
 
     def test_jit_causal_lm(self):
         """Test that CausalLM can be JIT compiled."""
-        model = modeling.Mamba2ForCausalLM(self.cfg, rngs=nnx.Rngs(42))
+        model = modeling.Mamba2ForCausalLM(self.config, rngs=nnx.Rngs(42))
 
         input_ids = jnp.ones((2, 32), dtype=jnp.int32)
         labels = jnp.ones((2, 32), dtype=jnp.int32)
@@ -321,11 +321,11 @@ class TestGradients(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.ModelConfig.tiny()
+        self.config = modeling.ModelConfig.tiny()
 
     def test_gradients_exist(self):
         """Test that gradients can be computed."""
-        model = modeling.Mamba2ForCausalLM(self.cfg, rngs=nnx.Rngs(42))
+        model = modeling.Mamba2ForCausalLM(self.config, rngs=nnx.Rngs(42))
 
         def loss_fn(model, x, labels):
             outputs = model(input_ids=x, labels=labels)
@@ -340,7 +340,7 @@ class TestGradients(absltest.TestCase):
 
     def test_no_nan_gradients(self):
         """Test that gradients don't contain NaNs."""
-        model = modeling.Mamba2ForCausalLM(self.cfg, rngs=nnx.Rngs(42))
+        model = modeling.Mamba2ForCausalLM(self.config, rngs=nnx.Rngs(42))
 
         def loss_fn(model, x, labels):
             outputs = model(input_ids=x, labels=labels)
@@ -416,8 +416,8 @@ class TestMamba2Cache(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.ModelConfig.tiny()
-        self.model = modeling.Mamba2ForCausalLM(self.cfg, rngs=nnx.Rngs(42))
+        self.config = modeling.ModelConfig.tiny()
+        self.model = modeling.Mamba2ForCausalLM(self.config, rngs=nnx.Rngs(42))
 
     def test_cache_shapes(self):
         """Test cache state shapes are correct."""
@@ -428,17 +428,17 @@ class TestMamba2Cache(absltest.TestCase):
 
         # Check cache structure
         self.assertIsInstance(cache, modeling.Mamba2Cache)
-        self.assertLen(cache.ssm_states, self.cfg.num_hidden_layers)
-        self.assertLen(cache.conv_states, self.cfg.num_hidden_layers)
+        self.assertLen(cache.ssm_states, self.config.num_hidden_layers)
+        self.assertLen(cache.conv_states, self.config.num_hidden_layers)
 
         # Check SSM state shapes
         for ssm_state in cache.ssm_states:
-            expected_shape = (batch_size, self.cfg.num_heads, self.cfg.head_dim, self.cfg.state_size)
+            expected_shape = (batch_size, self.config.num_heads, self.config.head_dim, self.config.state_size)
             self.assertEqual(ssm_state.shape, expected_shape)
 
         # Check conv state shapes
-        conv_dim = self.cfg.intermediate_size + 2 * self.cfg.state_size
-        cache_len = self.cfg.conv_kernel - 1
+        conv_dim = self.config.intermediate_size + 2 * self.config.state_size
+        cache_len = self.config.conv_kernel - 1
         for conv_state in cache.conv_states:
             expected_shape = (batch_size, conv_dim, cache_len)
             self.assertEqual(conv_state.shape, expected_shape)
@@ -471,20 +471,20 @@ class TestMamba2Cache(absltest.TestCase):
     def test_create_empty_cache(self):
         """Test creating empty cache with correct shapes."""
         batch_size = 4
-        cache = modeling.create_empty_cache(self.cfg, batch_size)
+        cache = modeling.create_empty_cache(self.config, batch_size)
 
         self.assertIsInstance(cache, modeling.Mamba2Cache)
-        self.assertLen(cache.ssm_states, self.cfg.num_hidden_layers)
-        self.assertLen(cache.conv_states, self.cfg.num_hidden_layers)
+        self.assertLen(cache.ssm_states, self.config.num_hidden_layers)
+        self.assertLen(cache.conv_states, self.config.num_hidden_layers)
 
         # Check all states are zeros with correct shapes
         for ssm_state in cache.ssm_states:
-            expected_shape = (batch_size, self.cfg.num_heads, self.cfg.head_dim, self.cfg.state_size)
+            expected_shape = (batch_size, self.config.num_heads, self.config.head_dim, self.config.state_size)
             self.assertEqual(ssm_state.shape, expected_shape)
             self.assertTrue(jnp.all(ssm_state == 0))
 
-        conv_dim = self.cfg.intermediate_size + 2 * self.cfg.state_size
-        cache_len = self.cfg.conv_kernel - 1
+        conv_dim = self.config.intermediate_size + 2 * self.config.state_size
+        cache_len = self.config.conv_kernel - 1
         for conv_state in cache.conv_states:
             expected_shape = (batch_size, conv_dim, cache_len)
             self.assertEqual(conv_state.shape, expected_shape)

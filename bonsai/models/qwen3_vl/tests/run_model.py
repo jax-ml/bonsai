@@ -3,12 +3,10 @@ import time
 import jax
 import jax.numpy as jnp
 import numpy as np
-from huggingface_hub import snapshot_download
 from jax._src.mesh import AxisType
 from transformers import AutoProcessor
 
 from bonsai.models.qwen3_vl import modeling
-from bonsai.models.qwen3_vl import params
 
 # ============================================================================
 # MESH CONFIGURATION - Modify these to enable sharding
@@ -30,7 +28,6 @@ def generate_with_vision(
     model, cache, input_ids, pixel_values, image_grid_thw, token_type_ids, max_new_tokens: int = 50
 ):
     """Generation with vision inputs."""
-    batch_size, seq_len = input_ids.shape
     generated_tokens = []
 
     # Prefill with vision
@@ -40,7 +37,7 @@ def generate_with_vision(
     generated_tokens.append(next_token)
 
     # Decode loop (text-only after prefill)
-    for step in range(max_new_tokens - 1):
+    for _ in range(max_new_tokens - 1):
         logits, cache = modeling.forward(model, cache, next_token)
         next_token = jnp.argmax(logits, axis=-1, keepdims=True)
         generated_tokens.append(next_token)
@@ -70,22 +67,18 @@ def main():
     else:
         print("\nSharding disabled (running on single device)")
 
-    # Download model
-    print("\n1. Downloading model...")
-    model_path = snapshot_download(MODEL_ID)
-
-    # Load Flax model
-    print("\n2. Loading Flax model...")
+    # Load pretrained model
+    print("\n1. Loading pretrained model...")
     start = time.time()
-    flax_config = modeling.Qwen3VLConfig.qwen3vl_2b(use_fsdp=use_fsdp, use_tp=use_tp)
-    flax_model = params.create_model_from_safe_tensors(model_path, flax_config)
+    bonsai_config = modeling.ModelConfig.qwen3vl_2b(use_fsdp=use_fsdp, use_tp=use_tp)
+    bonsai_model = modeling.Qwen3VLForConditionalGeneration.from_pretrained(MODEL_ID, config=bonsai_config)
     print(f"   Model loaded in {time.time() - start:.2f}s")
 
     # Load processor
-    processor = AutoProcessor.from_pretrained(model_path)
+    processor = AutoProcessor.from_pretrained(MODEL_ID)
 
     print("\n" + "=" * 60)
-    print("3. Example : Image + Text Generation")
+    print("2. Example : Image + Text Generation")
     print("=" * 60)
 
     messages_vision = [
@@ -121,7 +114,7 @@ def main():
 
         # Create token_type_ids (1 for image tokens, 0 for text)
         # Image token ID is 151655
-        token_type_ids = (input_ids_vision == flax_config.image_token_id).astype(jnp.int32)
+        token_type_ids = (input_ids_vision == bonsai_config.image_token_id).astype(jnp.int32)
 
         print(f"   Pixel values: {pixel_values.shape}")
         print(f"   Image grid THW: {image_grid_thw}")
@@ -136,11 +129,11 @@ def main():
             token_type_ids = jnp.concatenate(
                 [token_type_ids, jnp.zeros((batch_vision - 1, token_type_ids.shape[1]), dtype=jnp.int32)], axis=0
             )
-        cache_vision = modeling.init_cache(flax_config, batch_vision, seq_len_vision, generate_steps=200)
+        cache_vision = modeling.init_cache(bonsai_config, batch_vision, seq_len_vision, generate_steps=200)
 
         print("\n4. Generating with vision...")
         generated_ids_vision = generate_with_vision(
-            flax_model,
+            bonsai_model,
             cache_vision,
             input_ids_vision,
             pixel_values,
