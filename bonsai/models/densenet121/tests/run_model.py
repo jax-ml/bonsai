@@ -17,18 +17,16 @@ import time
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from huggingface_hub import snapshot_download
 
-from bonsai.models.densenet121 import modeling, params
+from bonsai.models.densenet121 import modeling
 
 
 def run_model():
-    # 1. Download h5 file
-    model_ckpt_path = snapshot_download("keras/densenet_121_imagenet")
+    # 1. Define pretrained model name:
+    model_name = "keras/densenet_121_imagenet"
 
     # 2. Load pretrained model
-    config = modeling.ModelConfig.densenet_121()
-    model = params.create_model_from_h5(model_ckpt_path, config)
+    model = modeling.DenseNet.from_pretrained(model_name)
     graphdef, state = nnx.split(model)
     state = jax.tree.leaves(state)
 

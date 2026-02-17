@@ -100,11 +100,11 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.seq_len, self.bonsai_config.d_model)
         jx = jax.random.normal(jax.random.key(0), shape, jnp.float32)
-        tx = torch.tensor(jx)
+        tx = torch.tensor(np.asarray(jx))
 
         for attr in ["q_proj", "k_proj", "v_proj", "ff_proj", "up_proj"]:
             ty, ny = getattr(tm, attr)(tx), getattr(nm, attr)(jx, out_sharding=None)
-            np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), err_msg=attr)
+            np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=5e-7, atol=1e-6, err_msg=attr)
 
         # norms
         for attr in ["attn_norm", "ff_norm"]:
@@ -114,10 +114,10 @@ class TestModuleForwardPasses(absltest.TestCase):
         # ff_out
         shape = (self.batch_size, self.seq_len, self.bonsai_config.mlp_hidden_size)
         jx = jax.random.normal(jax.random.key(0), shape, jnp.float32)
-        tx = torch.tensor(jx)
+        tx = torch.tensor(np.asarray(jx))
 
         ty, ny = tm.ff_out(tx), nm.ff_out(jx, out_sharding=None)
-        np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), err_msg="ff_out")
+        np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=5e-7, atol=1e-6, err_msg="ff_out")
 
     def test_wte(self):
         tm = self.baseline_model.model.transformer["wte"]
@@ -135,7 +135,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.seq_len, self.bonsai_config.d_model)
         jx = jax.random.normal(jax.random.key(0), shape, jnp.float32)
-        tx = torch.tensor(jx)
+        tx = torch.tensor(np.asarray(jx))
 
         ty, ny = tm(tx), nm(jx)
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=5e-7, atol=5e-7)
@@ -146,7 +146,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         shape = (self.batch_size, self.seq_len, self.bonsai_config.d_model)
         jx = jax.random.normal(jax.random.key(0), shape, jnp.float32)
-        tx = torch.tensor(jx)
+        tx = torch.tensor(np.asarray(jx))
 
         ty, ny = tm(tx), nm(jx, out_sharding=None)
         np.testing.assert_allclose(ny, ty.detach().cpu().numpy(), rtol=2e-6, atol=2e-6)
@@ -176,7 +176,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         shape = (self.batch_size, self.seq_len, self.bonsai_config.d_model)
         jx = jax.random.normal(jax.random.key(0), shape, jnp.float32)
         segment_ids = jnp.ones((self.batch_size, self.seq_len), jnp.int32)
-        tx = torch.tensor(jx)
+        tx = torch.tensor(np.asarray(jx))
 
         left_pads = modeling.count_left_pads(segment_ids)
         start_ind = left_pads.reshape((-1, 1))

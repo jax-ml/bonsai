@@ -6,7 +6,6 @@ import jax.numpy as jnp
 import numpy as np
 import torch
 from absl.testing import absltest
-from huggingface_hub import snapshot_download
 from jax import P
 from jax.sharding import AxisType
 from tqdm import trange
@@ -16,7 +15,7 @@ from transformers.masking_utils import create_causal_mask, create_sliding_window
 from transformers.models.gemma3 import Gemma3ForConditionalGeneration
 from transformers.models.gemma3.modeling_gemma3 import token_type_ids_mask_function
 
-from bonsai.models.gemma3 import modeling, params
+from bonsai.models.gemma3 import modeling
 
 # used for skipping smaller tests
 SKIP_INTERMEDIATE_TESTS: bool = False
@@ -58,9 +57,8 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         cls.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(cls.mesh)
-        cls.bonsai_config = modeling.ModelConfig.gemma3_4b_it(norm_dtype=jnp.float32)
-        model_ckpt_path = snapshot_download(cls.model_name, token=access_token)
-        cls.bonsai_model = params.create_gemma3_from_pretrained(model_ckpt_path, cls.bonsai_config)
+        cls.bonsai_model = modeling.Gemma3Model.from_pretrained(cls.model_name)
+        cls.bonsai_config = cls.bonsai_model.config
 
     def _upgrade_dtypes(self):
         self.bonsai_model.embed_tokens.weight.embedding.set_value(

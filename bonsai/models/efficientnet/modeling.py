@@ -254,7 +254,7 @@ class EfficientNet(nnx.Module):
         rngs: nnx.Rngs,
     ):
         super().__init__()
-        self.cfg = cfg
+        self.config = cfg
         out_channels = round_filters(32, cfg.width_coefficient)
         self.stem_conv = nnx.Conv(
             3,
@@ -325,6 +325,32 @@ class EfficientNet(nnx.Module):
         x = self.dropout(x, deterministic=not training)
         x = self.classifier(x)
         return x
+
+    @classmethod
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None):
+        """model_name is the name of the model to load from timm.
+        For example, "efficientnet_b0".
+        """
+        from bonsai.models.efficientnet import params
+
+        if config is not None:
+            raise ValueError("config must be None when using EfficientNet.from_pretrained")
+
+        config_map = {
+            "efficientnet_b0": ModelConfig.b0,
+            "efficientnet_b1": ModelConfig.b1,
+            "efficientnet_b2": ModelConfig.b2,
+            "efficientnet_b3": ModelConfig.b3,
+            "efficientnet_b4": ModelConfig.b4,
+            "efficientnet_b5": ModelConfig.b5,
+            "efficientnet_b6": ModelConfig.b6,
+            "efficientnet_b7": ModelConfig.b7,
+        }
+        if model_name not in config_map:
+            raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+
+        config = config_map[model_name]()
+        return params._create_model_from_timm(model_name, config)
 
 
 @jax.jit

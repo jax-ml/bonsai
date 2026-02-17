@@ -6,6 +6,7 @@ from bonsai.models.gemma3.modeling import Gemma3Model, ModelConfig as Gemma3Mode
 from bonsai.models.llada.modeling import LLaDAModel, ModelConfig as LLaDAModelConfig
 from bonsai.models.mamba2.modeling import Mamba2ForCausalLM, Mamba2Forecaster, Mamba2Model, ModelConfig as Mamba2Config
 from bonsai.models.qwen3.modeling import Qwen3, ModelConfig as Qwen3Config
+from bonsai.models.qwen3_vl.modeling import Qwen3VLForConditionalGeneration, ModelConfig as Qwen3VLConfig
 from bonsai.models.resnet.modeling import ResNet, ModelConfig as ResNetConfig
 from bonsai.models.sam2.modeling import SAM2Base, SAM2ImagePredictor, ModelConfig as SAM2Config
 from bonsai.models.umt5.modeling import UMT5Model, ModelConfig as UMT5Config
@@ -36,6 +37,8 @@ __all__ = [
     "Mamba2Model",
     "Qwen3",
     "Qwen3Config",
+    "Qwen3VLConfig",
+    "Qwen3VLForConditionalGeneration",
     "ResNet",
     "ResNetConfig",
     "SAM2Base",

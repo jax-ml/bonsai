@@ -18,23 +18,24 @@ import timm
 import torch
 from absl.testing import absltest, parameterized
 
-from bonsai.models.efficientnet import params
+from bonsai.models.efficientnet.modeling import EfficientNet
 
 
 class TestModuleForwardPasses(parameterized.TestCase):
+    @staticmethod
     def _get_models_and_input_size(version: int):
         nnx_name = f"efficientnet_b{version}"
         timm_name = nnx_name if version < 5 else "tf_" + nnx_name + "_ap"
 
-        nnx_model = params.create_efficientnet_from_pretrained(version=version)
+        nnx_model = EfficientNet.from_pretrained(nnx_name)
 
         timm_model = timm.create_model(timm_name, pretrained=True)
         timm_model.eval()
-        return nnx_model, timm_model, nnx_model.cfg.resolution
+        return nnx_model, timm_model, nnx_model.config.resolution
 
     @parameterized.parameters([0, 1, 2, 3, 4, 5, 6, 7])
     def test_full(self, version: int):
-        nnx_model, timm_model, img_size = TestModuleForwardPasses._get_models_and_input_size(version)
+        nnx_model, timm_model, img_size = self._get_models_and_input_size(version)
         b = 32
         tx = torch.rand((b, 3, img_size, img_size), dtype=torch.float32)
         jx = jnp.permute_dims(tx.detach().cpu().numpy(), (0, 2, 3, 1))

@@ -17,19 +17,13 @@ import time
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from huggingface_hub import snapshot_download
-
 from bonsai.models.vit import modeling as model_lib
-from bonsai.models.vit import params
 
 
 def run_model():
-    # Download safetensors file
-    model_name = "google/vit-base-patch16-224"
-    model_ckpt_path = snapshot_download(model_name)
-
     # Load pretrained model
-    model = params.create_vit_from_pretrained(model_ckpt_path, model_lib.ModelConfig.vit_p16_224())
+    model_name = "google/vit-base-patch16-224"
+    model = model_lib.ViTClassificationModel.from_pretrained(model_name)
     graphdef, state = nnx.split(model)
     flat_state = jax.tree.leaves(state)
 

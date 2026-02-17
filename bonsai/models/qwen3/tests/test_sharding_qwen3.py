@@ -11,14 +11,14 @@ from jax.sharding import AxisType, NamedSharding
 from bonsai.models.qwen3 import modeling
 
 
-@unittest.skipIf(jax.device_count() < 4, "At least 4 devices required")
+@unittest.skipIf(jax.device_count() < 8, "At least 8 devices required")
 class TestSharding(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         fsdp, tp = modeling.ShardMode.FSDP.value, modeling.ShardMode.TP.value
 
-        cls.mesh = jax.make_mesh(((2, 2)), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        cls.mesh = jax.make_mesh(((4, 2)), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(cls.mesh)
 
         cls.bonsai_config = modeling.ModelConfig.qwen3_0_6b(True, True)
@@ -28,7 +28,7 @@ class TestSharding(absltest.TestCase):
         nm = self.bonsai_model
         fsdp = modeling.ShardMode.FSDP.value
 
-        batch_size = 2  # should be evenly divisible to num devices for fsdp axis
+        batch_size = 4  # should be evenly divisible to num devices for fsdp axis
         num_tokens = 128
         n_text = jax.device_put(
             np.arange(batch_size * num_tokens).reshape(batch_size, -1),

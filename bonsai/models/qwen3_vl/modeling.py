@@ -1,3 +1,17 @@
+# Copyright 2025 The JAX Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, TypeAlias
@@ -355,7 +369,7 @@ class Qwen3VLTextConfig:
 
 
 @dataclass(frozen=True)
-class Qwen3VLConfig:
+class ModelConfig:
     """Combined configuration for Qwen3-VL model."""
 
     vision_config: Qwen3VLVisionConfig
@@ -737,7 +751,7 @@ Cache: TypeAlias = list[LayerCache]
 
 
 def init_cache(
-    config: Qwen3VLConfig, batch_size: int, token_len: int, generate_steps: int, dtype: jnp.dtype = jnp.bfloat16
+    config: ModelConfig, batch_size: int, token_len: int, generate_steps: int, dtype: jnp.dtype = jnp.bfloat16
 ) -> Cache:
     """Initialize KV-cache for all layers."""
     cache_size = 2 ** math.ceil(math.log2(max(token_len + generate_steps, 1)))
@@ -981,7 +995,7 @@ def make_causal_mask(cache: LayerCache, seq_len: int) -> Array:
 class Qwen3VLForConditionalGeneration(nnx.Module):
     """Qwen3-VL model with language modeling head."""
 
-    def __init__(self, config: Qwen3VLConfig, *, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
         self.config = config
         self.model = Qwen3VLModel(config, rngs=rngs)
         if config.text_config.tie_word_embeddings:
@@ -998,9 +1012,10 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
     def __call__(
         self,
         input_ids: Array,
-        cache: Cache,
         pixel_values: Optional[Array] = None,
         image_grid_thw: Optional[Array] = None,
+        *,
+        cache: Cache,
         token_type_ids: Optional[Array] = None,
     ) -> Array:
         """Forward pass with KV-cache."""
@@ -1044,11 +1059,34 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
 
         return logits
 
+    @classmethod
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. For example, "google/gemma3-4b-it".
+        Note that access to the model is restricted and you need to be authorized to access it.
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.qwen3_vl import params
+
+        if config is None:
+            config_map = {
+                "Qwen/Qwen3-VL-2B-Instruct": ModelConfig.qwen3vl_2b,
+                "Qwen/Qwen3-VL-4B-Instruct": ModelConfig.qwen3vl_4b,
+                "Qwen/Qwen3-VL-8B-Instruct": ModelConfig.qwen3vl_8b,
+                "Qwen/Qwen3-VL-32B-Instruct": ModelConfig.qwen3vl_32b,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name]()
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
+        return params.create_model_from_safe_tensors(model_ckpt_path, config)
+
 
 class Qwen3VLModel(nnx.Module):
     """Qwen3-VL backbone model."""
 
-    def __init__(self, config: Qwen3VLConfig, *, rngs: nnx.Rngs):
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
         self.config = config
         self.visual = Qwen3VLVisionModel(config.vision_config, rngs=rngs)
         self.language_model = Qwen3VLTextModel(config.text_config, rngs=rngs)
@@ -1057,7 +1095,7 @@ class Qwen3VLModel(nnx.Module):
 @jax.jit
 def forward(model: Qwen3VLForConditionalGeneration, cache: Cache, input_ids: Array) -> Tuple[Array, Cache]:
     """JIT-compiled forward pass for text-only generation."""
-    logits = model(input_ids, cache)
+    logits = model(input_ids, cache=cache)
     return logits[:, -1, :], cache
 
 
@@ -1071,5 +1109,5 @@ def forward_vision(
     token_type_ids: Array,
 ) -> Tuple[Array, Cache]:
     """Forward pass with vision inputs (not JIT - vision has data-dependent shapes)."""
-    logits = model(input_ids, cache, pixel_values, image_grid_thw, token_type_ids)
+    logits = model(input_ids, pixel_values, image_grid_thw, cache=cache, token_type_ids=token_type_ids)
     return logits[:, -1, :], cache

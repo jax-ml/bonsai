@@ -325,6 +325,31 @@ class Dinov3ViTModel(nnx.Module):
 
         return {"last_hidden_state": sequence_output, "pooler_output": pooled_output}
 
+    @classmethod
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. For example, "facebook/dinov3-vits16-pretrain-lvd1689m".
+        Note that access to the model is restricted and you need to be authorized to access it.
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.dinov3 import params
+
+        if config is None:
+            config_map = {
+                "facebook/dinov3-vits16-pretrain-lvd1689m": ModelConfig.dinov3_vits16,
+                "facebook/dinov3-vits16plus-pretrain-lvd1689m": ModelConfig.dinov3_vits16plus,
+                "facebook/dinov3-vitb16-pretrain-lvd1689m": ModelConfig.dinov3_vitb16,
+                "facebook/dinov3-vitl16-pretrain-lvd1689m": ModelConfig.dinov3_vitl16,
+                "facebook/dinov3-vith16plus-pretrain-lvd1689m": ModelConfig.dinov3_vith16plus,
+                "facebook/dinov3-vit7b16-pretrain-lvd1689m": ModelConfig.dinov3_vit7b16,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name]()
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
+        return params.create_model_from_safe_tensors(model_ckpt_path, config)
+
 
 @jax.jit()
 def forward(model: Dinov3ViTModel, inputs: Array):

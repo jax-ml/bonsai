@@ -119,6 +119,7 @@ class ConvNeXt(nnx.Module):
         *,
         rngs: nnx.Rngs,
     ):
+        self.config = cfg
         self.embedding_layer = nnx.Sequential(
             nnx.Conv(cfg.in_channels, cfg.stage_dims[0], cfg.patch_size, cfg.patch_size, rngs=rngs),
             nnx.LayerNorm(cfg.stage_dims[0], epsilon=cfg.layernorm_eps, rngs=rngs),
@@ -140,6 +141,28 @@ class ConvNeXt(nnx.Module):
         x = jnp.mean(x, axis=(1, 2))
         x = self.norm(x)
         return self.head(x)
+
+    @classmethod
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. For example, "facebook/convnext-small-224"
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.convnext import params
+
+        if config is None:
+            config_map = {
+                "facebook/convnext-tiny-224": ModelConfig.convnext_tiny_224,
+                "facebook/convnext-small-224": ModelConfig.convnext_small_224,
+                "facebook/convnext-base-224": ModelConfig.convnext_base_224,
+                "facebook/convnext-large-224": ModelConfig.convnext_large_224,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name]()
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.h5")
+        return params.create_convnext_from_pretrained(model_ckpt_path, config)
 
 
 @partial(jax.jit, static_argnames=["graph_def", "train"])
