@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import torch
-from absl.testing import absltest
+from absl.testing import absltest, parameterized
 from flax import nnx
 from huggingface_hub import snapshot_download
 from jax.sharding import AxisType
@@ -27,7 +27,7 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         ## models
         cls.torch_model = Qwen3ForCausalLM.from_pretrained(model_name, dtype="auto").eval()
-        cls.bonsai_config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
+        cls.bonsai_config = modeling.ModelConfig.qwen3_0_6b()
         model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
         cls.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(cls.mesh)
@@ -122,7 +122,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         return model_inputs
 
     def _init_nnx_cache(self, batch_size: int):
-        return self.nnx_model.init_cache(
+        return modeling.init_cache(
             cfg=self.bonsai_config, batch_size=batch_size, token_len=10, generate_steps=32, dtype=jnp.float32
         )
 
@@ -389,6 +389,18 @@ class TestModuleForwardPasses(absltest.TestCase):
         torch_logits = self.torch_model(**torch_inputs).logits
 
         self._check_batched_logits(torch_inputs["left_pads"], torch_logits, nnx_logits)
+
+
+class TestModuleOtherConfigs(parameterized.TestCase):
+    @parameterized.named_parameters(
+        ("qwen3_0_6b", "qwen3_0_6b"),
+        ("qwen3_1_7b", "qwen3_1_7b"),
+        ("qwen3_4b", "qwen3_4b"),
+        ("qwen3_8b", "qwen3_8b"),
+        ("qwen3_14b", "qwen3_14b"),
+    )
+    def test_config(self, config_name):
+        _ = getattr(modeling.ModelConfig, config_name)()
 
 
 if __name__ == "__main__":
