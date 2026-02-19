@@ -138,7 +138,7 @@ model_name = "facebook/sam2-hiera-small-hf"
 MODEL_CP_PATH = "./checkpoints/" + model_name.split("/")[1]
 snapshot_download(model_name, local_dir=MODEL_CP_PATH)
 
-config = modeling.SAM2Config.sam2_small()
+config = modeling.ModelConfig.sam2_small()
 model_obj = params.create_sam2_from_pretrained(MODEL_CP_PATH + "/model.safetensors", config)
 
 predictor = modeling.SAM2ImagePredictor(model_obj)

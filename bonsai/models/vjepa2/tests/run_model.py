@@ -5,7 +5,7 @@ import cv2
 from huggingface_hub import snapshot_download, hf_hub_download
 from transformers import AutoConfig, AutoVideoProcessor
 
-from bonsai.models.vjepa2.modeling import VJEPA2Config, forward
+from bonsai.models.vjepa2.modeling import ModelConfig, forward
 from bonsai.models.vjepa2.params import create_model_from_safe_tensors
 
 
@@ -43,7 +43,7 @@ def main():
     hf_config = AutoConfig.from_pretrained(hf_repo)
     processor = AutoVideoProcessor.from_pretrained(hf_repo)
 
-    config = VJEPA2Config.vitl_fpc16_256()
+    config = ModelConfig.vitl_fpc16_256()
     model = create_model_from_safe_tensors(model_dir, cfg=config, classifier=True)
     model.eval()
 

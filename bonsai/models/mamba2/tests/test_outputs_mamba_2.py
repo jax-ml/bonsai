@@ -28,30 +28,30 @@ from flax import nnx
 from bonsai.models.mamba2 import modeling, params
 
 
-class TestMamba2Config(absltest.TestCase):
-    """Tests for Mamba2Config."""
+class TestModelConfig(absltest.TestCase):
+    """Tests for ModelConfig."""
 
     def test_default_config(self):
         """Test default config values."""
-        cfg = modeling.Mamba2Config()
+        cfg = modeling.ModelConfig()
         self.assertEqual(cfg.vocab_size, 50280)
         self.assertEqual(cfg.hidden_size, 768)
         self.assertEqual(cfg.num_hidden_layers, 24)
 
     def test_intermediate_size(self):
         """Test intermediate_size property."""
-        cfg = modeling.Mamba2Config(hidden_size=512, expand=2)
+        cfg = modeling.ModelConfig(hidden_size=512, expand=2)
         self.assertEqual(cfg.intermediate_size, 1024)
 
     def test_num_heads(self):
         """Test num_heads property."""
-        cfg = modeling.Mamba2Config(hidden_size=512, expand=2, head_dim=64)
+        cfg = modeling.ModelConfig(hidden_size=512, expand=2, head_dim=64)
         # intermediate_size = 1024, head_dim = 64 -> num_heads = 16
         self.assertEqual(cfg.num_heads, 16)
 
     def test_predefined_configs(self):
         """Test predefined configuration methods."""
-        cfg_tiny = modeling.Mamba2Config.tiny()
+        cfg_tiny = modeling.ModelConfig.tiny()
         self.assertEqual(cfg_tiny.hidden_size, 64)
         self.assertEqual(cfg_tiny.num_hidden_layers, 2)
 
@@ -155,7 +155,7 @@ class TestMamba2Model(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.Mamba2Config.tiny()
+        self.cfg = modeling.ModelConfig.tiny()
         self.model = modeling.Mamba2Model(self.cfg, rngs=nnx.Rngs(42))
 
     def test_output_shape(self):
@@ -206,7 +206,7 @@ class TestMamba2ForCausalLM(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.Mamba2Config.tiny()
+        self.cfg = modeling.ModelConfig.tiny()
         self.model = modeling.Mamba2ForCausalLM(self.cfg, rngs=nnx.Rngs(42))
 
     def test_output_shape(self):
@@ -267,7 +267,7 @@ class TestParameters(absltest.TestCase):
 
     def test_create_random_model(self):
         """Test random model creation."""
-        cfg = modeling.Mamba2Config.tiny()
+        cfg = modeling.ModelConfig.tiny()
         model = params.create_random_model(cfg, seed=42)
         self.assertIsInstance(model, modeling.Mamba2ForCausalLM)
 
@@ -292,7 +292,7 @@ class TestJIT(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.Mamba2Config.tiny()
+        self.cfg = modeling.ModelConfig.tiny()
 
     def test_jit_backbone(self):
         """Test that backbone can be JIT compiled."""
@@ -321,7 +321,7 @@ class TestGradients(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.Mamba2Config.tiny()
+        self.cfg = modeling.ModelConfig.tiny()
 
     def test_gradients_exist(self):
         """Test that gradients can be computed."""
@@ -364,7 +364,7 @@ class TestGoldenParity(absltest.TestCase):
 
     def test_hidden_state_parity(self):
         """Test last_hidden_state matches mamba_ssm reference within numerical tolerance."""
-        cfg = modeling.Mamba2Config(
+        cfg = modeling.ModelConfig(
             vocab_size=50288,
             hidden_size=768,
             state_size=128,
@@ -388,7 +388,7 @@ class TestGoldenParity(absltest.TestCase):
 
     def test_logits_parity(self):
         """Test logits match mamba_ssm reference within numerical tolerance."""
-        cfg = modeling.Mamba2Config(
+        cfg = modeling.ModelConfig(
             vocab_size=50288,
             hidden_size=768,
             state_size=128,
@@ -416,7 +416,7 @@ class TestMamba2Cache(absltest.TestCase):
 
     def setUp(self):
         super().setUp()
-        self.cfg = modeling.Mamba2Config.tiny()
+        self.cfg = modeling.ModelConfig.tiny()
         self.model = modeling.Mamba2ForCausalLM(self.cfg, rngs=nnx.Rngs(42))
 
     def test_cache_shapes(self):
