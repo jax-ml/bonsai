@@ -43,7 +43,7 @@ def run_model():
     config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
     mesh, batch_shd = None, None
 
-    # Enable sharding below if you have mtuliple devices.
+    # Enable sharding below if you have multiple devices.
     # model_ckpt_path = snapshot_download("Qwen/Qwen3-4B")
     # config = modeling.ModelConfig.qwen3_4b(use_sharding=True)
     # mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
@@ -61,7 +61,7 @@ def run_model():
 
     generate_steps = 32
     model = params.create_model_from_safe_tensors(model_ckpt_path, config)
-    cache = model.init_cache(config, batch_size, token_len, generate_steps, dtype=jnp.float32)
+    cache = modeling.init_cache(config, batch_size, token_len, generate_steps, dtype=jnp.float32)
 
     key = jax.random.key(0)
     sampler = Sampler(temperature=1.0, top_p=0.8, top_k=10)

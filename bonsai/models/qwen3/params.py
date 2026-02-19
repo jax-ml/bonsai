@@ -36,10 +36,10 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
     # Mapping of torch_keys -> (nnx_keys, (permute_rule, reshape_rule)).
     return {
         r"model\.embed_tokens\.weight": ("embedder.embedding", Transform.EMBED),
-        r"model\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (r"layers.\1.attn.q_proj.w", Transform.ATTN_Q),
-        r"model\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (r"layers.\1.attn.k_proj.w", Transform.ATTN_KV),
-        r"model\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (r"layers.\1.attn.v_proj.w", Transform.ATTN_KV),
-        r"model\.layers\.([0-9]+)\.self_attn\.o_proj\.weight": (r"layers.\1.attn.o_proj.w", Transform.ATTN_OUT),
+        r"model\.layers\.([0-9]+)\.self_attn\.q_proj\.weight": (r"layers.\1.attn.q_proj.kernel", Transform.ATTN_Q),
+        r"model\.layers\.([0-9]+)\.self_attn\.k_proj\.weight": (r"layers.\1.attn.k_proj.kernel", Transform.ATTN_KV),
+        r"model\.layers\.([0-9]+)\.self_attn\.v_proj\.weight": (r"layers.\1.attn.v_proj.kernel", Transform.ATTN_KV),
+        r"model\.layers\.([0-9]+)\.self_attn\.o_proj\.weight": (r"layers.\1.attn.o_proj.kernel", Transform.ATTN_OUT),
         # mlp
         r"model\.layers\.([0-9]+)\.mlp\.gate_proj\.weight": (r"layers.\1.mlp.gate_proj.kernel", Transform.LINEAR),
         r"model\.layers\.([0-9]+)\.mlp\.up_proj\.weight": (r"layers.\1.mlp.up_proj.kernel", Transform.LINEAR),
@@ -54,7 +54,7 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
             r"layers.\1.post_attention_layernorm.scale",
             Transform.SCALE,
         ),
-        r"lm_head\.weight": ("lm_head.w", Transform.LINEAR),
+        r"lm_head\.weight": ("lm_head.kernel", Transform.LINEAR),
     }
 
 
@@ -93,6 +93,6 @@ def create_model_from_safe_tensors(file_dir: str, cfg: model_lib.ModelConfig) ->
         raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
 
     if cfg.tie_word_embeddings:
-        state_dict["lm_head"]["w"] = state_dict["embedder"]["embedding"].T
+        state_dict["lm_head"]["kernel"] = state_dict["embedder"]["embedding"].T
     gc.collect()
     return nnx.merge(graph_def, state_dict)
