@@ -32,7 +32,7 @@ Follow these steps to contribute code:
    For more information, please see [Bonsai Pull Request checklist](#bonsai-pull-request-checklist).
 
 2. Fork the Bonsai repository by clicking the **Fork** button on the
-   [repository page](https://www.github.com/jax-ml/bonsai). This creates
+   [repository page](http://www.github.com/jax-ml/bonsai). This creates
    a copy of the Bonsai repository in your own account.
 
 3. `pip` installing your fork from source. This allows you to modify the code
@@ -124,20 +124,6 @@ Alternatively, manually run a pre-commit hook.
 ```bash
 pre-commit run --all-files
 ```
-
-### Single-change commits and pull requests
-
-We follow [jax's convention](https://docs.jax.dev/en/latest/contributing.html#single-change-commits-and-pull-requests) in single-change commits in pull requests.
-A git commit ought to be a self-contained, single change with a descriptive
-message. This helps with review and with identifying or reverting changes if
-issues are uncovered later on.
-
-**Pull requests typically comprise a single git commit.** (In some cases, for
-instance for large refactors or internal rewrites, they may contain several.)
-In preparing a pull request for review, you may need to squash together
-multiple commits. We ask that you do this prior to sending the PR for review if
-possible. The `git rebase -i` command might be useful to this end.
-
 
 ## Contributing a model
 
