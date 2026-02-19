@@ -122,6 +122,16 @@ def main():
         test_files = find_tests_in_directory(Path(target))
         if test_files:
             subprocess.run(["uv", "run", "pytest", target, "-v"], check=True)
+            if any("sharding" in path.stem for path in test_files):
+                subprocess.run(
+                    ["uv", "run", "pytest", target, "-v", "-k", "TestSharding"],
+                    check=True,
+                    env=os.environ
+                    | {
+                        "JAX_NUM_CPU_DEVICES": "4",
+                        "JAX_PLATFORMS": "cpu",
+                    },
+                )
         else:
             print(f"No tests to run for {target}")
 
