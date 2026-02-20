@@ -1,3 +1,4 @@
+import functools
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, TypeAlias
@@ -1060,7 +1061,7 @@ def forward(model: Qwen3VLForConditionalGeneration, cache: Cache, input_ids: Arr
     return logits[:, -1, :], cache
 
 
-# TODO: Add jit compilation support by fixing image size
+@functools.partial(jax.jit, static_argnums=(4,))
 def forward_vision(
     model: Qwen3VLForConditionalGeneration,
     cache: Cache,
@@ -1069,6 +1070,11 @@ def forward_vision(
     image_grid_thw: tuple[int, int, int],
     token_type_ids: Array,
 ) -> Tuple[Array, Cache]:
-    """Forward pass with vision inputs (not JIT - vision has data-dependent shapes)."""
+    """JIT-compiled forward pass with vision inputs.
+
+    image_grid_thw is marked static since its values control array shapes
+    (linspace, reshape, arange) in the vision encoder. Different image
+    resolutions will trigger recompilation (one-time cost per resolution).
+    """
     logits = model(input_ids, cache, pixel_values, image_grid_thw, token_type_ids)
     return logits[:, -1, :], cache
