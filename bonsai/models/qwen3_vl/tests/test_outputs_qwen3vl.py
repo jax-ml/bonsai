@@ -384,7 +384,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         # Create grid_thw for a small image: 1 frame, 16x16 grid
         grid_thw_np = np.array([[1, 16, 16]], dtype=np.int64)
         grid_thw_pt = torch.tensor(grid_thw_np)
-        grid_thw_tuple = (1, 16, 16)
+        grid_thw_tuple = ((1, 16, 16),)
 
         with torch.inference_mode():
             pt_rope = pt_visual.rot_pos_emb(grid_thw_pt)
@@ -411,7 +411,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
 
         grid_thw_np = np.array([[grid_t, grid_h, grid_w]], dtype=np.int64)
         grid_thw_pt = torch.tensor(grid_thw_np)
-        grid_thw_tuple = (grid_t, grid_h, grid_w)
+        grid_thw_tuple = ((grid_t, grid_h, grid_w),)
 
         key = jax.random.PRNGKey(42)
         jx = jax.random.normal(key, (num_patches, per_patch_size), dtype=jnp.float32)
@@ -629,7 +629,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         """Check position embedding interpolation output matches."""
         inputs = self._create_dummy_image_input()
         grid_thw_pt = inputs["image_grid_thw"]
-        grid_thw_tuple = tuple(int(x) for x in grid_thw_pt[0])
+        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
 
         with torch.inference_mode():
             pt_pos = self.pt_model.model.visual.fast_pos_embed_interpolate(grid_thw_pt).numpy()
@@ -641,7 +641,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         """Check RoPE embedding output matches."""
         inputs = self._create_dummy_image_input()
         grid_thw_pt = inputs["image_grid_thw"]
-        grid_thw_tuple = tuple(int(x) for x in grid_thw_pt[0])
+        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
 
         with torch.inference_mode():
             pt_rope = self.pt_model.model.visual.rot_pos_emb(grid_thw_pt)
@@ -660,7 +660,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         pixel_values_pt = inputs["pixel_values"]
         grid_thw_pt = inputs["image_grid_thw"]
         pixel_values_jax = jnp.array(pixel_values_pt.numpy())
-        grid_thw_tuple = tuple(int(x) for x in grid_thw_pt[0])
+        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
 
         # Get patch + pos embeddings
         with torch.inference_mode():
@@ -680,7 +680,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         pixel_values_pt = inputs["pixel_values"]
         grid_thw_pt = inputs["image_grid_thw"]
         pixel_values_jax = jnp.array(pixel_values_pt.numpy())
-        grid_thw_tuple = tuple(int(x) for x in grid_thw_pt[0])
+        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
 
         with torch.inference_mode():
             pt_result = self.pt_model.model.visual(pixel_values_pt, grid_thw_pt)
@@ -730,7 +730,7 @@ class TestVisionTextGeneration(PretrainedModelMixin, absltest.TestCase):
         input_ids_pt = inputs["input_ids"]
 
         pixel_values_jax = jnp.array(pixel_values_pt.numpy())
-        grid_thw_tuple = tuple(int(x) for x in grid_thw_pt[0])
+        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
         input_ids_jax = jnp.array(input_ids_pt.numpy())
 
         # Create token_type_ids: 1 for image tokens, 0 for text
@@ -785,7 +785,7 @@ class TestVisionTextGeneration(PretrainedModelMixin, absltest.TestCase):
         )
 
         pixel_values_jax = jnp.array(inputs["pixel_values"].numpy())
-        grid_thw_tuple = tuple(int(x) for x in inputs["image_grid_thw"][0])
+        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in inputs["image_grid_thw"])
         input_ids_jax = jnp.array(inputs["input_ids"].numpy())
 
         # Create token_type_ids: 1 for image tokens, 0 for text
