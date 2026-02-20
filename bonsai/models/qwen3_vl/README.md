@@ -18,7 +18,6 @@ This directory contains a pure JAX implementation of the [Qwen3-VL SOTA Vision L
 | [Qwen3-VL-32B-Thinking](https://huggingface.co/Qwen/Qwen3-VL-32B-Thinking) | **✅ Supported** |
 | [NVIDIA-Cosmos-Reason2-2B](https://huggingface.co/nvidia/Cosmos-Reason2-2B) | **✅ Supported** |
 | [NVIDIA-Cosmos-Reason2-8B](https://huggingface.co/nvidia/Cosmos-Reason2-8B) | **✅ Supported** |
-
 | **MoE Models** | |
 | [Qwen3-VL-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B) | **🟡 Not started** |
 | [Qwen3-VL-235B-A22B](https://huggingface.co/Qwen/Qwen3-235B-A22B) | **🟡 Not started** |
