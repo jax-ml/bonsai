@@ -96,5 +96,25 @@ class TestForwardPass(absltest.TestCase):
         np.testing.assert_allclose(jy, ty.detach().cpu().numpy(), rtol=1e-5, atol=2e-2)
 
 
+class TestRopePositionEmbedding(absltest.TestCase):
+    def test_non_square_patch_size_uses_width_patch_dimension(self):
+        config = model_lib.ModelConfig(
+            patch_size=(16, 8),
+            hidden_size=64,
+            num_attention_heads=1,
+            image_size=64,
+        )
+        rope = model_lib.Dinov3ViTRopePositionEmbedding(config)
+
+        x = jnp.zeros((1, 3, 64, 40), dtype=jnp.float32)
+        cos, sin = rope(x)
+
+        _, _, height, width = x.shape
+        expected_num_patches = (height // config.patch_size[0]) * (width // config.patch_size[1])
+        expected_head_dim = config.hidden_size // config.num_attention_heads
+        self.assertEqual(cos.shape, (expected_num_patches, expected_head_dim))
+        self.assertEqual(sin.shape, (expected_num_patches, expected_head_dim))
+
+
 if __name__ == "__main__":
     absltest.main()
