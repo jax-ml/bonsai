@@ -423,6 +423,25 @@ class VAE(nnx.Module):
 
         return x
 
+    @classmethod
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. For example, "stabilityai/sd-vae-ft-mse"
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.vae import params
+
+        if config is None:
+            config_map = {
+                "stabilityai/sd-vae-ft-mse": ModelConfig.stable_diffusion_v1_5,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name]()
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
+        return params.create_model_from_safe_tensors(model_ckpt_path, config)
+
 
 @jax.jit
 def forward(model, x):

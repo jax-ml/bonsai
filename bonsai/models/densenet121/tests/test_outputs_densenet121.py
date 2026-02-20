@@ -19,9 +19,7 @@ import numpy as np
 import tensorflow as tf
 from absl.testing import absltest
 from flax import nnx
-from huggingface_hub import snapshot_download
-
-from bonsai.models.densenet121 import modeling, params
+from bonsai.models.densenet121 import modeling
 
 
 class TestModuleForwardPasses(absltest.TestCase):
@@ -30,10 +28,7 @@ class TestModuleForwardPasses(absltest.TestCase):
         jax.config.update("jax_default_matmul_precision", "float32")
         try:
             self.ref_model = keras_hub.models.ImageClassifier.from_preset("densenet_121_imagenet")
-            model_ckpt_path = snapshot_download("keras/densenet_121_imagenet")
-            graph_def, state = nnx.split(
-                params.create_model_from_h5(model_ckpt_path, modeling.ModelConfig.densenet_121())
-            )
+            graph_def, state = nnx.split(modeling.DenseNet.from_pretrained("keras/densenet_121_imagenet"))
             state = jax.tree.map(lambda x: x.astype(jnp.float32) if isinstance(x, jax.Array) else x, state)
             self.nnx_model = nnx.merge(graph_def, state)
 

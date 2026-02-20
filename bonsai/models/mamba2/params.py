@@ -202,7 +202,7 @@ def load_pytorch_weights(
     loaded_keys: list[str] = []
     skipped_keys: list[str] = []
 
-    tie = getattr(model.cfg, "tie_word_embeddings", False)
+    tie = getattr(model.config, "tie_word_embeddings", False)
     embedding_loaded = False
 
     for pt_key, pt_tensor in state_dict.items():

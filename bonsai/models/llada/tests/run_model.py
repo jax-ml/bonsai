@@ -16,12 +16,12 @@
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import torch
-from huggingface_hub import snapshot_download
 from jax.sharding import AxisType
 from transformers import AutoTokenizer
 
-from bonsai.models.llada import modeling, params
+from bonsai.models.llada import modeling
 
 
 def run_model():
@@ -34,9 +34,8 @@ def run_model():
 
     mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
     jax.set_mesh(mesh)
-    model_ckpt_path = snapshot_download(model_name)
-    config = modeling.ModelConfig.llada_8b_it(False, False, dtype=jnp.float32)
-    model = params.create_llada_from_pretrained(model_ckpt_path, config, mesh=mesh)
+    model = modeling.LLaDAModel.from_pretrained(model_name)
+    config = model.config
 
     # Prepare inputs
     prompts = [
@@ -68,7 +67,7 @@ def run_model():
         confidence_eos_eot_inf=False,
         key=jax.random.key(0),
     )
-    out = torch.tensor(out)
+    out = torch.tensor(np.asarray(out))
     output = processor.batch_decode(out[:, input_ids.shape[1] :], skip_special_tokens=True)
     for i, o in enumerate(output):
         print(f"Output {i}:\t{o}")

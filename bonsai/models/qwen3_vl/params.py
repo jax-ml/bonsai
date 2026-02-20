@@ -311,7 +311,7 @@ def _assign_weights(
 
 def create_model_from_safe_tensors(
     file_dir: str,
-    config: model_lib.Qwen3VLConfig,
+    config: model_lib.ModelConfig,
     mesh: jax.sharding.Mesh | None = None,
     model_filename: str | None = None,
 ) -> model_lib.Qwen3VLForConditionalGeneration:
@@ -342,10 +342,10 @@ def create_model_from_safe_tensors(
     # Create model with abstract state (no actual arrays)
     model = nnx.eval_shape(lambda: model_lib.Qwen3VLForConditionalGeneration(config, rngs=nnx.Rngs(params=0)))
     graph_def, abs_state = nnx.split(model)
-    state_dict = abs_state.to_pure_dict()
+    state_dict = nnx.to_pure_dict(abs_state)
 
     # Get sharding if mesh provided
-    sharding = nnx.get_named_sharding(abs_state, mesh).to_pure_dict() if mesh is not None else None
+    sharding = nnx.to_pure_dict(nnx.get_named_sharding(abs_state, mesh)) if mesh is not None else None
 
     # Key mapping - depends on whether embeddings are tied
     key_mapping = _get_key_and_transform_mapping(config.text_config.tie_word_embeddings)

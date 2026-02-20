@@ -305,7 +305,7 @@ class Mamba2Mixer(nnx.Module):
     """Mamba2 mixer block using the SSD algorithm."""
 
     def __init__(self, cfg: ModelConfig, layer_idx: int, *, rngs: nnx.Rngs):
-        self.cfg = cfg
+        self.config = cfg
         self.layer_idx = layer_idx
         self.hidden_size = cfg.hidden_size
         self.ssm_state_size = cfg.state_size
@@ -408,7 +408,7 @@ class Mamba2Block(nnx.Module):
     """Single Mamba2 block with pre-norm and residual connection."""
 
     def __init__(self, cfg: ModelConfig, layer_idx: int, *, rngs: nnx.Rngs):
-        self.cfg = cfg
+        self.config = cfg
         self.residual_in_fp32 = cfg.residual_in_fp32
         self.norm = RMSNorm(cfg.hidden_size, eps=cfg.layer_norm_epsilon, rngs=rngs)
         self.mixer = Mamba2Mixer(cfg, layer_idx=layer_idx, rngs=rngs)
@@ -431,7 +431,7 @@ class Mamba2Model(nnx.Module):
     """Mamba2 backbone model (no task-specific head)."""
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
-        self.cfg = cfg
+        self.config = cfg
         self.embedder = nnx.Embed(num_embeddings=cfg.vocab_size, features=cfg.hidden_size, rngs=rngs)
         self.layers = nnx.List([Mamba2Block(cfg, layer_idx=i, rngs=rngs) for i in range(cfg.num_hidden_layers)])
         self.final_norm = RMSNorm(cfg.hidden_size, eps=cfg.layer_norm_epsilon, rngs=rngs)
@@ -451,12 +451,12 @@ class Mamba2Model(nnx.Module):
 
         # Extract per-layer states from cache or initialize
         if cache is None:
-            conv_states = [None] * self.cfg.num_hidden_layers
-            ssm_states = [None] * self.cfg.num_hidden_layers
+            conv_states = [None] * self.config.num_hidden_layers
+            ssm_states = [None] * self.config.num_hidden_layers
         else:
-            if len(cache.conv_states) != self.cfg.num_hidden_layers:
+            if len(cache.conv_states) != self.config.num_hidden_layers:
                 raise ValueError("cache.conv_states length must equal num_hidden_layers")
-            if len(cache.ssm_states) != self.cfg.num_hidden_layers:
+            if len(cache.ssm_states) != self.config.num_hidden_layers:
                 raise ValueError("cache.ssm_states length must equal num_hidden_layers")
             conv_states = cache.conv_states
             ssm_states = cache.ssm_states
@@ -492,7 +492,7 @@ class Mamba2ForCausalLM(nnx.Module):
     """Mamba2 model with causal language modeling head."""
 
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
-        self.cfg = cfg
+        self.config = cfg
         self.backbone = Mamba2Model(cfg, rngs=rngs)
         if not cfg.tie_word_embeddings:
             self.lm_head = nnx.Linear(cfg.hidden_size, cfg.vocab_size, use_bias=False, rngs=rngs)
@@ -509,7 +509,7 @@ class Mamba2ForCausalLM(nnx.Module):
         backbone_outputs = self.backbone(input_ids=input_ids, cache=cache)
         hidden_states = backbone_outputs["last_hidden_state"]
 
-        if self.cfg.tie_word_embeddings:
+        if self.config.tie_word_embeddings:
             logits = hidden_states @ self.backbone.embedder.embedding[:].T
         else:
             logits = self.lm_head(hidden_states)
@@ -522,6 +522,7 @@ class Mamba2ForCausalLM(nnx.Module):
 
         return {"logits": logits, "loss": loss, "cache": backbone_outputs["cache"]}
 
+    # TODO: reconsile the API with other models
     @classmethod
     def from_pretrained(
         cls,

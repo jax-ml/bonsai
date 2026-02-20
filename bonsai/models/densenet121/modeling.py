@@ -34,6 +34,22 @@ class ModelConfig:
             growth_rate=32,
         )
 
+    @classmethod
+    def densenet_169(cls):
+        return cls(
+            num_classes=1000,
+            dense_block_layers=[6, 12, 32, 32],
+            growth_rate=32,
+        )
+
+    @classmethod
+    def densenet_201(cls):
+        return cls(
+            num_classes=1000,
+            dense_block_layers=[6, 12, 48, 32],
+            growth_rate=32,
+        )
+
 
 class DenseBlock(nnx.Module):
     def __init__(self, num_layers: int, in_channels: int, growth_rate: int, *, rngs: nnx.Rngs):
@@ -118,6 +134,27 @@ class DenseNet(nnx.Module):
         x = self.linear(x)
 
         return x
+
+    @classmethod
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. For example, "keras/densenet_121_imagenet"
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.densenet121 import params
+
+        if config is None:
+            config_map = {
+                "keras/densenet_121_imagenet": ModelConfig.densenet_121,
+                "keras/densenet_169_imagenet": ModelConfig.densenet_169,
+                "keras/densenet_201_imagenet": ModelConfig.densenet_201,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name]()
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.h5")
+        return params.create_model_from_h5(model_ckpt_path, config)
 
 
 @jax.jit

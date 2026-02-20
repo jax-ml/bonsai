@@ -18,9 +18,9 @@ from enum import Enum
 from typing import TypeAlias
 
 import jax
+import jax.numpy as jnp
 from flax import nnx
 from jax import P
-from jax import numpy as jnp
 from jax.sharding import PartitionSpec, get_abstract_mesh, reshard
 from jaxtyping import Array, ArrayLike
 
@@ -378,6 +378,7 @@ class DecoderLayer(nnx.Module):
 
 class Qwen3(nnx.Module):
     def __init__(self, cfg: ModelConfig, *, rngs: nnx.Rngs):
+        self.config = cfg
         embedding_metadata = {"out_sharding": cfg.shd_cfg.emb_vd}
         self.embedder = nnx.Embed(
             num_embeddings=cfg.vocab_size,
@@ -403,6 +404,33 @@ class Qwen3(nnx.Module):
             x = layer(x, cache[i], segment_ids)
         logits = self.lm_head(self.final_norm(x), out_sharding=self.out_emb_shd)
         return logits
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_name: str,
+        config: ModelConfig | None = None,
+    ):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. For example, "Qwen/Qwen3-0.6B".
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.qwen3 import params
+
+        if config is None:
+            config_map = {
+                "Qwen/Qwen3-0.6B": ModelConfig.qwen3_0_6b,
+                "Qwen/Qwen3-1.7B": ModelConfig.qwen3_1_7b,
+                "Qwen/Qwen3-4B": ModelConfig.qwen3_4b,
+                "Qwen/Qwen3-8B": ModelConfig.qwen3_8b,
+                "Qwen/Qwen3-14B": ModelConfig.qwen3_14b,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name]()
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
+        return params.create_model_from_safe_tensors(model_ckpt_path, config)
 
 
 def init_cache(

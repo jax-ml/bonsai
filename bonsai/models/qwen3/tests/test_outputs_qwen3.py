@@ -4,7 +4,6 @@ import numpy as np
 import torch
 from absl.testing import absltest, parameterized
 from flax import nnx
-from huggingface_hub import snapshot_download
 from jax.sharding import AxisType
 from jax.typing import DTypeLike
 from transformers import AutoTokenizer
@@ -12,7 +11,7 @@ from transformers.cache_utils import DynamicCache
 from transformers.masking_utils import create_causal_mask, create_sliding_window_causal_mask
 from transformers.models.qwen3 import Qwen3ForCausalLM
 
-from bonsai.models.qwen3 import modeling, params
+from bonsai.models.qwen3 import modeling
 from bonsai.models.qwen3.tests.run_model import tokenize
 
 jax.config.update("jax_default_matmul_precision", "float32")
@@ -27,13 +26,13 @@ class TestModuleForwardPasses(absltest.TestCase):
 
         ## models
         cls.torch_model = Qwen3ForCausalLM.from_pretrained(model_name, dtype="auto").eval()
-        cls.bonsai_config = modeling.ModelConfig.qwen3_0_6b()
-        model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
         cls.mesh = jax.make_mesh(((1, 1)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(cls.mesh)
 
         # Cast JAX model to float32 for precision matching with PyTorch CPU
-        graph_def, state = nnx.split(params.create_model_from_safe_tensors(model_ckpt_path, cls.bonsai_config))
+        model = modeling.Qwen3.from_pretrained(model_name)
+        cls.bonsai_config = model.config
+        graph_def, state = nnx.split(model)
         state = jax.tree.map(lambda x: x.astype(jnp.float32) if isinstance(x, jax.Array) else x, state)
         cls.nnx_model = nnx.merge(graph_def, state)
 

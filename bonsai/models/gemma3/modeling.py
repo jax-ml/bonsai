@@ -486,13 +486,13 @@ class Gemma3RMSNorm(nnx.Module):
 
 class Gemma3TextScaledWordEmbedding(nnx.Module):
     def __init__(self, cfg: TextConfig, *, rngs: nnx.Rngs):
-        self.cfg = cfg
+        self.config = cfg
         embedding_metadata = {"out_sharding": cfg.shd_cfg.emb_kernel}
         self.weight = nnx.Embed(cfg.vocab_size, cfg.hidden_size, embedding_metadata=embedding_metadata, rngs=rngs)
         self.embed_scale = nnx.data(jnp.array(cfg.hidden_size**0.5, dtype=jnp.bfloat16).astype(jnp.float32))
 
     def __call__(self, input_ids: Array):
-        shd = self.cfg.shd_cfg.activation
+        shd = self.config.shd_cfg.activation
         x = self.weight(input_ids, out_sharding=shd) * self.embed_scale
         return x
 
@@ -809,6 +809,26 @@ class Gemma3Model(nnx.Module):
             out = out * self.final_logit_softcapping
 
         return out
+
+    @classmethod
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. For example, "google/gemma3-4b-it".
+        Note that access to the model is restricted and you need to be authorized to access it.
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.gemma3 import params
+
+        if config is None:
+            config_map = {
+                "google/gemma-3-4b-it": ModelConfig.gemma3_4b_it,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name](norm_dtype=jnp.float32)
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
+        return params.create_gemma3_from_pretrained(model_ckpt_path, config)
 
 
 @jax.jit
