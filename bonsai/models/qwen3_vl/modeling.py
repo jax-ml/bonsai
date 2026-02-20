@@ -585,9 +585,9 @@ class Qwen3VLVisionModel(nnx.Module):
             ]
         )
 
-    def _fast_pos_embed_interpolate(self, grid_thw: Array) -> Array:
+    def _fast_pos_embed_interpolate(self, grid_thw: tuple[int, int, int]) -> Array:
         """Bilinear interpolation for position embeddings, matching PyTorch."""
-        grid_h, grid_w = int(grid_thw[0, 1]), int(grid_thw[0, 2])
+        grid_t, grid_h, grid_w = grid_thw
 
         # Create interpolation indices
         h_idxs = jnp.linspace(0, self.num_grid_per_side - 1, grid_h)
@@ -626,7 +626,7 @@ class Qwen3VLVisionModel(nnx.Module):
 
         # Apply spatial merge permutation
         merge_size = self.config.spatial_merge_size
-        grid_t = int(grid_thw[0, 0])
+        # grid_t already unpacked above
 
         # Reshape: (H*W, D) -> (H, W, D)
         pos_embeds = pos_embeds.reshape(grid_h, grid_w, -1)
@@ -645,11 +645,10 @@ class Qwen3VLVisionModel(nnx.Module):
 
         return pos_embeds
 
-    def _rot_pos_emb(self, grid_thw: Array) -> Tuple[Array, Array]:
+    def _rot_pos_emb(self, grid_thw: tuple[int, int, int]) -> Tuple[Array, Array]:
         """Compute rotary position embeddings matching PyTorch rot_pos_emb."""
         merge_size = self.config.spatial_merge_size
-        grid_h, grid_w = int(grid_thw[0, 1]), int(grid_thw[0, 2])
-        grid_t = int(grid_thw[0, 0])
+        grid_t, grid_h, grid_w = grid_thw
 
         # Compute merged dimensions
         merged_h, merged_w = grid_h // merge_size, grid_w // merge_size
@@ -698,7 +697,7 @@ class Qwen3VLVisionModel(nnx.Module):
         sin = jnp.sin(emb)
         return cos, sin
 
-    def __call__(self, hidden_states: Array, grid_thw: Array) -> Tuple[Array, list[Array]]:
+    def __call__(self, hidden_states: Array, grid_thw: tuple[int, int, int]) -> Tuple[Array, list[Array]]:
         hidden_states = self.patch_embed(hidden_states)
         seq_len = hidden_states.shape[0]
 
@@ -1000,7 +999,7 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
         input_ids: Array,
         cache: Cache,
         pixel_values: Optional[Array] = None,
-        image_grid_thw: Optional[Array] = None,
+        image_grid_thw: Optional[tuple[int, int, int]] = None,
         token_type_ids: Optional[Array] = None,
     ) -> Array:
         """Forward pass with KV-cache."""
@@ -1067,7 +1066,7 @@ def forward_vision(
     cache: Cache,
     input_ids: Array,
     pixel_values: Array,
-    image_grid_thw: Array,
+    image_grid_thw: tuple[int, int, int],
     token_type_ids: Array,
 ) -> Tuple[Array, Cache]:
     """Forward pass with vision inputs (not JIT - vision has data-dependent shapes)."""
