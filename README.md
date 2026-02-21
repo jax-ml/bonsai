@@ -33,6 +33,7 @@ These are listed based on status and then alphabetically.
 | [Dinov3](bonsai/models/dinov3)                | Vision FM            | ✅     |         |
 | [VJEPA-2](bonsai/models/vjepa2)               | Video FWM            | ✅     |         |
 | [Qwen3VL](bonsai/models/qwen3_vl)             | VLM                  | ✅     |         |
+| [Nvidia-Cosmos-Reason2](bonsai/models/qwen3_vl)| VLM                  | ✅     |         |
 | [Gemma3](bonsai/models/gemma3)                | VLM                  | ⚙️     | Local attention cache and todos in file        |
 | [Mamba2](bonsai/models/mamba2)                | Language SSM         | ⚙️     | Caching and sharding        |
 | [umT5](bonsai/models/umt5)                    | LLM                  | ⚙️     | Caching and sharding        |
