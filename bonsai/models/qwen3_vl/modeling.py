@@ -648,9 +648,9 @@ class Qwen3VLVisionModel(nnx.Module):
 
     def _fast_pos_embed_interpolate(self, grid_thw: GridTHW) -> Array:
         """Bilinear interpolation for position embeddings, handles multiple images."""
-        results = []
-        for grid_t, grid_h, grid_w in grid_thw:
-            results.append(self._fast_pos_embed_interpolate_single(grid_t, grid_h, grid_w))
+        results = [
+            self._fast_pos_embed_interpolate_single(grid_t, grid_h, grid_w) for grid_t, grid_h, grid_w in grid_thw
+        ]
         return jnp.concatenate(results, axis=0)
 
     def _rot_pos_emb_single(self, grid_t: int, grid_h: int, grid_w: int) -> Array:
@@ -699,9 +699,7 @@ class Qwen3VLVisionModel(nnx.Module):
 
     def _rot_pos_emb(self, grid_thw: GridTHW) -> Tuple[Array, Array]:
         """Compute rotary position embeddings, handles multiple images."""
-        embs = []
-        for grid_t, grid_h, grid_w in grid_thw:
-            embs.append(self._rot_pos_emb_single(grid_t, grid_h, grid_w))
+        embs = [self._rot_pos_emb_single(grid_t, grid_h, grid_w) for grid_t, grid_h, grid_w in grid_thw]
         emb = jnp.concatenate(embs, axis=0)
         cos = jnp.cos(emb)
         sin = jnp.sin(emb)
