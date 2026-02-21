@@ -30,9 +30,9 @@ These are listed based on status and then alphabetically.
 | [Qwen 3](bonsai/models/qwen3)                 | LLM                  | ✅     |         |
 | [ResNet50](bonsai/models/resnet)              | Image classification | ✅     |         |
 | [VGG](bonsai/models/vgg19)                    | Image classification | ✅     |         |
-| [Dinov3](bonsai/models/dinov3)                | Vision FM            |  ✅     |         |
-| [VJEPA-2](bonsai/models/vjepa2)                | Video FWM            |  ✅     |         |
-| [Qwen3VL](bonsai/models/qwen3_vl)                | VLM            |  ✅     |         |
+| [Dinov3](bonsai/models/dinov3)                | Vision FM            | ✅     |         |
+| [VJEPA-2](bonsai/models/vjepa2)               | Video FWM            | ✅     |         |
+| [Qwen3VL](bonsai/models/qwen3_vl)             | VLM                  | ✅     |         |
 | [Gemma3](bonsai/models/gemma3)                | VLM                  | ⚙️     | Local attention cache and todos in file        |
 | [Mamba2](bonsai/models/mamba2)                | Language SSM         | ⚙️     | Caching and sharding        |
 | [umT5](bonsai/models/umt5)                    | LLM                  | ⚙️     | Caching and sharding        |
