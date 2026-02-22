@@ -266,6 +266,74 @@ class TestSharding(absltest.TestCase):
 
         jax.set_mesh(jax.make_mesh((1,), ("dummy",), axis_types=(AxisType.Explicit,)))
 
+    def test_full_vision_text_forward(self):
+        """Test full vision+text forward pass with sharding (FSDP=4, TP=2)."""
+        mesh = jax.make_mesh((4, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        jax.set_mesh(mesh)
+
+        cfg = get_test_config(use_fsdp=True, use_tp=True)
+        rngs = nnx.Rngs(0)
+        fsdp = modeling.ShardMode.FSDP.value
+        model = modeling.Qwen3VLForConditionalGeneration(cfg, rngs=rngs)
+
+        batch_size = 4  # divisible by fsdp=4
+        num_tokens = 128
+        patch_size = cfg.vision_config.patch_size  # 14
+        temporal_patch_size = cfg.vision_config.temporal_patch_size  # 2
+        in_channels = cfg.vision_config.in_channels  # 3
+        spatial_merge_size = cfg.vision_config.spatial_merge_size  # 2
+        per_patch_features = in_channels * temporal_patch_size * patch_size * patch_size  # 3 * 2 * 14 * 14 = 1176
+
+        # Each image: grid (T=1, H=patch_size, W=patch_size) -> patch_size*patch_size patches before merge
+        grid_h, grid_w = patch_size, patch_size  # 14x14 = 196 patches per image
+        num_patches_per_image = grid_h * grid_w  # 196
+        merged_patches_per_image = num_patches_per_image // (spatial_merge_size**2)  # 196 // 4 = 49
+        total_patches = num_patches_per_image * batch_size  # 196 * 4 = 784
+
+        # Create pixel_values: (total_patches, per_patch_features)
+        key = jax.random.key(0)
+        pixel_values = jax.random.uniform(
+            key,
+            (total_patches, per_patch_features),
+            dtype=jnp.float32,
+            minval=-1,
+            maxval=1,
+        )
+
+        # Create text input_ids: (batch, num_tokens)
+        n_text = jax.device_put(
+            np.arange(batch_size * num_tokens).reshape(batch_size, -1) % cfg.text_config.vocab_size,
+            device=P(fsdp),
+        )
+
+        # Create token_type_ids: 1 for image token positions, 0 for text
+        # Mark merged_patches_per_image consecutive positions as image tokens per batch
+        token_type_ids = np.zeros((batch_size, num_tokens), dtype=np.int32)
+        token_type_ids[:, 12 : 12 + merged_patches_per_image] = 1
+        n_tti = jax.device_put(token_type_ids, device=P(fsdp))
+
+        # One image per batch item -> batch_size entries in grid_thw
+        image_grid_thw = ((1, grid_h, grid_w),) * batch_size
+
+        # Init cache
+        cache = modeling.init_cache(cfg, batch_size, num_tokens, 1, jnp.float32)
+
+        # Forward pass - should complete without error
+        out = model(n_text, cache, pixel_values, image_grid_thw, n_tti)
+
+        # Verify output shape: (batch, seq_len, vocab_size)
+        self.assertEqual(out.shape, (batch_size, num_tokens, cfg.text_config.vocab_size))
+
+        # Verify output is sharded correctly
+        from jax.sharding import NamedSharding
+
+        self.assertIsInstance(out.sharding, NamedSharding)
+        expected_logit_shd = P(cfg.text_config.shd_cfg.act_btd[0], None, None)
+        self.assertEqual(out.sharding.spec, expected_logit_shd)
+        print(f"Full vision+text forward: shape={out.shape}, sharding={out.sharding.spec} ✓")
+
+        jax.set_mesh(jax.make_mesh((1,), ("dummy",), axis_types=(AxisType.Explicit,)))
+
 
 if __name__ == "__main__":
     absltest.main()

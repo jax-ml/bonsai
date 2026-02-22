@@ -382,9 +382,8 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         flax_visual = self.flax_model.model.visual
 
         # Create grid_thw for a small image: 1 frame, 16x16 grid
-        grid_thw_np = np.array([[1, 16, 16]], dtype=np.int64)
-        grid_thw_pt = torch.tensor(grid_thw_np)
         grid_thw_tuple = ((1, 16, 16),)
+        grid_thw_pt = torch.tensor(grid_thw_tuple, dtype=torch.long)
 
         with torch.inference_mode():
             pt_rope = pt_visual.rot_pos_emb(grid_thw_pt)
@@ -409,9 +408,8 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         grid_t, grid_h, grid_w = 1, 16, 16
         num_patches = grid_t * grid_h * grid_w  # 256 patches before merge
 
-        grid_thw_np = np.array([[grid_t, grid_h, grid_w]], dtype=np.int64)
-        grid_thw_pt = torch.tensor(grid_thw_np)
         grid_thw_tuple = ((grid_t, grid_h, grid_w),)
+        grid_thw_pt = torch.tensor(grid_thw_tuple, dtype=torch.long)
 
         key = jax.random.PRNGKey(42)
         jx = jax.random.normal(key, (num_patches, per_patch_size), dtype=jnp.float32)
