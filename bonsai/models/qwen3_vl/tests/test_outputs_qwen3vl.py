@@ -382,9 +382,8 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         flax_visual = self.flax_model.model.visual
 
         # Create grid_thw for a small image: 1 frame, 16x16 grid
-        grid_thw_np = np.array([[1, 16, 16]], dtype=np.int64)
-        grid_thw_pt = torch.tensor(grid_thw_np)
-        grid_thw_jax = jnp.array(grid_thw_np)
+        grid_thw_tuple = ((1, 16, 16),)
+        grid_thw_pt = torch.tensor(grid_thw_tuple, dtype=torch.long)
 
         with torch.inference_mode():
             pt_rope = pt_visual.rot_pos_emb(grid_thw_pt)
@@ -392,7 +391,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
             pt_cos = pt_emb.cos().numpy()
             pt_sin = pt_emb.sin().numpy()
 
-        flax_cos, flax_sin = flax_visual._rot_pos_emb(grid_thw_jax)
+        flax_cos, flax_sin = flax_visual._rot_pos_emb(grid_thw_tuple)
 
         np.testing.assert_allclose(np.array(flax_cos), pt_cos, rtol=1e-5, atol=1e-5)
         np.testing.assert_allclose(np.array(flax_sin), pt_sin, rtol=1e-5, atol=1e-5)
@@ -409,9 +408,8 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
         grid_t, grid_h, grid_w = 1, 16, 16
         num_patches = grid_t * grid_h * grid_w  # 256 patches before merge
 
-        grid_thw_np = np.array([[grid_t, grid_h, grid_w]], dtype=np.int64)
-        grid_thw_pt = torch.tensor(grid_thw_np)
-        grid_thw_jax = jnp.array(grid_thw_np)
+        grid_thw_tuple = ((grid_t, grid_h, grid_w),)
+        grid_thw_pt = torch.tensor(grid_thw_tuple, dtype=torch.long)
 
         key = jax.random.PRNGKey(42)
         jx = jax.random.normal(key, (num_patches, per_patch_size), dtype=jnp.float32)
@@ -428,7 +426,7 @@ class TestVisionComponentsEquivalence(absltest.TestCase):
             else:
                 pt_out = pt_result[0].numpy()
 
-        flax_out, flax_deepstack = flax_visual(jx, grid_thw_jax)
+        flax_out, flax_deepstack = flax_visual(jx, grid_thw_tuple)
         flax_out = np.array(flax_out)
 
         # After spatial merge (2x2), 256 patches become 64
@@ -629,11 +627,11 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         """Check position embedding interpolation output matches."""
         inputs = self._create_dummy_image_input()
         grid_thw_pt = inputs["image_grid_thw"]
-        grid_thw_jax = jnp.array(grid_thw_pt.numpy())
+        grid_thw_tuple = tuple(grid_thw_pt.long().tolist())
 
         with torch.inference_mode():
             pt_pos = self.pt_model.model.visual.fast_pos_embed_interpolate(grid_thw_pt).numpy()
-        flax_pos = np.array(self.flax_model.model.visual._fast_pos_embed_interpolate(grid_thw_jax))
+        flax_pos = np.array(self.flax_model.model.visual._fast_pos_embed_interpolate(grid_thw_tuple))
 
         np.testing.assert_allclose(flax_pos, pt_pos, rtol=1e-5, atol=3e-5)
 
@@ -641,7 +639,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         """Check RoPE embedding output matches."""
         inputs = self._create_dummy_image_input()
         grid_thw_pt = inputs["image_grid_thw"]
-        grid_thw_jax = jnp.array(grid_thw_pt.numpy())
+        grid_thw_tuple = tuple(grid_thw_pt.long().tolist())
 
         with torch.inference_mode():
             pt_rope = self.pt_model.model.visual.rot_pos_emb(grid_thw_pt)
@@ -649,7 +647,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
             pt_cos = pt_emb.cos().numpy()
             pt_sin = pt_emb.sin().numpy()
 
-        flax_cos, flax_sin = self.flax_model.model.visual._rot_pos_emb(grid_thw_jax)
+        flax_cos, flax_sin = self.flax_model.model.visual._rot_pos_emb(grid_thw_tuple)
 
         np.testing.assert_allclose(np.array(flax_cos), pt_cos, rtol=1e-6, atol=2e-5)
         np.testing.assert_allclose(np.array(flax_sin), pt_sin, rtol=1e-6, atol=2e-5)
@@ -660,7 +658,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         pixel_values_pt = inputs["pixel_values"]
         grid_thw_pt = inputs["image_grid_thw"]
         pixel_values_jax = jnp.array(pixel_values_pt.numpy())
-        grid_thw_jax = jnp.array(grid_thw_pt.numpy())
+        grid_thw_tuple = tuple(grid_thw_pt.long().tolist())
 
         # Get patch + pos embeddings
         with torch.inference_mode():
@@ -669,7 +667,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
             pt_hidden = (pt_patches + pt_pos).numpy()
 
         flax_patches = self.flax_model.model.visual.patch_embed(pixel_values_jax)
-        flax_pos = self.flax_model.model.visual._fast_pos_embed_interpolate(grid_thw_jax)
+        flax_pos = self.flax_model.model.visual._fast_pos_embed_interpolate(grid_thw_tuple)
         flax_hidden = np.array(flax_patches + flax_pos)
 
         np.testing.assert_allclose(flax_hidden, pt_hidden, rtol=1e-5, atol=1e-5)
@@ -680,7 +678,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         pixel_values_pt = inputs["pixel_values"]
         grid_thw_pt = inputs["image_grid_thw"]
         pixel_values_jax = jnp.array(pixel_values_pt.numpy())
-        grid_thw_jax = jnp.array(grid_thw_pt.numpy())
+        grid_thw_tuple = tuple(grid_thw_pt.long().tolist())
 
         with torch.inference_mode():
             pt_result = self.pt_model.model.visual(pixel_values_pt, grid_thw_pt)
@@ -691,7 +689,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
                 pt_out = self.pt_model.model.visual.merger(pt_hidden).numpy()
             else:
                 pt_out = pt_result[0].numpy()
-        flax_out, _ = self.flax_model.model.visual(pixel_values_jax, grid_thw_jax)
+        flax_out, _ = self.flax_model.model.visual(pixel_values_jax, grid_thw_tuple)
 
         self.assertEqual(
             np.array(flax_out).shape,
@@ -730,7 +728,7 @@ class TestVisionTextGeneration(PretrainedModelMixin, absltest.TestCase):
         input_ids_pt = inputs["input_ids"]
 
         pixel_values_jax = jnp.array(pixel_values_pt.numpy())
-        grid_thw_jax = jnp.array(grid_thw_pt.numpy())
+        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
         input_ids_jax = jnp.array(input_ids_pt.numpy())
 
         # Create token_type_ids: 1 for image tokens, 0 for text
@@ -751,7 +749,7 @@ class TestVisionTextGeneration(PretrainedModelMixin, absltest.TestCase):
         cache = model_lib.init_cache(self.flax_config, batch, seq_len, 20)
 
         flax_logits, cache = model_lib.forward_vision(
-            self.flax_model, cache, input_ids_jax, pixel_values_jax, grid_thw_jax, token_type_ids_jax
+            self.flax_model, cache, input_ids_jax, pixel_values_jax, grid_thw_tuple, token_type_ids_jax
         )
 
         # Vision+text forward has larger tolerance due to accumulated numerical diffs
@@ -785,7 +783,7 @@ class TestVisionTextGeneration(PretrainedModelMixin, absltest.TestCase):
         )
 
         pixel_values_jax = jnp.array(inputs["pixel_values"].numpy())
-        grid_thw_jax = jnp.array(inputs["image_grid_thw"].numpy())
+        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in inputs["image_grid_thw"])
         input_ids_jax = jnp.array(inputs["input_ids"].numpy())
 
         # Create token_type_ids: 1 for image tokens, 0 for text
@@ -797,7 +795,7 @@ class TestVisionTextGeneration(PretrainedModelMixin, absltest.TestCase):
 
         # Prefill with vision
         logits, cache = model_lib.forward_vision(
-            self.flax_model, cache, input_ids_jax, pixel_values_jax, grid_thw_jax, token_type_ids_jax
+            self.flax_model, cache, input_ids_jax, pixel_values_jax, grid_thw_tuple, token_type_ids_jax
         )
 
         # Verify cache position
