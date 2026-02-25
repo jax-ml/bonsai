@@ -36,7 +36,9 @@ class TestModuleForwardPasses(absltest.TestCase):
         random_inputs = jax.random.truncated_normal(
             jax.random.key(0), lower=-1, upper=1, shape=(batch_size, image_size, image_size, 3)
         )
-        baseline_inputs = {"pixel_values": torch.tensor(random_inputs).to(torch.float32).permute(0, 3, 1, 2)}
+        baseline_inputs = {
+            "pixel_values": torch.tensor(np.asarray(random_inputs), dtype=torch.float32).permute(0, 3, 1, 2)
+        }
 
         bonsai_outputs = model_lib.forward(bonsai_model, random_inputs)
         with torch.no_grad():
@@ -55,7 +57,9 @@ class TestModuleForwardPasses(absltest.TestCase):
         random_inputs = jax.random.truncated_normal(
             jax.random.key(0), lower=-1, upper=1, shape=(batch_size, image_size, image_size, 3)
         )
-        baseline_inputs = {"pixel_values": torch.tensor(np.array(random_inputs)).to(torch.float32).permute(0, 3, 1, 2)}
+        baseline_inputs = {
+            "pixel_values": torch.tensor(np.asarray(random_inputs), dtype=torch.float32).permute(0, 3, 1, 2)
+        }
 
         bonsai_outputs = model_lib.forward(bonsai_model, random_inputs)
         with torch.no_grad():
