@@ -19,8 +19,8 @@ classifiers = [
 ]
 
 dependencies = [
-  "jax >= 0.8.0, < 0.9.0",
-  "jaxlib >= 0.8.0, < 0.9.0",
+  "jax >= 0.9.0, < 0.10.0",
+  "jaxlib >= 0.9.0, < 0.10.0",
   # Set flax from source as long as bonsai has no stable release
   # "flax >= 0.12.0, < 0.13.0",
   "flax @ git+https://github.com/google/flax.git",
@@ -28,6 +28,7 @@ dependencies = [
   "jinja2>=3.0.0",
   "huggingface-hub>=0.20.0",
   "transformers >= 4.30.0, < 5.0.0",
+  "Pillow >= 12.0.0, < 13.0.0",  # SAM2 dependency
 ]
 
 [project.optional-dependencies]
@@ -48,6 +49,7 @@ test-env = [
   "h5py",
   "diffusers[flax]",
   "keras_hub",
+  "sentencepiece",  # for Gemma3 tests
 ]
 
 testing = [
