@@ -627,7 +627,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         """Check position embedding interpolation output matches."""
         inputs = self._create_dummy_image_input()
         grid_thw_pt = inputs["image_grid_thw"]
-        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
+        grid_thw_tuple = tuple(grid_thw_pt.long().tolist())
 
         with torch.inference_mode():
             pt_pos = self.pt_model.model.visual.fast_pos_embed_interpolate(grid_thw_pt).numpy()
@@ -639,7 +639,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         """Check RoPE embedding output matches."""
         inputs = self._create_dummy_image_input()
         grid_thw_pt = inputs["image_grid_thw"]
-        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
+        grid_thw_tuple = tuple(grid_thw_pt.long().tolist())
 
         with torch.inference_mode():
             pt_rope = self.pt_model.model.visual.rot_pos_emb(grid_thw_pt)
@@ -658,7 +658,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         pixel_values_pt = inputs["pixel_values"]
         grid_thw_pt = inputs["image_grid_thw"]
         pixel_values_jax = jnp.array(pixel_values_pt.numpy())
-        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
+        grid_thw_tuple = tuple(grid_thw_pt.long().tolist())
 
         # Get patch + pos embeddings
         with torch.inference_mode():
@@ -678,7 +678,7 @@ class TestVisionEncoderPretrained(PretrainedModelMixin, absltest.TestCase):
         pixel_values_pt = inputs["pixel_values"]
         grid_thw_pt = inputs["image_grid_thw"]
         pixel_values_jax = jnp.array(pixel_values_pt.numpy())
-        grid_thw_tuple = tuple((int(x[0]), int(x[1]), int(x[2])) for x in grid_thw_pt)
+        grid_thw_tuple = tuple(grid_thw_pt.long().tolist())
 
         with torch.inference_mode():
             pt_result = self.pt_model.model.visual(pixel_values_pt, grid_thw_pt)
