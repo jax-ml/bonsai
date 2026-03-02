@@ -39,15 +39,15 @@ class MemoryAttentionLayer(nnx.Module):
         self.cross_attn_image = cross_attention
 
         self.linear1 = nnx.Linear(d_model, dim_feedforward, rngs=rngs)
-        self.dropout = nnx.Dropout(dropout, rngs=rngs)
+        self.dropout = nnx.Dropout(dropout, deterministic=False, rngs=rngs)
         self.linear2 = nnx.Linear(dim_feedforward, d_model, rngs=rngs)
 
         self.norm1 = nnx.LayerNorm(d_model, rngs=rngs)
         self.norm2 = nnx.LayerNorm(d_model, rngs=rngs)
         self.norm3 = nnx.LayerNorm(d_model, rngs=rngs)
-        self.dropout1 = nnx.Dropout(dropout, rngs=rngs)
-        self.dropout2 = nnx.Dropout(dropout, rngs=rngs)
-        self.dropout3 = nnx.Dropout(dropout, rngs=rngs)
+        self.dropout1 = nnx.Dropout(dropout, deterministic=False, rngs=rngs)
+        self.dropout2 = nnx.Dropout(dropout, deterministic=False, rngs=rngs)
+        self.dropout3 = nnx.Dropout(dropout, deterministic=False, rngs=rngs)
 
         self.activation = get_activation_fn(activation)
 

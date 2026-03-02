@@ -68,7 +68,7 @@ class Embeddings(nnx.Module):
         )
         self.cls_token = nnx.Param(jax.random.normal(rngs.params(), (1, 1, cfg.hidden_dim)))
         self.pos_embeddings = nnx.Param(jax.random.normal(rngs.params(), (1, num_patches + 1, cfg.hidden_dim)))
-        self.dropout = nnx.Dropout(cfg.dropout_prob)
+        self.dropout = nnx.Dropout(cfg.dropout_prob, deterministic=False)
 
     def __call__(self, pixel_values: jnp.ndarray, *, rngs: nnx.Rngs | None) -> jnp.ndarray:
         embeddings = self.projection(pixel_values)
@@ -106,7 +106,7 @@ class TransformerEncoder(nnx.Module):
         )
         self.linear1 = nnx.Linear(cfg.hidden_dim, cfg.mlp_dim, rngs=rngs)
         self.linear2 = nnx.Linear(cfg.mlp_dim, cfg.hidden_dim, rngs=rngs)
-        self.dropout = nnx.Dropout(cfg.dropout_prob)
+        self.dropout = nnx.Dropout(cfg.dropout_prob, deterministic=False)
         self.layernorm_before = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)
         self.layernorm_after = nnx.LayerNorm(cfg.hidden_dim, epsilon=cfg.eps, rngs=rngs)
 

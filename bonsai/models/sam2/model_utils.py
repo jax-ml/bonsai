@@ -138,7 +138,7 @@ def select_closest_cond_frames(frame_idx: int, cond_frame_outputs: dict, max_con
 class DropPath(nnx.Module):
     def __init__(self, drop_prob: float, scale_by_keep: bool = True, *, rngs: nnx.Rngs):
         self.drop_prob = drop_prob
-        self.dropout = nnx.Dropout(rate=self.drop_prob, broadcast_dims=(1, 2, 3))
+        self.dropout = nnx.Dropout(rate=self.drop_prob, deterministic=False, broadcast_dims=(1, 2, 3))
 
         self.scale_by_keep = scale_by_keep
         self.rngs = rngs

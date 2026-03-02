@@ -303,7 +303,7 @@ class EfficientNet(nnx.Module):
         self.head_bn = nnx.BatchNorm(out_channels, use_running_average=True, rngs=rngs)
 
         self.gap = partial(jnp.mean, axis=(1, 2))
-        self.dropout = nnx.Dropout(rate=cfg.dropout_rate)
+        self.dropout = nnx.Dropout(rate=cfg.dropout_rate, deterministic=False)
         self.classifier = nnx.Linear(out_channels, cfg.num_classes, rngs=rngs)
 
     def __call__(self, x: jax.Array, training: bool = False) -> jax.Array:

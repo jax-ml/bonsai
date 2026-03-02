@@ -150,7 +150,7 @@ class UMT5DenseActDense(nnx.Module):
         self.wo = nnx.Linear(
             config.d_ff, config.d_model, precision=Precision.HIGHEST, param_dtype=param_dtype, use_bias=False, rngs=rngs
         )
-        self.dropout = nnx.Dropout(config.dropout_rate, rngs=rngs)
+        self.dropout = nnx.Dropout(config.dropout_rate, deterministic=False, rngs=rngs)
         self.act = ACT_FN[config.dense_act_fn]
 
     def __call__(self, hidden_states: jax.Array):
@@ -171,7 +171,7 @@ class UMT5LayerFF(nnx.Module):
             config, is_gated_act=config.is_gated_act, param_dtype=param_dtype, rngs=rngs
         )
         self.layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon, param_dtype=param_dtype)
-        self.dropout = nnx.Dropout(config.dropout_rate, rngs=rngs)
+        self.dropout = nnx.Dropout(config.dropout_rate, deterministic=False, rngs=rngs)
 
     def __call__(self, hidden_states: jax.Array):
         forwarded_states = self.layer_norm(hidden_states)
@@ -237,7 +237,7 @@ class UMT5Attention(nnx.Module):
             rngs=rngs,
         )
 
-        self.dropout = nnx.Dropout(config.dropout_rate, rngs=rngs)
+        self.dropout = nnx.Dropout(config.dropout_rate, deterministic=False, rngs=rngs)
 
         if self.has_relative_attention_bias:
             self.relative_attention_bias = nnx.Embed(
@@ -382,7 +382,7 @@ class UMT5LayerCrossAttention(nnx.Module):
             config, has_relative_attention_bias=False, layer_idx=layer_idx, param_dtype=param_dtype, rngs=rngs
         )
         self.layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon, param_dtype=param_dtype)
-        self.dropout = nnx.Dropout(config.dropout_rate, rngs=rngs)
+        self.dropout = nnx.Dropout(config.dropout_rate, deterministic=False, rngs=rngs)
 
     def __call__(
         self,
@@ -457,7 +457,7 @@ class UMT5Stack(nnx.Module):
             [UMT5Block(config, layer_idx=i, param_dtype=param_dtype, rngs=rngs) for i in range(config.num_layers)]
         )
         self.final_layer_norm = T5LayerNorm(config.d_model, eps=config.layer_norm_epsilon, param_dtype=param_dtype)
-        self.dropout = nnx.Dropout(config.dropout_rate, rngs=rngs)
+        self.dropout = nnx.Dropout(config.dropout_rate, deterministic=False, rngs=rngs)
 
     def _prepare_4d_causal_attention_mask_for_decoder(
         self,

@@ -218,7 +218,7 @@ class LLaDALlamaBlock(nnx.Module):
         self.attn_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps, dtype=jnp.float32, shd=shd.norm, rngs=rngs)
         self.ff_norm = RMSNorm(cfg.d_model, cfg.rms_norm_eps, dtype=jnp.float32, shd=shd.norm, rngs=rngs)
 
-        self.dropout = nnx.Dropout(cfg.resid_drop)
+        self.dropout = nnx.Dropout(cfg.resid_drop, deterministic=False)
         self.attn_drop = cfg.attn_drop
 
         # Attention
@@ -311,7 +311,7 @@ class LLaDAModel(nnx.Module):
         ei = partial(default_embed_init, out_sharding=cfg.shd_cfg.emb_kernel)
         self.wte = ShardedEmbedding(cfg.embedding_size, cfg.d_model, embedding_init=ei, rngs=rngs)
 
-        self.emb_drop = nnx.Dropout(self.config.emb_drop)
+        self.emb_drop = nnx.Dropout(self.config.emb_drop, deterministic=False)
         self.ln_f = RMSNorm(cfg.d_model, eps=cfg.rms_norm_eps, dtype=cfg.dtype, shd=shd.norm, rngs=rngs)
         self.blocks = nnx.List([LLaDALlamaBlock(cfg, rngs=rngs) for _ in range(cfg.n_layers)])
 
