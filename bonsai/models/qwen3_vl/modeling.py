@@ -1,6 +1,10 @@
+import functools
 import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, TypeAlias
+
+# One entry per image/video: ((T1, H1, W1), (T2, H2, W2), ...)
+GridTHW: TypeAlias = tuple[tuple[int, int, int], ...]
 from enum import Enum
 
 import jax
@@ -585,10 +589,8 @@ class Qwen3VLVisionModel(nnx.Module):
             ]
         )
 
-    def _fast_pos_embed_interpolate(self, grid_thw: Array) -> Array:
-        """Bilinear interpolation for position embeddings, matching PyTorch."""
-        grid_h, grid_w = int(grid_thw[0, 1]), int(grid_thw[0, 2])
-
+    def _fast_pos_embed_interpolate_single(self, grid_t: int, grid_h: int, grid_w: int) -> Array:
+        """Bilinear interpolation for position embeddings for a single image."""
         # Create interpolation indices
         h_idxs = jnp.linspace(0, self.num_grid_per_side - 1, grid_h)
         w_idxs = jnp.linspace(0, self.num_grid_per_side - 1, grid_w)
@@ -626,7 +628,6 @@ class Qwen3VLVisionModel(nnx.Module):
 
         # Apply spatial merge permutation
         merge_size = self.config.spatial_merge_size
-        grid_t = int(grid_thw[0, 0])
 
         # Reshape: (H*W, D) -> (H, W, D)
         pos_embeds = pos_embeds.reshape(grid_h, grid_w, -1)
@@ -645,11 +646,16 @@ class Qwen3VLVisionModel(nnx.Module):
 
         return pos_embeds
 
-    def _rot_pos_emb(self, grid_thw: Array) -> Tuple[Array, Array]:
-        """Compute rotary position embeddings matching PyTorch rot_pos_emb."""
+    def _fast_pos_embed_interpolate(self, grid_thw: GridTHW) -> Array:
+        """Bilinear interpolation for position embeddings, handles multiple images."""
+        results = [
+            self._fast_pos_embed_interpolate_single(grid_t, grid_h, grid_w) for grid_t, grid_h, grid_w in grid_thw
+        ]
+        return jnp.concatenate(results, axis=0)
+
+    def _rot_pos_emb_single(self, grid_t: int, grid_h: int, grid_w: int) -> Array:
+        """Compute rotary position embeddings for a single image."""
         merge_size = self.config.spatial_merge_size
-        grid_h, grid_w = int(grid_thw[0, 1]), int(grid_thw[0, 2])
-        grid_t = int(grid_thw[0, 0])
 
         # Compute merged dimensions
         merged_h, merged_w = grid_h // merge_size, grid_w // merge_size
@@ -664,7 +670,7 @@ class Qwen3VLVisionModel(nnx.Module):
         row_idx = block_rows[:, None, None, None] * merge_size + intra_row[None, None, :, None]
         col_idx = block_cols[None, :, None, None] * merge_size + intra_col[None, None, None, :]
 
-        # Expand and reshape to match spatial merge order: (merged_h, merged_w, m, m) -> (merged_h, merged_w, m, m)
+        # Expand and reshape to match spatial merge order
         row_idx = jnp.broadcast_to(row_idx, (merged_h, merged_w, merge_size, merge_size)).reshape(-1)
         col_idx = jnp.broadcast_to(col_idx, (merged_h, merged_w, merge_size, merge_size)).reshape(-1)
 
@@ -673,32 +679,33 @@ class Qwen3VLVisionModel(nnx.Module):
             row_idx = jnp.tile(row_idx, grid_t)
             col_idx = jnp.tile(col_idx, grid_t)
 
-        # Create frequency table - PyTorch uses rotary_dim = head_dim // 2
-        # And inv_freq has length rotary_dim // 2 = head_dim // 4
+        # Create frequency table
         max_hw = max(grid_h, grid_w)
         head_dim = self.config.head_dim
-        rotary_dim = head_dim // 2  # = 32 for head_dim=64
-        inv_freq_dim = rotary_dim // 2  # = 16
+        rotary_dim = head_dim // 2
         inv_freq = 1.0 / (self.config.rope_theta ** (jnp.arange(0, rotary_dim, 2, dtype=jnp.float32) / rotary_dim))
         seq_positions = jnp.arange(max_hw, dtype=jnp.float32)
-        freq_table = jnp.outer(seq_positions, inv_freq)  # (max_hw, rotary_dim//2) = (max_hw, 16)
+        freq_table = jnp.outer(seq_positions, inv_freq)
 
-        # Lookup embeddings for row and col: (seq, rotary_dim//2) each
-        row_emb = freq_table[row_idx]  # (seq, 16)
-        col_emb = freq_table[col_idx]  # (seq, 16)
+        # Lookup embeddings for row and col
+        row_emb = freq_table[row_idx]
+        col_emb = freq_table[col_idx]
 
-        # Concatenate row and col: (seq, 32)
+        # Concatenate row and col, then double
         emb = jnp.concatenate([row_emb, col_emb], axis=-1)
-
-        # Double the embedding (matching PyTorch cat): (seq, 64)
         emb = jnp.concatenate([emb, emb], axis=-1)
 
-        # Apply cos/sin
+        return emb
+
+    def _rot_pos_emb(self, grid_thw: GridTHW) -> Tuple[Array, Array]:
+        """Compute rotary position embeddings, handles multiple images."""
+        embs = [self._rot_pos_emb_single(grid_t, grid_h, grid_w) for grid_t, grid_h, grid_w in grid_thw]
+        emb = jnp.concatenate(embs, axis=0)
         cos = jnp.cos(emb)
         sin = jnp.sin(emb)
         return cos, sin
 
-    def __call__(self, hidden_states: Array, grid_thw: Array) -> Tuple[Array, list[Array]]:
+    def __call__(self, hidden_states: Array, grid_thw: GridTHW) -> Tuple[Array, list[Array]]:
         hidden_states = self.patch_embed(hidden_states)
         seq_len = hidden_states.shape[0]
 
@@ -1000,7 +1007,7 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
         input_ids: Array,
         cache: Cache,
         pixel_values: Optional[Array] = None,
-        image_grid_thw: Optional[Array] = None,
+        image_grid_thw: Optional[GridTHW] = None,
         token_type_ids: Optional[Array] = None,
     ) -> Array:
         """Forward pass with KV-cache."""
@@ -1061,15 +1068,20 @@ def forward(model: Qwen3VLForConditionalGeneration, cache: Cache, input_ids: Arr
     return logits[:, -1, :], cache
 
 
-# TODO: Add jit compilation support by fixing image size
+@functools.partial(jax.jit, static_argnums=(4,))
 def forward_vision(
     model: Qwen3VLForConditionalGeneration,
     cache: Cache,
     input_ids: Array,
     pixel_values: Array,
-    image_grid_thw: Array,
+    image_grid_thw: GridTHW,
     token_type_ids: Array,
 ) -> Tuple[Array, Cache]:
-    """Forward pass with vision inputs (not JIT - vision has data-dependent shapes)."""
+    """JIT-compiled forward pass with vision inputs.
+
+    image_grid_thw is marked static since its values control array shapes
+    (linspace, reshape, arange) in the vision encoder. Different image
+    resolutions will trigger recompilation (one-time cost per resolution).
+    """
     logits = model(input_ids, cache, pixel_values, image_grid_thw, token_type_ids)
     return logits[:, -1, :], cache

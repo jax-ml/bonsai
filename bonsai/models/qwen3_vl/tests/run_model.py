@@ -117,7 +117,7 @@ def main():
     # Check for vision inputs
     if "pixel_values" in inputs_vision:
         pixel_values = jnp.array(inputs_vision["pixel_values"].numpy())
-        image_grid_thw = jnp.array(inputs_vision["image_grid_thw"].numpy())
+        image_grid_thw = tuple(tuple(row) for row in inputs_vision["image_grid_thw"].long().tolist())
 
         # Create token_type_ids (1 for image tokens, 0 for text)
         # Image token ID is 151655
