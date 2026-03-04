@@ -353,6 +353,29 @@ class LLaDAModel(nnx.Module):
         x = self.ff_out(x, out_sharding=shd)
         return x, key, hidden_states
 
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_name: str,
+        config: ModelConfig | None = None,
+    ):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. E.g. "GSAI-ML/LLaDA-8B-Instruct"
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.llada import params
+
+        if config is None:
+            config_map = {
+                "GSAI-ML/LLaDA-8B-Instruct": ModelConfig.llada_8b_it,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name](False, False)
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
+        return params.create_llada_from_pretrained(model_ckpt_path, config)
+
 
 def add_gumbel_noise(logits: Array, temperature: float, key: Array) -> Array:
     if temperature == 0:

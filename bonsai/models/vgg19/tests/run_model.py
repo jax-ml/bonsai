@@ -17,27 +17,22 @@ import time
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from huggingface_hub import snapshot_download
 
-from bonsai.models.vgg19 import modeling, params
+from bonsai.models.vgg19 import modeling
 
 
 def run_model():
-    # 1. Download h5 file
-    model_ckpt_path = snapshot_download("keras/vgg_19_imagenet")
-
-    # 2. Load pretrained model
-    config = modeling.ModelConfig.vgg_19()
-    model = params.create_model_from_h5(model_ckpt_path, config)
+    # 1. Load pretrained model
+    model = modeling.VGG.from_pretrained("keras/vgg_19_imagenet")
     graphdef, state = nnx.split(model)
     state = jax.tree.leaves(state)
 
-    # 3. Prepare dummy input
+    # 2. Prepare dummy input
     batch_size = 8
     image_size = 224
     dummy_input = jnp.ones((batch_size, image_size, image_size, 3), dtype=jnp.float32)
 
-    # 4. Warmup + profiling
+    # 3. Warmup + profiling
     # Warmup (triggers compilation)
     _ = modeling.forward(graphdef, state, dummy_input)
     jax.block_until_ready(_)
@@ -49,14 +44,14 @@ def run_model():
         jax.block_until_ready(logits)
     jax.profiler.stop_trace()
 
-    # 5. Timed execution
+    # 4. Timed execution
     t0 = time.perf_counter()
     for _ in range(10):
         logits = modeling.forward(graphdef, state, dummy_input)
         jax.block_until_ready(logits)
     print(f"10 runs took {time.perf_counter() - t0:.4f} s")
 
-    # 6. Show top-1 predicted class
+    # 5. Show top-1 predicted class
     pred = jnp.argmax(logits, axis=-1)
     print("Predicted classes:", pred)
 

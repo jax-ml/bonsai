@@ -4,11 +4,8 @@ import numpy as np
 import torch
 from absl.testing import absltest
 from flax import nnx
-from huggingface_hub import snapshot_download
 from transformers import ViTForImageClassification
-
-from bonsai.models.vit import params
-from bonsai.models.vit.modeling import ModelConfig
+from bonsai.models.vit.modeling import ViTClassificationModel
 
 
 class TestModuleForwardPasses(absltest.TestCase):
@@ -16,11 +13,9 @@ class TestModuleForwardPasses(absltest.TestCase):
         super().setUp()
         jax.config.update("jax_default_matmul_precision", "float32")
         model_name = "google/vit-base-patch16-224"
-        model_ckpt_path = snapshot_download(model_name)
-        self.bonsai_config = ModelConfig.vit_p16_224()
 
         # Cast JAX model to float32 for precision matching with PyTorch CPU
-        graph_def, state = nnx.split(params.create_vit_from_pretrained(model_ckpt_path, self.bonsai_config))
+        graph_def, state = nnx.split(ViTClassificationModel.from_pretrained(model_name))
         state = jax.tree.map(lambda x: x.astype(jnp.float32) if isinstance(x, jax.Array) else x, state)
         self.bonsai_model = nnx.merge(graph_def, state)
 

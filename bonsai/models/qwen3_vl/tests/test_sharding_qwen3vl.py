@@ -5,15 +5,15 @@ from absl.testing import absltest
 import unittest
 
 from flax import nnx
-from jax._src.mesh import AxisType
-from jax.sharding import PartitionSpec as P
+from jax import P
+from jax.sharding import AxisType
 
 from bonsai.models.qwen3_vl import modeling
 
 
 def get_test_config(use_fsdp=False, use_tp=False):
     """Get a small test config with optional sharding."""
-    return modeling.Qwen3VLConfig(
+    return modeling.ModelConfig(
         vision_config=modeling.Qwen3VLVisionConfig(
             depth=2,
             hidden_size=64,
@@ -45,36 +45,33 @@ def get_test_config(use_fsdp=False, use_tp=False):
     )
 
 
-@unittest.skipIf(jax.device_count() < 4, "Atleast 4 devices required")
+@unittest.skipIf(jax.device_count() < 8, "Atleast 8 devices required")
 class TestSharding(absltest.TestCase):
     """Test sharding with simulated 8-device mesh."""
 
     @classmethod
     def setUpClass(cls):
-        print(f"JAX devices: {jax.devices()}")
-        print(f"Device count: {len(jax.devices())}")
-        assert len(jax.devices()) == 8, f"Expected 8 simulated devices, got {len(jax.devices())}"
+        cls.mesh = jax.make_mesh((4, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        jax.set_mesh(cls.mesh)
+
+        cls.cfg_unsharded = get_test_config(use_fsdp=False, use_tp=False)
+        cls.cfg_sharded = get_test_config(use_fsdp=True, use_tp=True)
 
     def test_sharding_config_creation(self):
         """Test that sharding configs are created correctly."""
         # No sharding
-        cfg_unsharded = modeling.Qwen3VLConfig.qwen3vl_2b()
-        self.assertEqual(cfg_unsharded.text_config.shd_cfg.q_weight, P(None, None))
+        self.assertEqual(self.cfg_unsharded.text_config.shd_cfg.q_weight, P(None, None))
 
         # With sharding
-        cfg_sharded = modeling.Qwen3VLConfig.qwen3vl_2b(use_fsdp=True, use_tp=True)
-        self.assertEqual(cfg_sharded.text_config.shd_cfg.q_weight, P("fsdp", "tp"))
-        self.assertEqual(cfg_sharded.vision_config.shd_cfg.attn_qkv_kernel, P("fsdp", "tp"))
+        self.assertEqual(self.cfg_sharded.text_config.shd_cfg.q_weight, P("fsdp", "tp"))
+        self.assertEqual(self.cfg_sharded.vision_config.shd_cfg.attn_qkv_kernel, P("fsdp", "tp"))
 
     def test_text_mlp_sharded_vs_unsharded(self):
         """Test text MLP output is numerically equivalent with/without sharding."""
-        # Setup mesh for sharded test
-        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
-
         # Create unsharded model and input
-        cfg_unsharded = get_test_config(use_fsdp=False, use_tp=False)
+        fsdp = modeling.ShardMode.FSDP.value
         rngs = nnx.Rngs(42)
-        mlp_unsharded = modeling.Qwen3VLMLP(cfg_unsharded.text_config, rngs=rngs)
+        mlp_unsharded = modeling.Qwen3VLMLP(self.cfg_unsharded.text_config, rngs=rngs)
 
         # Capture weights from unsharded model using [...] indexing
         gate_kernel = np.array(mlp_unsharded.gate_proj.kernel[...])
@@ -82,14 +79,12 @@ class TestSharding(absltest.TestCase):
         down_kernel = np.array(mlp_unsharded.down_proj.kernel[...])
 
         # Use batch=2 so it's divisible by fsdp=2
-        x = jnp.ones((2, 8, 128), dtype=jnp.float32)  # (batch, seq, hidden)
+        x = jnp.ones((4, 8, 128), dtype=jnp.float32)  # (batch, seq, hidden)
         out_unsharded = mlp_unsharded(x)
 
         # Create sharded model with same weights
-        jax.set_mesh(mesh)
-        cfg_sharded = get_test_config(use_fsdp=True, use_tp=True)
         rngs = nnx.Rngs(42)
-        mlp_sharded = modeling.Qwen3VLMLP(cfg_sharded.text_config, rngs=rngs)
+        mlp_sharded = modeling.Qwen3VLMLP(self.cfg_sharded.text_config, rngs=rngs)
 
         # Copy weights to sharded model using [...] indexing
         mlp_sharded.gate_proj.kernel[...] = jnp.array(gate_kernel)
@@ -97,7 +92,7 @@ class TestSharding(absltest.TestCase):
         mlp_sharded.down_proj.kernel[...] = jnp.array(down_kernel)
 
         # Recreate input inside mesh context
-        x_sharded = jnp.ones((2, 8, 128), dtype=jnp.float32)
+        x_sharded = jnp.ones((4, 8, 128), dtype=jnp.float32, out_sharding=P(fsdp))
         out_sharded = mlp_sharded(x_sharded)
 
         # Numerical comparison
@@ -108,19 +103,13 @@ class TestSharding(absltest.TestCase):
             atol=1e-5,
             err_msg="Sharded MLP output differs from unsharded",
         )
-        print("Text MLP: sharded vs unsharded numerical match ✓")
-
-        # Reset mesh
-        jax.set_mesh(jax.make_mesh((1,), ("dummy",), axis_types=(AxisType.Explicit,)))
 
     def test_vision_mlp_sharded_vs_unsharded(self):
         """Test vision MLP output is numerically equivalent with/without sharding."""
-        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
-
         # Create unsharded model
-        cfg_unsharded = get_test_config(use_fsdp=False, use_tp=False)
+        fsdp = modeling.ShardMode.FSDP.value
         rngs = nnx.Rngs(42)
-        mlp_unsharded = modeling.Qwen3VLVisionMLP(cfg_unsharded.vision_config, rngs=rngs)
+        mlp_unsharded = modeling.Qwen3VLVisionMLP(self.cfg_unsharded.vision_config, rngs=rngs)
 
         fc1_kernel = np.array(mlp_unsharded.linear_fc1.kernel[...])
         fc2_kernel = np.array(mlp_unsharded.linear_fc2.kernel[...])
@@ -131,10 +120,8 @@ class TestSharding(absltest.TestCase):
         out_unsharded = mlp_unsharded(x)
 
         # Create sharded model
-        jax.set_mesh(mesh)
-        cfg_sharded = get_test_config(use_fsdp=True, use_tp=True)
         rngs = nnx.Rngs(42)
-        mlp_sharded = modeling.Qwen3VLVisionMLP(cfg_sharded.vision_config, rngs=rngs)
+        mlp_sharded = modeling.Qwen3VLVisionMLP(self.cfg_sharded.vision_config, rngs=rngs)
 
         mlp_sharded.linear_fc1.kernel[...] = jnp.array(fc1_kernel)
         mlp_sharded.linear_fc2.kernel[...] = jnp.array(fc2_kernel)
@@ -142,7 +129,7 @@ class TestSharding(absltest.TestCase):
         mlp_sharded.linear_fc2.bias[...] = jnp.array(fc2_bias)
 
         # Recreate input inside mesh context
-        x_sharded = jnp.ones((16, 64), dtype=jnp.float32)
+        x_sharded = jnp.ones((16, 64), dtype=jnp.float32, out_sharding=P(fsdp))
         out_sharded = mlp_sharded(x_sharded)
 
         np.testing.assert_allclose(
@@ -152,73 +139,87 @@ class TestSharding(absltest.TestCase):
             atol=1e-5,
             err_msg="Sharded Vision MLP output differs from unsharded",
         )
-        print("Vision MLP: sharded vs unsharded numerical match ✓")
 
-        jax.set_mesh(jax.make_mesh((1,), ("dummy",), axis_types=(AxisType.Explicit,)))
-
-    def test_full_model_creation_with_sharding(self):
+    def test_full(self):
         """Test full model can be created with sharding enabled."""
-        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
-        jax.set_mesh(mesh)
-
-        cfg = get_test_config(use_fsdp=True, use_tp=True)
         rngs = nnx.Rngs(0)
+        fsdp = modeling.ShardMode.FSDP.value
+        model = modeling.Qwen3VLForConditionalGeneration(self.cfg_sharded, rngs=rngs)
+        config = model.config
 
-        model = modeling.Qwen3VLForConditionalGeneration(cfg, rngs=rngs)
+        # # TODO: enable the test once fixed the bug in Qwen3VLVisionModel when batch size > 1
+        # batch_size = 4  # should be evenly divisible to num devices for fsdp axis
+        # num_tokens = 128
+        # key = jax.random.key(0)
+        # patch_size = config.vision_config.patch_size
+        # img_size = patch_size * patch_size
+        # n_img = jax.random.uniform(
+        #     key,
+        #     (batch_size * img_size, img_size * 3 * 2),
+        #     dtype=jnp.float32,
+        #     minval=-1,
+        #     maxval=1,
+        #     out_sharding=P(fsdp),
+        # )
+        # n_text = jax.device_put(
+        #     np.arange(batch_size * num_tokens).reshape(batch_size, -1),
+        #     device=P(fsdp),
+        # )
+        # token_type_ids = np.zeros((batch_size, num_tokens), dtype=int)
+        # token_type_ids[:, 12:98] = 1
+        # n_tti = jax.device_put(
+        #     token_type_ids,
+        #     device=P(fsdp),
+        # )
+        # image_grid_thw = jnp.asarray([[1, patch_size, patch_size]] * batch_size)
+        # cache = modeling.init_cache(config, batch_size, num_tokens, 1, jnp.float32)
 
-        # Just verify model was created successfully
-        self.assertIsNotNone(model)
-        print("Full model created with sharding ✓")
+        # out = model(n_text, n_img, image_grid_thw, cache=cache, token_type_ids=n_tti)
 
-        jax.set_mesh(jax.make_mesh((1,), ("dummy",), axis_types=(AxisType.Explicit,)))
+        # assert isinstance(out.sharding, NamedSharding)
+        # assert out.sharding.spec == config.text_config.shd_cfg.act_btd
 
     def test_text_model_forward_with_sharding(self):
         """Test text model can run forward pass with sharding enabled."""
-        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
-        jax.set_mesh(mesh)
-
         # Create sharded model
-        cfg = get_test_config(use_fsdp=True, use_tp=True)
+        fsdp = modeling.ShardMode.FSDP.value
         rngs = nnx.Rngs(42)
-        text_model = modeling.Qwen3VLTextModel(cfg.text_config, rngs=rngs)
+        text_model = modeling.Qwen3VLTextModel(self.cfg_sharded.text_config, rngs=rngs)
 
-        # Create input - batch=2 divisible by fsdp=2
-        batch, seq_len = 2, 8
-        inputs_embeds = jnp.ones((batch, seq_len, 128), dtype=jnp.float32)
-        cache = modeling.init_cache(cfg, batch_size=batch, token_len=seq_len, generate_steps=4)
+        # Create input - batch=4 divisible by fsdp=4
+        batch, seq_len = 4, 8
+        inputs_embeds = jnp.ones((batch, seq_len, 128), dtype=jnp.float32, out_sharding=P(fsdp))
+        cache = modeling.init_cache(self.cfg_sharded, batch_size=batch, token_len=seq_len, generate_steps=4)
         positions = jnp.arange(seq_len)[None, :].repeat(batch, axis=0)
-        sin, cos = modeling._generate_rope(positions, cfg.text_config.head_dim, cfg.text_config.rope_theta)
+        sin, cos = modeling._generate_rope(
+            positions, self.cfg_sharded.text_config.head_dim, self.cfg_sharded.text_config.rope_theta
+        )
 
         # Forward pass should complete without error
         output = text_model(inputs_embeds, cache, sin, cos, mask=None)
 
         self.assertEqual(output.shape, (batch, seq_len, 128))
-        print("Text Model: forward pass with sharding ✓")
-
-        jax.set_mesh(jax.make_mesh((1,), ("dummy",), axis_types=(AxisType.Explicit,)))
 
     def test_vision_attention_sharded_vs_unsharded(self):
         """Test vision attention output is numerically equivalent with/without sharding."""
-        mesh = jax.make_mesh((2, 2), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
-
         # Create unsharded model
-        cfg_unsharded = get_test_config(use_fsdp=False, use_tp=False)
+        fsdp = modeling.ShardMode.FSDP.value
         rngs = nnx.Rngs(42)
-        attn_unsharded = modeling.Qwen3VLVisionAttention(cfg_unsharded.vision_config, rngs=rngs)
+        attn_unsharded = modeling.Qwen3VLVisionAttention(self.cfg_unsharded.vision_config, rngs=rngs)
 
         # Get weights
-        graphdef, state = nnx.split(attn_unsharded)
+        _, state = nnx.split(attn_unsharded)
         flat_state = nnx.to_flat_state(state)
         state_arrays = {k: np.array(v[...]) for k, v in zip(flat_state.paths, flat_state.leaves)}
 
         # Create input - (seq, hidden)
         seq_len = 16
-        hidden_size = cfg_unsharded.vision_config.hidden_size
+        hidden_size = self.cfg_unsharded.vision_config.hidden_size
         x = jnp.ones((seq_len, hidden_size), dtype=jnp.float32)
 
         # Create RoPE cos/sin for vision
         # VisionAttention expects (seq_len, head_dim) for cos/sin
-        head_dim = cfg_unsharded.vision_config.head_dim
+        head_dim = self.cfg_unsharded.vision_config.head_dim
         # Simple RoPE: just use arange positions with full head_dim
         positions = jnp.arange(seq_len, dtype=jnp.float32)
         theta = 10000.0
@@ -232,20 +233,18 @@ class TestSharding(absltest.TestCase):
         out_unsharded = attn_unsharded(x, (cos_vals, sin_vals))
 
         # Create sharded model
-        jax.set_mesh(mesh)
-        cfg_sharded = get_test_config(use_fsdp=True, use_tp=True)
         rngs = nnx.Rngs(42)
-        attn_sharded = modeling.Qwen3VLVisionAttention(cfg_sharded.vision_config, rngs=rngs)
+        attn_sharded = modeling.Qwen3VLVisionAttention(self.cfg_sharded.vision_config, rngs=rngs)
 
         # Copy weights
-        sharded_graphdef, sharded_state = nnx.split(attn_sharded)
+        _, sharded_state = nnx.split(attn_sharded)
         sharded_flat_state = nnx.to_flat_state(sharded_state)
         for k, v in zip(sharded_flat_state.paths, sharded_flat_state.leaves):
             if k in state_arrays:
                 v[...] = jnp.array(state_arrays[k])
 
         # Recreate ALL inputs inside mesh context
-        x_sharded = jnp.ones((seq_len, hidden_size), dtype=jnp.float32)
+        x_sharded = jnp.ones((seq_len, hidden_size), dtype=jnp.float32, out_sharding=P(fsdp))
         positions_sharded = jnp.arange(seq_len, dtype=jnp.float32)
         freqs_sharded = 1.0 / (theta ** (jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim))
         angles_sharded = jnp.outer(positions_sharded, freqs_sharded)
@@ -262,9 +261,6 @@ class TestSharding(absltest.TestCase):
             atol=1e-4,
             err_msg="Sharded VisionAttention output differs from unsharded",
         )
-        print("Vision Attention: sharded vs unsharded numerical match ✓")
-
-        jax.set_mesh(jax.make_mesh((1,), ("dummy",), axis_types=(AxisType.Explicit,)))
 
 
 if __name__ == "__main__":

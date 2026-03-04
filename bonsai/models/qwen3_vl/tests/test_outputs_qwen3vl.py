@@ -29,7 +29,6 @@ class PretrainedModelMixin:
     test suite, rather than reloading it for every test class.
     """
 
-    _models_loaded = False
     model_path = None
     pt_model = None
     flax_config = None
@@ -39,22 +38,15 @@ class PretrainedModelMixin:
     @classmethod
     def load_models_once(cls):
         """Loads models if they haven't been loaded yet."""
-        if cls._models_loaded:
-            return
-
-        print("\n[Mixin] Loading Qwen3-VL-2B models (Shared instance)...")
         MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
 
         # Download and Load
         cls.model_path = snapshot_download(MODEL_ID)
         cls.pt_model = Qwen3VLForConditionalGeneration.from_pretrained(cls.model_path, dtype=torch.float32).eval()
 
-        cls.flax_config = model_lib.Qwen3VLConfig.qwen3vl_2b()
-        cls.flax_model = params.create_model_from_safe_tensors(cls.model_path, cls.flax_config)
-        cls.processor = AutoProcessor.from_pretrained(cls.model_path)
-
-        cls._models_loaded = True
-        print("[Mixin] Models loaded successfully.\n")
+        cls.flax_model = model_lib.Qwen3VLForConditionalGeneration.from_pretrained(MODEL_ID)
+        cls.flax_config = cls.flax_model.config
+        cls.processor = AutoProcessor.from_pretrained(MODEL_ID)
 
     def tearDown(self):
         """
@@ -108,8 +100,8 @@ def get_test_config_torch() -> Qwen3VLConfig:
     )
 
 
-def get_test_config_flax() -> model_lib.Qwen3VLConfig:
-    return model_lib.Qwen3VLConfig(
+def get_test_config_flax() -> model_lib.ModelConfig:
+    return model_lib.ModelConfig(
         vision_config=model_lib.Qwen3VLVisionConfig(
             depth=2,
             hidden_size=64,
@@ -495,7 +487,7 @@ class TestPretrained2B(PretrainedModelMixin, absltest.TestCase):
 
         batch, seq_len = input_ids_jax.shape
         cache = model_lib.init_cache(self.flax_config, batch, seq_len, generate_steps=10)
-        flax_logits = np.array(self.flax_model(input_ids_jax, cache))
+        flax_logits = np.array(self.flax_model(input_ids_jax, cache=cache))
 
         np.testing.assert_allclose(flax_logits, pt_logits, rtol=1e-5, atol=1e-2)
 

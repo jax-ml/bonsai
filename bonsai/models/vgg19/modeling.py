@@ -79,6 +79,25 @@ class VGG(nnx.Module):
         x = self.classifier(x)
         return x
 
+    @classmethod
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None):
+        """model_name the *model id* of a pretrained model hosted inside
+        a model repo on huggingface.co. For example, "keras/vgg_19_imagenet"
+        """
+        from huggingface_hub import snapshot_download
+        from bonsai.models.vgg19 import params
+
+        if config is None:
+            config_map = {
+                "keras/vgg_19_imagenet": ModelConfig.vgg_19,
+            }
+            if model_name not in config_map:
+                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+            config = config_map[model_name]()
+
+        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.h5")
+        return params.create_model_from_h5(model_ckpt_path, config)
+
 
 @jax.jit
 def forward(graphdef: nnx.GraphDef, state: nnx.State, x: jax.Array) -> jax.Array:

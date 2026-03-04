@@ -17,9 +17,7 @@ import numpy as np
 import torch
 from absl.testing import absltest, parameterized
 from diffusers.models import AutoencoderKL
-from huggingface_hub import snapshot_download
-
-from bonsai.models.vae import modeling, params
+from bonsai.models.vae import modeling
 
 
 class TestModuleForwardPasses(parameterized.TestCase):
@@ -30,9 +28,7 @@ class TestModuleForwardPasses(parameterized.TestCase):
         cls.img_size = 256
 
         model_name = "stabilityai/sd-vae-ft-mse"
-        model_ckpt_path = snapshot_download(model_name)
-        torch_cfg = modeling.ModelConfig.stable_diffusion_v1_5()
-        cls.jax_model = params.create_model_from_safe_tensors(file_dir=model_ckpt_path, cfg=torch_cfg)
+        cls.jax_model = modeling.VAE.from_pretrained(model_name)
         cls.dif_model = AutoencoderKL.from_pretrained(model_name)
 
     def test_encoder(self):
