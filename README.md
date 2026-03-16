@@ -27,6 +27,7 @@ These are listed based on status and then alphabetically.
 | [ConvNeXT](bonsai/models/convnext/)           | Image classification | ✅     |         |
 | [Densenet](bonsai/models/densenet121/)        | Image classification | ✅     |         |
 | [EfficientNet](bonsai/models/efficientnet/)   | Image classification | ✅     |         |
+| [GAT](bonsai/models/gat/)                     | Graph Attention      | ✅     |         |
 | [Qwen 3](bonsai/models/qwen3)                 | LLM                  | ✅     |         |
 | [ResNet50](bonsai/models/resnet)              | Image classification | ✅     |         |
 | [VGG](bonsai/models/vgg19)                    | Image classification | ✅     |         |
