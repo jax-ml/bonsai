@@ -107,6 +107,12 @@ select = [
 quote-style = "double"
 indent-style = "space"
 
+
+[tool.pytest.ini_options]
+testpaths = ["bonsai"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
 [tool.jupytext]
 formats = "ipynb,md:myst"
 cell_metadata_filter = "-all"
