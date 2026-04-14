@@ -1225,7 +1225,7 @@ class SAM2Base(nnx.Module):
         keep = max_inds[None, ...] == obj_range
 
         # clamp all other scores to ≤ -10.0
-        clamped = jnp.clip(pred_masks, a_max=-10.0)
+        clamped = jnp.clip(pred_masks, max=-10.0)
         return jnp.where(keep, pred_masks, clamped)
 
 

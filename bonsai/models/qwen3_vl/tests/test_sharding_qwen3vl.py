@@ -13,7 +13,7 @@ from bonsai.models.qwen3_vl import modeling
 
 def get_test_config(use_fsdp=False, use_tp=False):
     """Get a small test config with optional sharding."""
-    return modeling.Qwen3VLConfig(
+    return modeling.ModelConfig(
         vision_config=modeling.Qwen3VLVisionConfig(
             depth=2,
             hidden_size=64,

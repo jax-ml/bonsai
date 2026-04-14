@@ -16,11 +16,9 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from huggingface_hub import snapshot_download
 from jax import P
 from transformers import AutoTokenizer
-
-from bonsai.models.qwen3 import modeling, params
+from bonsai.models.qwen3 import modeling
 from bonsai.utils import Sampler
 
 
@@ -39,8 +37,8 @@ def tokenize(tokenizer, input: list[str], shd: P | None = None):
 
 def run_model():
     # For sharding, you can use one of the following:
-    model_ckpt_path = snapshot_download("Qwen/Qwen3-0.6B")
-    config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
+    model_name = "Qwen/Qwen3-0.6B"
+    # config = modeling.ModelConfig.qwen3_0_6b(use_sharding=False)
     mesh, batch_shd = None, None
 
     # Enable sharding below if you have multiple devices.
@@ -55,13 +53,13 @@ def run_model():
         "Who am I?",
     ]
 
-    tokenizer = AutoTokenizer.from_pretrained(model_ckpt_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokens = tokenize(tokenizer, query, batch_shd)
     batch_size, token_len = tokens.shape
 
     generate_steps = 32
-    model = params.create_model_from_safe_tensors(model_ckpt_path, config)
-    cache = modeling.init_cache(config, batch_size, token_len, generate_steps, dtype=jnp.float32)
+    model = modeling.Qwen3.from_pretrained(model_name)
+    cache = model.init_cache(model.config, batch_size, token_len, generate_steps, dtype=jnp.float32)
 
     key = jax.random.key(0)
     sampler = Sampler(temperature=1.0, top_p=0.8, top_k=10)

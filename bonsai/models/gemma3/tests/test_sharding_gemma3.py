@@ -11,14 +11,14 @@ from jax.sharding import AxisType, NamedSharding
 from bonsai.models.gemma3 import modeling
 
 
-@unittest.skipIf(jax.device_count() < 4, "At least 4 devices required")
+@unittest.skipIf(jax.device_count() < 8, "At least 8 devices required")
 class TestSharding(absltest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         fsdp, tp = modeling.ShardMode.FSDP.value, modeling.ShardMode.TP.value
 
-        cls.mesh = jax.make_mesh(((2, 2)), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        cls.mesh = jax.make_mesh(((4, 2)), (fsdp, tp), axis_types=(AxisType.Explicit, AxisType.Explicit))
         jax.set_mesh(cls.mesh)
 
         # Define a small model
@@ -68,7 +68,7 @@ class TestSharding(absltest.TestCase):
         nm = self.bonsai_model
         fsdp = modeling.ShardMode.FSDP.value
 
-        batch_size = 2  # should be evenly divisible to num devices for fsdp axis
+        batch_size = 4  # should be evenly divisible to num devices for fsdp axis
         num_tokens = 128
         key = jax.random.key(0)
         img_size = self.bonsai_config.vision_config.image_size

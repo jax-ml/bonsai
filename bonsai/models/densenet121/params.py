@@ -85,7 +85,7 @@ def _get_key_and_transform_mapping(cfg: model_lib.ModelConfig):
 
     # final bn
     for i in range(len(bn_params)):
-        key = rf"^layers/dense_net_backbone/layers/batch_normalization_120/vars/{i}$"
+        key = rf"^layers/dense_net_backbone/layers/batch_normalization_{end_index + 1}/vars/{i}$"
         mapping[key] = (f"final_bn.{bn_params[i]}", None)
 
     # linear
