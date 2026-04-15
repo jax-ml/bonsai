@@ -1005,6 +1005,7 @@ class Qwen3VLForConditionalGeneration(nnx.Module):
     def __call__(
         self,
         input_ids: Array,
+        cache: Cache,
         pixel_values: Optional[Array] = None,
         image_grid_thw: Optional[GridTHW] = None,
         token_type_ids: Optional[Array] = None,
