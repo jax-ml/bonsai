@@ -1,0 +1,3 @@
+# Ignore all Jupyter Notebooks in language stats
+*.ipynb linguist-detectable=false
+
