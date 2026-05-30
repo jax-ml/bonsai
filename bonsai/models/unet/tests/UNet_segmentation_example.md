@@ -9,8 +9,7 @@ jupytext:
     format_version: 0.13
     jupytext_version: 1.18.1
 kernelspec:
-  display_name: bonsai
-  language: python
+  display_name: Python 3
   name: python3
 ---
 
@@ -19,8 +18,6 @@ kernelspec:
 +++
 
 # **Image Segmentation with U-Net (Work in progress)**
-
-This notebook is work in progress. ([#73](https://github.com/jax-ml/bonsai/issues/73))
 
 This notebook demonstrates how to use the U-Net model from the Bonsai library to perform a simple image segmentation task.
 
@@ -31,6 +28,7 @@ This notebook demonstrates how to use the U-Net model from the Bonsai library to
 ## **1. Set-up**
 
 ```{code-cell} ipython3
+%%capture
 !pip install -q git+https://github.com/jax-ml/bonsai@main
 !pip install -q pillow matplotlib scikit-image
 !pip install tqdm -q
@@ -42,6 +40,7 @@ This notebook demonstrates how to use the U-Net model from the Bonsai library to
 from pathlib import Path
 
 import jax
+import jax.extend
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
@@ -50,14 +49,13 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 from flax import nnx
 from flax.training.train_state import TrainState
-from jax.lib import xla_bridge
 from tqdm import tqdm
 
 from bonsai.models.unet import modeling as unet_lib
 from bonsai.models.unet import params as params_lib
 
 print(f"JAX version: {jax.__version__}")
-print(f"JAX device: {xla_bridge.get_backend().platform}")
+print(f"JAX device: {jax.extend.backend.get_backend().platform}")
 ```
 
 ## **2. Load Data and Train the Model**
@@ -137,7 +135,7 @@ def train_step(state: TrainState, other_vars: nnx.State, batch: tuple[jax.Array,
     return state, loss
 
 
-print(" Starting training from scratch...")
+print("Starting training from scratch...")
 train_loader, _ = load_dataset()
 num_epochs = 100
 state = train_state
@@ -169,115 +167,14 @@ ckpt_dir.mkdir(exist_ok=True)
 checkpointer = ocp.PyTreeCheckpointer()
 
 # Save state.params instead of the merged state
-checkpointer.save(ckpt_dir, item=state.params, force=True)
+checkpointer.save(ckpt_dir.resolve(), item=state.params, force=True)
 
-print(f"\n Model parameters saved to: {ckpt_dir.resolve()}")
+print(f"Model parameters saved to: {ckpt_dir.resolve()}")
 ```
 
-## **4. Load Pre-Trained Weights and Train**
+## **4. Prepare U-Net Model for Inference**
 
-```{code-cell} ipython3
-###### TRAIN BY LOADING PRE TRAINED WEIGHTS ######
-
-from pathlib import Path
-
-import jax
-import optax
-import orbax.checkpoint as ocp
-from flax import nnx
-from flax.training.train_state import TrainState
-
-from bonsai.models.unet import modeling as unet_lib
-from bonsai.models.unet import params as params_lib
-
-IMAGE_SIZE = 128
-BATCH_SIZE = 8
-
-
-def load_dataset(batch_size=BATCH_SIZE, image_size=IMAGE_SIZE):
-    """Loads and preprocesses a subset of the Oxford-IIIT Pet dataset."""
-    ds_builder = tfds.builder("oxford_iiit_pet")
-    ds_builder.download_and_prepare()
-    train_split, test_split = ds_builder.as_dataset(split=["train", "test"])
-
-    def preprocess(sample):
-        image = tf.image.resize(sample["image"], (image_size, image_size))
-        mask = tf.image.resize(sample["segmentation_mask"], (image_size, image_size), method="nearest")
-        image = tf.cast(image, tf.float32) / 255.0
-        mask = tf.squeeze(mask - 1, axis=-1)
-        return image, mask
-
-    train_ds = train_split.map(preprocess).cache().shuffle(10).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    test_ds = test_split.map(preprocess).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    return tfds.as_numpy(train_ds), tfds.as_numpy(test_ds)
-
-
-config = unet_lib.ModelConfig(in_channels=3, num_classes=3)
-rngs = nnx.Rngs(0)
-
-# Create a template model to get BOTH the graphdef and other_vars
-template_model = params_lib.create_model(cfg=config, rngs=rngs)
-graphdef, model_state = nnx.split(template_model)
-
-# Extract the non-trainable variables. These are needed for the model's structure.
-other_vars = model_state.filter(lambda path, value: not isinstance(value, nnx.Param))
-
-# Load the TRAINED parameters from your checkpoint
-ckpt_dir = Path("./checkpoints")
-checkpointer = ocp.PyTreeCheckpointer()
-# The checkpoint correctly contains only the parameters, as saved by the example notebook
-loaded_params = checkpointer.restore(ckpt_dir)
-
-optimizer = optax.adam(learning_rate=0.2e-3)
-
-# Initialize the TrainState with the LOADED parameters
-train_state = TrainState.create(apply_fn=graphdef.apply, params=loaded_params, tx=optimizer)
-
-
-@jax.jit
-def train_step(state: TrainState, other_vars: nnx.State, batch: tuple[jax.Array, jax.Array]):
-    """Performs a single training step."""
-    images, masks = batch
-
-    def loss_fn(params):
-        # Recombine the graph, TRAINED params, and OTHER_VARS to build the full model
-        model = nnx.merge(graphdef, params, other_vars)
-
-        # Forward pass, converting the output proxy to a JAX array
-        logits = jnp.asarray(model(images))
-
-        # Calculate loss
-        loss = segmentation_loss(logits, masks)
-        return loss
-
-    grad_fn = jax.value_and_grad(loss_fn)
-    loss, grads = grad_fn(state.params)
-    state = state.apply_gradients(grads=grads)
-    return state, loss
-
-
-print("Starting training from checkpoint...")
-train_loader, vis_loader = load_dataset()
-num_epochs = 100
-state = train_state
-
-for epoch in range(num_epochs):
-    total_loss = 0
-    batch_count = 0
-    for images, masks in train_loader:
-        # Pass other_vars to the train_step function
-        state, loss = train_step(state, other_vars, (images, masks))
-        total_loss += loss
-        batch_count += 1
-    avg_loss = total_loss / batch_count
-    print(f"Epoch {epoch + 1}/{num_epochs}, Average Loss: {avg_loss:.4f}")
-
-print("Training finished!")
-```
-
-## **5. Load U-Net Model for Inference**
-
-Now let's load the U-Net model from the Bonsai library. We will configure it for an input with 3 channels (like our RGB synthetic image) and 1 output class (for binary segmentation).
+Now let's prepare the U-Net model from the Bonsai library. We will configure it for an input with 3 channels (like our RGB synthetic image) and 1 output class (for binary segmentation).
 
 ```{code-cell} ipython3
 from pathlib import Path
@@ -292,7 +189,7 @@ from bonsai.models.unet import params as params_lib
 IMAGE_SIZE = 128
 
 
-def load_test_data(num_images):
+def load_test_data(num_images, seed=42):
     ds_builder = tfds.builder("oxford_iiit_pet")
     ds_builder.download_and_prepare()
     test_split = ds_builder.as_dataset(split="test")
@@ -303,14 +200,11 @@ def load_test_data(num_images):
         return image
 
     buffer_size = ds_builder.info.splits["test"].num_examples
-    test_ds = test_split.shuffle(buffer_size).map(preprocess).take(num_images).batch(num_images)
+    test_ds = test_split.shuffle(buffer_size, seed=seed).map(preprocess).take(num_images).batch(num_images)
     return next(iter(tfds.as_numpy(test_ds)))
 
 
-print("Loading model and weights...")
-
-# Define the path to your saved checkpoints
-ckpt_dir = Path("./checkpoints")
+print("Preparing model for inference...")
 
 # This provides the necessary structure (the "graphdef").
 config = unet_lib.ModelConfig(in_channels=3, num_classes=3)
@@ -318,22 +212,25 @@ rngs = nnx.Rngs(params=0)
 template_model = params_lib.create_model(cfg=config, rngs=rngs)
 graphdef, _ = nnx.split(template_model)  # We only need the static graphdef
 
-# b. Restore the saved parameters using Orbax.
-checkpointer = ocp.PyTreeCheckpointer()
-# restore() automatically finds the latest checkpoint in the directory
-loaded_params = checkpointer.restore(ckpt_dir)
+# b. Use the parameters from the previous training step or load from checkpoint.
+if "state" in locals():
+    loaded_params = state.params
+else:
+    ckpt_dir = Path("./checkpoints")
+    checkpointer = ocp.PyTreeCheckpointer()
+    loaded_params = checkpointer.restore(ckpt_dir.resolve())
 
 # c. Merge the graphdef with the loaded parameters to create a complete, trained model.
 inference_model = nnx.merge(graphdef, loaded_params)
-print(" Model loaded successfully!")
+print("Model ready for inference!")
 ```
 
-## **6. Run Inference**
+## **5. Run Inference**
 
-We will now perform a forward pass with our synthetic image through the untrained U-Net. The output will be random, but it will confirm that the model's architecture works correctly and produces an output with the expected shape.
+We will now perform a forward pass with our synthetic image through the trained U-Net. The output should be a valid segmentation mask.
 
 ```{code-cell} ipython3
-print("\n Preparing data and running prediction...")
+print("Preparing data and running prediction...")
 
 # a. Load a batch of 5 images from the test set.
 image_batch = load_test_data(num_images=10)
@@ -350,15 +247,15 @@ def predict(model, images):
 # c. Run the prediction.
 predicted_masks = predict(inference_model, image_batch)
 
-print(f" Prediction complete. Output shape: {predicted_masks.shape}")
+print(f"Prediction complete. Output shape: {predicted_masks.shape}")
 ```
 
-## **7. Visualize Results**
+## **6. Visualize Results**
 
-Let's visualize the input image, the ground truth mask, and the mask predicted by the (untrained) model. The predicted mask will look like noise because the weights are random, but this workflow is exactly what you would use in a training loop.
+Let's visualize the input image, the ground truth mask, and the mask predicted by the trained model. The predicted mask should closely match the ground truth, demonstrating the model's ability to segment the image.
 
 ```{code-cell} ipython3
-print(" Displaying results...")
+print("Displaying results...")
 fig, axes = plt.subplots(2, 10, figsize=(20, 8))
 for i in range(10):
     # Plot original image
@@ -385,4 +282,8 @@ This notebook demonstrates how to set up and run the Bonsai U-Net model. Here yo
 1. **Instantiated the U-Net model** with a specific configuration.
 2. **Created synthetic data** for a simple segmentation task.
 3. **Performed a forward pass** to get the model's output logits.
-4. **Visualized the output**, confirming the model produces a mask of the correct dimensions.
+4. **Visualized the output**, confirming the model learned to segment the image.
+
+```{code-cell} ipython3
+
+```
