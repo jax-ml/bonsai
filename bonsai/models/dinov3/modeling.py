@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Literal
 
 import jax
 import jax.numpy as jnp
@@ -13,7 +14,7 @@ class ModelConfig:
     intermediate_size: int = 1536
     num_hidden_layers: int = 12
     num_attention_heads: int = 6
-    hidden_act: str = "gelu"
+    hidden_act: Literal["gelu", "silu"] = "gelu"
     layer_norm_eps: float = 1e-5
     rope_theta: float = 100.0
     image_size: int = 224
@@ -127,12 +128,12 @@ class Dinov3ViTRopePositionEmbedding(nnx.Module):
         self.base = config.rope_theta
         self.head_dim = config.hidden_size // config.num_attention_heads
         self.num_patches_h = config.image_size // config.patch_size[0]
-        self.num_patches_w = config.image_size // config.patch_size[0]
+        self.num_patches_w = config.image_size // config.patch_size[1]
 
     def __call__(self, pixel_values: Array) -> tuple[Array, Array]:
         _, _, height, width = pixel_values.shape
         num_patches_h = height // self.config.patch_size[0]
-        num_patches_w = width // self.config.patch_size[0]
+        num_patches_w = width // self.config.patch_size[1]
 
         coords_h = jnp.arange(0.5, num_patches_h, dtype=jnp.float32) / num_patches_h  # [H]
         coords_w = jnp.arange(0.5, num_patches_w, dtype=jnp.float32) / num_patches_w  # [W]
@@ -157,7 +158,7 @@ class Dinov3LayerScale(nnx.Module):
         self.lambda1 = nnx.Param(jnp.full((config.hidden_size,), config.layerscale_value, dtype=jnp.float32))
 
     def __call__(self, x: Array) -> Array:
-        return x * self.lambda1
+        return x * self.lambda1[...]
 
 
 def rotate_half(x: Array) -> Array:
