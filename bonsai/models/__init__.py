@@ -3,6 +3,7 @@ from bonsai.models.densenet121.modeling import DenseNet, ModelConfig as DenseNet
 from bonsai.models.dinov3.modeling import Dinov3ViTModel, ModelConfig as Dinov3ViTModelConfig
 from bonsai.models.efficientnet.modeling import EfficientNet, ModelConfig as EfficientNetConfig
 from bonsai.models.gemma3.modeling import Gemma3Model, ModelConfig as Gemma3ModelConfig
+from bonsai.models.gemma4.modeling import Gemma4Model, Gemma4ForCausalLM, ModelConfig as Gemma4Config
 from bonsai.models.llada.modeling import LLaDAModel, ModelConfig as LLaDAModelConfig
 from bonsai.models.mamba2.modeling import Mamba2ForCausalLM, Mamba2Forecaster, Mamba2Model, ModelConfig as Mamba2Config
 from bonsai.models.qwen3.modeling import Qwen3, ModelConfig as Qwen3Config
@@ -29,6 +30,9 @@ __all__ = [
     "EfficientNetConfig",
     "Gemma3Model",
     "Gemma3ModelConfig",
+    "Gemma4Config",
+    "Gemma4ForCausalLM",
+    "Gemma4Model",
     "LLaDAModel",
     "LLaDAModelConfig",
     "Mamba2Config",

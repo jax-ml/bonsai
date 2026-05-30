@@ -32,6 +32,7 @@ These are listed based on status and then alphabetically.
 | [VGG](bonsai/models/vgg19)                    | Image classification | ✅     |         |
 | [Dinov3](bonsai/models/dinov3)                | Vision FM            | ⚙️     |         |
 | [Gemma3](bonsai/models/gemma3)                | VLM                  | ⚙️     | Local attention cache and todos in file        |
+| [Gemma4](bonsai/models/gemma4)                | LLM / MoE            | ✅     |                                                |
 | [Mamba2](bonsai/models/mamba2)                | Language SSM         | ⚙️     | Caching and sharding        |
 | [umT5](bonsai/models/umt5)                    | LLM                  | ⚙️     | Caching and sharding        |
 | [ViT](bonsai/models/vit)                      | Image classification | ⚙️     | Sharding        |

@@ -351,6 +351,6 @@ class Dinov3ViTModel(nnx.Module):
         return params.create_model_from_safe_tensors(model_ckpt_path, config)
 
 
-@jax.jit()
+@jax.jit
 def forward(model: Dinov3ViTModel, inputs: Array):
     return model(inputs)
